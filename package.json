@@ -1,0 +1,20 @@
+{
+  "name": "atlas-of-the-curious",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A hand-curated atlas of 40 extraordinary places on Earth. Static site; uses @chenglou/pretext for reflow-free text measurement in the character map.",
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "vendor": "node scripts/vendor.mjs",
+    "build-map": "node scripts/build-map.mjs",
+    "validate": "node scripts/validate-data.mjs",
+    "build-pages": "node scripts/build-place-pages.mjs",
+    "build": "node scripts/validate-data.mjs && node scripts/build-place-pages.mjs",
+    "postinstall": "node scripts/vendor.mjs"
+  },
+  "packageManager": "pnpm@12.3.4",
+  "devDependencies": {
+    "@chenglou/pretext": "latest"
+  }
+}

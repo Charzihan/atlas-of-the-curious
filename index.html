@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Atlas of the Curious — 40 extraordinary places on Earth</title>
+  <meta name="description" content="A hand-curated atlas of 40 of the most extraordinary places on Earth — salt mirrors, singing dunes, blue ice caves, and carved cities. Searchable, filterable, and fully offline.">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0b1020">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Atlas of the Curious">
+  <meta property="og:title" content="Atlas of the Curious — 40 extraordinary places on Earth">
+  <meta property="og:description" content="A hand-curated atlas of 40 extraordinary places on Earth — salt mirrors, singing dunes, blue ice caves, and carved cities. Searchable, filterable, and fully offline.">
+  <meta property="og:image" content="img/og-cover.png">
+  <meta property="og:image:alt" content="Atlas of the Curious — a text-rendered world map with 40 marked wonders">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Atlas of the Curious — 40 extraordinary places on Earth">
+  <meta name="twitter:description" content="A hand-curated atlas of 40 extraordinary places on Earth, drawn in text. Searchable, filterable, and fully offline.">
+  <meta name="twitter:image" content="img/og-cover.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%230b1020' stroke='%23e8b45a' stroke-width='6'/%3E%3Cpath d='M50 5 A45 45 0 0 1 50 95 A22 45 0 0 1 50 5' fill='%23e8b45a' opacity='.25'/%3E%3Ctext x='50' y='64' font-size='52' text-anchor='middle' fill='%23e8b45a'%3E%E2%9C%A6%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/style.css">
+  <script src="js/data.js" defer></script>
+  <script src="js/landmap.js" defer></script>
+  <script src="js/app.js" defer></script>
+  <script src="js/map.js" type="module" defer></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="wrap header-inner">
+      <a class="brand" href="#/">
+        <span class="brand-glyph" aria-hidden="true">✦</span>
+        <span class="brand-text">Atlas of the Curious</span>
+      </a>
+      <form id="search-form" class="search" role="search">
+        <label for="search-input" class="visually-hidden">Search places</label>
+        <input id="search-input" type="search" name="q"
+               placeholder="Search places, countries, wonders…"
+               autocomplete="off" spellcheck="false" maxlength="80">
+      </form>
+    </div>
+  </header>
+
+  <main>
+    <section class="atlas" id="text-atlas" aria-labelledby="atlas-title">
+      <div class="map-viewport" role="group" aria-label="Interactive character map of the world with 40 marked places. Move your cursor across the water to make it ripple.">
+        <div class="atlas-overlay">
+          <p class="hero-kicker">The Text Atlas</p>
+          <h2 id="atlas-title" class="atlas-title">Every wonder, on one map of characters.</h2>
+          <p class="atlas-sub">
+            Real coastlines and continent-by-continent color, drawn in text. Each dot sits on
+            its true coordinates. Text measured by
+            <a class="atlas-cred" href="https://github.com/chenglou/pretext">@chenglou/pretext</a> — never reflowed.
+          </p>
+          <p class="atlas-hint">drift across the water · tap for a splash · hover a dot · tap a dot to open it</p>
+        </div>
+        <!-- map stage injected here by js/map.js -->
+        <div class="map-controls" role="group" aria-label="Map controls">
+          <button class="map-btn" id="map-locate" type="button" title="Show where I am on the map">⌖ Locate me</button>
+          <button class="map-btn" id="map-zoom-in" type="button" aria-label="Zoom in" title="Zoom in (+)">＋</button>
+          <button class="map-btn" id="map-zoom-out" type="button" aria-label="Zoom out" title="Zoom out (−)">−</button>
+          <button class="map-btn" id="map-zoom-reset" type="button" aria-label="Reset map view" title="Reset view">⤢</button>
+        </div>
+      </div>
+      <div class="atlas-foot">
+        <div class="wrap atlas-foot-inner">
+          <div class="atlas-legend" id="atlas-legend"></div>
+          <span class="atlas-scale">equirectangular · hover a marker to read it</span>
+        </div>
+      </div>
+    </section>
+
+    <div class="wrap">
+      <section class="hero" aria-labelledby="hero-title">
+        <p class="hero-kicker">Hand-curated field notes</p>
+        <h1 id="hero-title">Places that make the map worth staring at.</h1>
+        <p class="hero-lede">
+          Salt flats that mirror the sky, dunes that sing at night, blue caves inside a
+          glacier, cities carved into cliffs. <span id="place-count" class="stat"></span>
+        </p>
+
+        <div class="daily" id="daily-pick" tabindex="-1">
+          <span class="daily-label">Today’s discovery</span>
+          <button class="daily-card" id="daily-card" type="button"></button>
+          <button class="surprise-btn" id="surprise-btn" type="button" title="Open a random place from the current filter">✦ Surprise me</button>
+        </div>
+      </section>
+    </div>
+
+    <div class="wrap">
+      <section class="controls" aria-label="Filters">
+      <div class="chips" id="category-chips" role="group" aria-label="Filter by category"></div>
+      <label class="sort">
+        <span class="visually-hidden">Sort places by</span>
+        <select id="sort-select">
+          <option value="featured">Featured order</option>
+          <option value="name">Name A–Z</option>
+          <option value="country">Country A–Z</option>
+          <option value="distance" disabled>Distance from me</option>
+        </select>
+      </label>
+    </section>
+
+    <p id="results-status" class="results-status" role="status" aria-live="polite"></p>
+
+    <section id="grid" class="grid" aria-label="Places"></section>
+
+    <p id="empty" class="empty" hidden>
+      No places match that search. Try “salt”, “temple”, or clear the filters.
+    </p>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap footer-inner">
+      <p><span class="brand-glyph" aria-hidden="true">✦</span> Atlas of the Curious — a static, dependency-free site. No cookies, no trackers, no external requests.</p>
+      <p class="footer-note">Coordinates approximate. Pack water, sunscreen, and humility.</p>
+    </div>
+  </footer>
+
+  <dialog id="place-dialog" aria-labelledby="dialog-title">
+    <div class="dialog-head" id="dialog-head">
+      <span class="dialog-symbol" id="dialog-symbol" aria-hidden="true"></span>
+      <div>
+        <span class="badge" id="dialog-category"></span>
+        <h2 id="dialog-title"></h2>
+        <p class="dialog-loc" id="dialog-loc"></p>
+      </div>
+      <button id="dialog-close" class="icon-btn" type="button" aria-label="Close">✕</button>
+    </div>
+    <div class="dialog-body">
+      <p class="dialog-tagline" id="dialog-tagline"></p>
+      <p class="dialog-story" id="dialog-story"></p>
+      <div class="fact">
+        <span class="fact-label">Field note</span>
+        <p id="dialog-fact"></p>
+      </div>
+      <div class="field-grid">
+        <div class="field"><span>Best time to visit</span><em id="dialog-besttime"></em></div>
+        <div class="field"><span>Nearest major city</span><em id="dialog-nearest"></em></div>
+      </div>
+      <p class="dialog-coords" id="dialog-coords"></p>
+    </div>
+    <div class="dialog-foot">
+      <button id="dialog-prev" class="ghost-btn" type="button">← Previous</button>
+      <button id="dialog-share" class="ghost-btn" type="button">Copy link</button>
+      <button id="dialog-next" class="ghost-btn" type="button">Next →</button>
+    </div>
+  </dialog>
+
+  <noscript>
+    <p class="noscript">This atlas needs JavaScript for search and detail views. The data itself lives in <code>js/data.js</code> — read it directly.</p>
+  </noscript>
+</body>
+</html>

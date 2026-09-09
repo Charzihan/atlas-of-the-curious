@@ -1,0 +1,16 @@
+{
+  "name": "Atlas of the Curious",
+  "short_name": "Atlas",
+  "description": "A hand-curated atlas of extraordinary places on Earth. Searchable, filterable, and fully offline.",
+  "id": "atlas-of-the-curious",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0b1020",
+  "theme_color": "#0b1020",
+  "icons": [
+    { "src": "img/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "img/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

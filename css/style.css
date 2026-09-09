@@ -1,0 +1,982 @@
+/* Atlas of the Curious — styles. No external fonts, no external assets. */
+
+:root {
+  --bg: #0b1020;
+  --bg-soft: #101733;
+  --panel: #141c3a;
+  --panel-2: #1a2450;
+  --ink: #e8ecf8;
+  --ink-dim: #9aa4c8;
+  --gold: #e8b45a;
+  --gold-soft: rgba(232, 180, 90, 0.16);
+  --line: rgba(154, 164, 200, 0.18);
+  --radius: 14px;
+  --shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  background:
+    radial-gradient(1100px 500px at 85% -10%, rgba(79, 195, 247, 0.08), transparent 60%),
+    radial-gradient(900px 480px at -10% 15%, rgba(232, 180, 90, 0.07), transparent 55%),
+    var(--bg);
+  color: var(--ink);
+  line-height: 1.55;
+  min-height: 100vh;
+}
+
+.wrap { max-width: 1080px; margin: 0 auto; padding: 0 20px; }
+
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px;
+  margin: -1px; padding: 0; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* ---------- Header ---------- */
+.site-header {
+  position: sticky; top: 0; z-index: 20;
+  background: rgba(11, 16, 32, 0.85);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line);
+}
+
+.header-inner {
+  display: flex; align-items: center; gap: 18px;
+  padding-top: 14px; padding-bottom: 14px;
+}
+
+.brand {
+  display: flex; align-items: center; gap: 10px;
+  color: var(--ink); text-decoration: none;
+  font-size: 1.15rem; letter-spacing: 0.02em;
+}
+
+.brand-glyph { color: var(--gold); font-size: 1.3rem; }
+
+.search { margin-left: auto; flex: 0 1 340px; }
+
+.search input {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--bg-soft);
+  color: var(--ink);
+  font: inherit; font-size: 0.95rem;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.search input:focus {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 3px var(--gold-soft);
+}
+
+/* ---------- Hero ---------- */
+.hero { padding: 52px 0 26px; }
+
+.hero-kicker {
+  text-transform: uppercase; letter-spacing: 0.22em;
+  font-size: 0.75rem; color: var(--gold); margin: 0 0 10px;
+  font-family: Verdana, Geneva, sans-serif;
+}
+
+.hero h1 {
+  font-size: clamp(1.9rem, 4.5vw, 3rem);
+  line-height: 1.12; margin: 0 0 14px; font-weight: normal;
+  max-width: 18ch;
+}
+
+.hero-lede { color: var(--ink-dim); max-width: 60ch; margin: 0 0 26px; }
+
+.stat { color: var(--ink); border-bottom: 1px dashed var(--gold); }
+
+/* Daily pick */
+.daily {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: linear-gradient(160deg, var(--panel), var(--bg-soft));
+  padding: 14px 16px;
+  max-width: 560px;
+}
+
+.daily-label {
+  display: block; margin-bottom: 8px;
+  font-family: Verdana, Geneva, sans-serif;
+  font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.18em;
+  color: var(--ink-dim);
+}
+
+.daily-card {
+  --card-accent: var(--gold);
+  display: flex; align-items: center; gap: 14px;
+  width: 100%; text-align: left;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--card-accent);
+  border-radius: 10px;
+  padding: 14px 16px;
+  color: var(--ink); font: inherit;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.daily-card:hover, .daily-card:focus-visible {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow);
+  outline: none;
+}
+
+.card-symbol {
+  font-size: 1.9rem; line-height: 1;
+  color: var(--card-accent);
+  flex: 0 0 auto;
+}
+
+.daily-name { display: block; font-size: 1.05rem; }
+.daily-tag { display: block; color: var(--ink-dim); font-size: 0.9rem; }
+.daily-go { margin-left: auto; color: var(--gold); white-space: nowrap; }
+
+/* ---------- Controls ---------- */
+.controls {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 14px;
+  padding: 18px 0 6px;
+}
+
+.chips { display: flex; flex-wrap: wrap; gap: 8px; flex: 1 1 auto; }
+
+.chip {
+  --chip-accent: var(--gold);
+  font: inherit; font-size: 0.82rem;
+  font-family: Verdana, Geneva, sans-serif;
+  color: var(--ink-dim);
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 7px 13px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.chip:hover { color: var(--ink); border-color: var(--chip-accent); }
+
+.chip.active {
+  color: #0b1020;
+  background: var(--chip-accent);
+  border-color: var(--chip-accent);
+  font-weight: bold;
+}
+
+.chip:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+
+.sort select {
+  font: inherit; font-size: 0.85rem;
+  background: var(--bg-soft); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 999px;
+  padding: 7px 12px; cursor: pointer;
+}
+
+.results-status {
+  font-family: Verdana, Geneva, sans-serif;
+  font-size: 0.78rem; color: var(--ink-dim);
+  margin: 10px 0 4px;
+}
+
+/* ---------- Grid & cards (JS masonry, chenglou.me/pretext style) ----------
+   #grid is a positioning context; app.js absolutely positions each card
+   (shortest-column placement) and sets the container height. Cards are
+   pooled, so filter/sort changes animate left/top instead of reflowing. */
+.grid {
+  position: relative;
+  padding: 14px 0 48px;
+}
+
+.grid .card { position: absolute; }
+
+/* No-animation first layout (also used when the grid is rebuilt cold). */
+.grid.masonry-no-anim .card { transition: none !important; }
+
+.card {
+  --card-accent: var(--gold);
+  display: flex; flex-direction: column;
+  background: linear-gradient(165deg, var(--panel), var(--bg-soft));
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 18px;
+  overflow: hidden;
+  opacity: 0;
+  transform: translateY(14px);
+  transition:
+    opacity 0.5s ease,
+    transform 0.5s ease,
+    left 0.45s cubic-bezier(0.22, 0.7, 0.3, 1),
+    top 0.45s cubic-bezier(0.22, 0.7, 0.3, 1),
+    box-shadow 0.18s ease,
+    border-color 0.18s ease;
+  will-change: left, top;
+}
+
+.card.is-in { opacity: 1; transform: none; }
+
+.card::before {
+  content: "";
+  position: absolute; inset: 0 0 auto 0; height: 3px;
+  background: var(--card-accent);
+  opacity: 0.85;
+}
+
+.card:hover, .card:focus-within {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow);
+  border-color: var(--card-accent);
+  z-index: 2;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .card { transition: none; opacity: 1; transform: none; }
+  .atlas-hint { animation: none; }
+  .map-marker { animation: none; }
+  .map-marker-ring { animation: none; }
+  .map-user-ring { animation: none; opacity: 0; }
+}
+
+.card h3 { margin: 10px 0 2px; font-size: 1.15rem; font-weight: normal; }
+
+.card-loc {
+  font-family: Verdana, Geneva, sans-serif;
+  font-size: 0.72rem; color: var(--ink-dim);
+  text-transform: uppercase; letter-spacing: 0.08em;
+  margin: 0 0 10px;
+}
+
+.card-tag { color: var(--ink-dim); font-size: 0.92rem; margin: 0; flex: 1 1 auto; }
+
+.card-more {
+  display: inline-block; margin-top: 14px;
+  color: var(--gold); text-decoration: none;
+  font-family: Verdana, Geneva, sans-serif; font-size: 0.78rem;
+}
+
+.card-more:hover, .card-more:focus-visible { text-decoration: underline; }
+
+.empty {
+  text-align: center; color: var(--ink-dim);
+  padding: 60px 0 80px; font-size: 1.05rem;
+}
+
+/* ---------- Dialog ---------- */
+dialog {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--bg-soft);
+  color: var(--ink);
+  padding: 0;
+  max-width: 640px; width: calc(100vw - 40px);
+  max-height: calc(100vh - 60px);
+  box-shadow: var(--shadow);
+}
+
+dialog::backdrop {
+  background: rgba(5, 8, 20, 0.72);
+  backdrop-filter: blur(4px);
+}
+
+.dialog-head {
+  display: flex; align-items: flex-start; gap: 16px;
+  padding: 22px 22px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.dialog-symbol { font-size: 2.6rem; line-height: 1; }
+
+.dialog-head h2 { margin: 6px 0 2px; font-size: 1.5rem; font-weight: normal; }
+
+.dialog-loc {
+  margin: 0; color: var(--ink-dim);
+  font-family: Verdana, Geneva, sans-serif; font-size: 0.75rem;
+  text-transform: uppercase; letter-spacing: 0.08em;
+}
+
+.badge {
+  display: inline-block;
+  --card-accent: var(--gold);
+  font-family: Verdana, Geneva, sans-serif;
+  font-size: 0.68rem; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--card-accent);
+  border: 1px solid var(--card-accent);
+  border-radius: 999px;
+  padding: 3px 10px;
+}
+
+.icon-btn {
+  margin-left: auto; flex: 0 0 auto;
+  background: none; border: 1px solid var(--line);
+  color: var(--ink-dim); border-radius: 50%;
+  width: 34px; height: 34px; cursor: pointer;
+  font-size: 0.95rem; line-height: 1;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.icon-btn:hover, .icon-btn:focus-visible { color: var(--ink); border-color: var(--gold); outline: none; }
+
+.dialog-body {
+  padding: 18px 22px;
+  overflow-y: auto;
+}
+
+.dialog-tagline { font-size: 1.08rem; font-style: italic; margin: 0 0 12px; }
+.dialog-story { margin: 0 0 16px; color: var(--ink); }
+
+.fact {
+  background: rgba(255, 255, 255, 0.035);
+  border-left: 3px solid var(--gold);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.fact-label {
+  display: block;
+  font-family: Verdana, Geneva, sans-serif;
+  font-size: 0.68rem; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--gold); margin-bottom: 6px;
+}
+
+.fact p { margin: 0; color: var(--ink-dim); font-size: 0.92rem; }
+
+.dialog-coords {
+  margin: 14px 0 0;
+  font-family: "Courier New", monospace;
+  font-size: 0.85rem; color: var(--ink-dim);
+}
+
+.dialog-foot {
+  display: flex; gap: 10px;
+  padding: 14px 22px 20px;
+  border-top: 1px solid var(--line);
+}
+
+.ghost-btn {
+  flex: 1;
+  font: inherit; font-size: 0.85rem;
+  font-family: Verdana, Geneva, sans-serif;
+  color: var(--ink); background: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 9px 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.ghost-btn:hover, .ghost-btn:focus-visible { border-color: var(--gold); color: var(--gold); outline: none; }
+
+/* ---------- Footer ---------- */
+.site-footer {
+  border-top: 1px solid var(--line);
+  padding: 26px 0 40px;
+  margin-top: 20px;
+  color: var(--ink-dim);
+  font-size: 0.85rem;
+}
+
+.footer-inner { display: flex; flex-direction: column; gap: 6px; }
+.footer-note { font-family: Verdana, Geneva, sans-serif; font-size: 0.72rem; }
+
+.noscript {
+  padding: 20px; margin: 20px 0;
+  border: 1px solid var(--gold); border-radius: var(--radius);
+  color: var(--gold);
+}
+
+/* ---------- Text Atlas (full-screen hero: character-grid world map) ---------- */
+.atlas {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 58px - 52px); /* header + legend footer */
+  min-height: 540px;
+  width: 100%;
+  position: relative;
+}
+
+.map-viewport {
+  position: relative;
+  flex: 1 1 auto;
+  width: 100%;
+  overflow: hidden;
+  background:
+    radial-gradient(900px 500px at 70% 30%, rgba(79, 195, 247, 0.06), transparent 70%),
+    radial-gradient(700px 420px at 20% 70%, rgba(96, 155, 205, 0.05), transparent 70%),
+    var(--bg-soft);
+  border-bottom: 1px solid var(--line);
+}
+
+/* Floating intro over the sea. A solid dark panel sits behind the text so the
+   title/subline stay legible over the busy character map and give a known,
+   testable contrast base for the copy. */
+.atlas-overlay {
+  position: absolute;
+  top: 26px;
+  left: 26px;
+  z-index: 9;
+  max-width: 420px;
+  padding: 20px 24px 22px;
+  pointer-events: none;
+  background: #080b1a;
+  border: 1px solid rgba(154, 164, 200, 0.14);
+  border-radius: 16px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+.atlas-overlay a { pointer-events: auto; }
+
+.atlas-title {
+  font-size: clamp(1.5rem, 3vw, 2.2rem);
+  font-weight: normal;
+  line-height: 1.1;
+  margin: 0 0 10px;
+}
+
+.atlas-sub {
+  color: var(--ink-dim);
+  margin: 0 0 10px;
+  font-size: 0.9rem;
+}
+
+.atlas-hint {
+  margin: 0;
+  font-family: Verdana, Geneva, sans-serif;
+  font-size: 0.68rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--gold);
+  opacity: 0.92;
+  animation: hint-pulse 2.8s ease-in-out infinite;
+}
+
+@keyframes hint-pulse {
+  0%, 100% { opacity: 0.62; }
+  50%      { opacity: 0.95; }
+}
+
+.atlas-cred {
+  color: var(--gold);
+  text-decoration: none;
+  border-bottom: 1px dashed var(--gold);
+}
+.atlas-cred:hover { text-decoration: underline; }
+
+.map-stage {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  white-space: nowrap;
+}
+
+/* The pan/zoom unit. Sized mapW×mapH by map.js and transformed as one (scale
+   about centre + translate). The base/sea/cloud/marker layers are absolute
+   children that fill it, so they all move together. --zoom (set inline) is
+   used to counter-scale markers to a constant on-screen size. */
+.map-zoom {
+  position: relative;
+  transform-origin: center center;
+}
+
+.map-base,
+.map-sea {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
+
+/* Crosshair: a subtle tracking reticle that follows the pointer. */
+.map-crosshair {
+  position: absolute;
+  left: 0; top: 0;
+  width: 0; height: 0;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  pointer-events: none;
+  z-index: 5;
+}
+.map-crosshair .cross-v,
+.map-crosshair .cross-h {
+  position: absolute;
+  display: block;
+  background: rgba(232, 180, 90, 0.35);
+}
+.map-crosshair .cross-v { width: 1px; height: 22px; left: -0.5px; top: -11px; }
+.map-crosshair .cross-h { height: 1px; width: 22px; left: -11px; top: -0.5px; }
+
+/* Live coordinate readout that trails the pointer. */
+.map-readout {
+  position: absolute;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+  font-family: "DejaVu Sans Mono", "Courier New", monospace;
+  font-size: 0.68rem;
+  letter-spacing: 0.03em;
+  color: var(--ink);
+  background: rgba(9, 13, 28, 0.85);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 11px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+.map-readout-land {
+  font-size: 0.58rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid;
+}
+.map-readout-land[data-state="land"] {
+  color: #8fd18a;
+  border-color: rgba(102, 187, 106, 0.5);
+  background: rgba(102, 187, 106, 0.1);
+}
+.map-readout-land[data-state="ocean"] {
+  color: #7fb8d8;
+  border-color: rgba(79, 195, 247, 0.4);
+  background: rgba(79, 195, 247, 0.08);
+}
+
+.map-markers { position: absolute; inset: 0; }
+
+.map-marker {
+  position: absolute;
+  transform: translate(-50%, -50%) scale(calc(1 / var(--zoom, 1)));
+  width: 19px; height: 19px;
+  padding: 0;
+  background: var(--bg);
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  line-height: 1;
+  font-size: 11px;
+  z-index: 4;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  animation: marker-in 0.5s ease backwards;
+}
+
+@keyframes marker-in {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(calc(0.4 / var(--zoom, 1))); }
+  to   { opacity: 1; transform: translate(-50%, -50%) scale(calc(1 / var(--zoom, 1))); }
+}
+
+.map-marker-ring {
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  border: 1px solid currentColor;
+  opacity: 0;
+  animation: ring-pulse 3.2s ease-out infinite;
+}
+
+@keyframes ring-pulse {
+  0%   { transform: scale(0.6); opacity: 0.7; }
+  60%  { transform: scale(1.7); opacity: 0; }
+  100% { transform: scale(1.7); opacity: 0; }
+}
+
+.map-marker:hover, .map-marker:focus-visible, .map-marker.is-hot {
+  transform: translate(-50%, -50%) scale(calc(1.4 / var(--zoom, 1)));
+  box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 25%, transparent), 0 0 16px 3px color-mix(in srgb, currentColor 45%, transparent);
+  outline: none;
+  z-index: 8;
+}
+
+/* Marker hidden by an active search / category filter. It stays in the DOM
+   (the dot's position is the answer) but reads as background noise. */
+.map-marker.is-dimmed {
+  opacity: 0.14;
+  pointer-events: none;
+  animation: none;
+}
+.map-marker.is-dimmed .map-marker-ring { display: none; }
+.map-marker.is-dimmed .map-marker-glyph { opacity: 0.4; }
+
+/* Marker pulse: fires when a place is opened from the grid / dialog (#4).
+   The ring expands outward and fades; the dot flashes. The --zoom counter-
+   scale keeps the pulse a constant on-screen size. */
+.map-marker.is-pulsing { z-index: 9; }
+.map-marker.is-pulsing .map-marker-ring {
+  animation: marker-pulse 0.8s ease-out 2;
+  opacity: 1;
+}
+@keyframes marker-pulse {
+  0%   { transform: scale(calc(0.5 / var(--zoom, 1))); opacity: 0.9; }
+  100% { transform: scale(calc(3.2 / var(--zoom, 1))); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .map-marker.is-pulsing .map-marker-ring { animation: none; opacity: 0.6; }
+}
+
+/* "You are here" marker (#3). A child of the zoom layer, so it pans/zooms with
+   the map; the dot counter-scales to stay a constant size, and the label is
+   a non-scaling chip so its text stays legible at any zoom. */
+.map-user {
+  position: absolute;
+  width: 0; height: 0;
+  z-index: 6;
+}
+/* Tap ripple ring (#fun): expands from the tap point and fades out, then the
+   DOM node removes itself on animationend. Lives in the zoom layer, so it
+   pans/zooms with the map; --zoom keeps it a constant on-screen size. */
+.map-ripples { position: absolute; inset: 0; pointer-events: none; z-index: 3; }
+.map-ripple {
+  position: absolute;
+  left: 0; top: 0;
+  width: var(--ripple-size, 90px);
+  height: var(--ripple-size, 90px);
+  border: 2px solid rgba(198, 231, 253, 0.9);
+  border-radius: 50%;
+  transform: translate(-50%, -50%) scale(calc(0.1 / var(--zoom, 1)));
+  opacity: 0.9;
+  pointer-events: none;
+  animation: ripple-expand 0.9s cubic-bezier(0.16, 0.6, 0.35, 1) forwards;
+  box-shadow: 0 0 12px rgba(150, 210, 250, 0.35), inset 0 0 8px rgba(150, 210, 250, 0.25);
+}
+@keyframes ripple-expand {
+  0%   { transform: translate(-50%, -50%) scale(calc(0.1 / var(--zoom, 1))); opacity: 0.95; }
+  100% { transform: translate(-50%, -50%) scale(calc(1 / var(--zoom, 1)));   opacity: 0; }
+}
+.map-user-dot {
+  position: absolute;
+  transform: translate(-50%, -50%) scale(calc(1 / var(--zoom, 1)));
+  width: 13px; height: 13px;
+  border-radius: 50%;
+  background: #ff6b6b;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 2px rgba(255, 107, 107, 0.4), 0 0 12px rgba(255, 107, 107, 0.7);
+}
+.map-user-ring {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 13px; height: 13px;
+  border-radius: 50%;
+  border: 1px solid #ff8b8b;
+  animation: user-pulse 2.4s ease-out infinite;
+}
+@keyframes user-pulse {
+  0%   { transform: translate(-50%, -50%) scale(1); opacity: 0.7; }
+  100% { transform: translate(-50%, -50%) scale(4); opacity: 0; }
+}
+.map-user-label {
+  position: absolute;
+  transform: translate(-50%, -140%) scale(calc(1 / var(--zoom, 1)));
+  transform-origin: center bottom;
+  background: rgba(9, 13, 28, 0.92);
+  border: 1px solid rgba(255, 107, 107, 0.5);
+  border-radius: 999px;
+  padding: 4px 11px;
+  font-family: Verdana, Geneva, sans-serif;
+  font-size: 0.66rem;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+  z-index: 7;
+}
+.map-user-label.is-visible { opacity: 1; }
+.map-user-label.is-error {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+@media (prefers-reduced-motion: reduce) {
+  .map-user-ring { animation: none; opacity: 0; }
+}
+
+/* Pan/zoom control cluster (#16). Sits over the map, bottom-right, on the
+   (untransformed) viewport so it stays put and a constant size. */
+.map-controls {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 9;
+  display: flex;
+  gap: 6px;
+}
+.map-btn {
+  font: inherit;
+  font-family: Verdana, Geneva, sans-serif;
+  font-size: 0.72rem;
+  color: var(--ink);
+  background: rgba(9, 13, 28, 0.82);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 11px;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+  white-space: nowrap;
+}
+.map-btn:hover, .map-btn:focus-visible {
+  border-color: var(--gold);
+  color: var(--gold);
+  outline: none;
+}
+.map-btn[aria-pressed="true"] { background: var(--gold-soft); border-color: var(--gold); }
+
+/* Surprise-me button next to the daily pick. */
+.surprise-btn {
+  margin-top: 10px;
+  font: inherit;
+  font-family: Verdana, Geneva, sans-serif;
+  font-size: 0.74rem;
+  letter-spacing: 0.04em;
+  color: var(--ink-dim);
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 7px 13px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.surprise-btn:hover, .surprise-btn:focus-visible {
+  color: var(--gold);
+  border-color: var(--gold);
+  outline: none;
+}
+
+/* Detail dialog: best-time / nearest-city / coords field grid. */
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin: 0 0 4px;
+}
+.field {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 10px 12px;
+}
+.field span {
+  display: block;
+  font-family: Verdana, Geneva, sans-serif;
+  font-size: 0.62rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  margin-bottom: 4px;
+}
+.field em { font-style: normal; font-size: 0.9rem; color: var(--ink); }
+
+/* Transient toast for share / locate feedback. */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%) translateY(10px);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--gold);
+  border-radius: 10px;
+  padding: 10px 16px;
+  font-family: Verdana, Geneva, sans-serif;
+  font-size: 0.8rem;
+  color: var(--ink);
+  box-shadow: var(--shadow);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 60;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+
+.map-label {
+  position: absolute;
+  font-size: 11px;
+  line-height: 1.35;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink);
+  background: rgba(10, 15, 32, 0.85);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 2px 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  z-index: 3;
+}
+
+.map-label-line { display: block; }
+
+.map-label:hover, .map-label.is-hot {
+  border-color: var(--gold);
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.45);
+  z-index: 7;
+}
+
+/* Hover card: place details that pop up beside a marker. */
+.map-card {
+  position: absolute;
+  width: 252px;
+  background: rgba(9, 13, 28, 0.94);
+  backdrop-filter: blur(6px);
+  border: 1px solid var(--line);
+  border-top: 2px solid var(--accent, var(--gold));
+  border-radius: 10px;
+  padding: 12px 14px;
+  z-index: 10;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  font-family: Verdana, Geneva, sans-serif;
+}
+
+.map-card.is-visible { opacity: 1; pointer-events: auto; }
+.map-card[data-side="right"] { transform: translateX(8px); }
+.map-card[data-side="left"]  { transform: translateX(-8px); }
+.map-card.is-visible[data-side="right"] { transform: translateX(0); }
+.map-card.is-visible[data-side="left"]  { transform: translateX(0); }
+
+.map-card-cat {
+  display: inline-block;
+  font-size: 0.62rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  border: 1px solid;
+  border-radius: 999px;
+  padding: 2px 9px;
+  margin-bottom: 7px;
+}
+
+.map-card-name {
+  display: block;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.02rem;
+  color: var(--ink);
+  margin-bottom: 2px;
+}
+
+.map-card-loc {
+  display: block;
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-dim);
+  margin-bottom: 8px;
+}
+
+.map-card-tag {
+  margin: 0 0 8px;
+  font-family: "DejaVu Sans Mono", "Courier New", monospace;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  color: var(--ink-dim);
+}
+
+.map-card-coords {
+  display: block;
+  font-family: "Courier New", monospace;
+  font-size: 0.72rem;
+  color: var(--ink-dim);
+  opacity: 0.8;
+  margin-bottom: 8px;
+}
+
+.map-card-cta {
+  display: block;
+  color: var(--accent, var(--gold));
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+}
+
+.card--lit {
+  border-color: var(--card-accent) !important;
+  box-shadow: 0 0 0 1px var(--card-accent), var(--shadow);
+}
+
+.atlas-foot { padding-top: 10px; }
+
+.atlas-foot-inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+}
+
+.atlas-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  flex: 1 1 auto;
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: Verdana, Geneva, sans-serif;
+  font-size: 0.68rem;
+  color: var(--ink-dim);
+}
+
+.legend-dot {
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  background: var(--chip-accent);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--chip-accent) 60%, transparent);
+}
+
+.atlas-scale {
+  font-family: Verdana, Geneva, sans-serif;
+  font-size: 0.66rem;
+  color: var(--ink-dim);
+  opacity: 0.7;
+}
+
+/* ---------- Small screens ---------- */
+@media (max-width: 640px) {
+  .header-inner { flex-wrap: wrap; }
+  .search { flex: 1 1 100%; margin-left: 0; }
+  .hero { padding-top: 34px; }
+  .dialog-foot { flex-wrap: wrap; }
+  .dialog-foot .ghost-btn { flex: 1 1 auto; }
+
+  /* Mobile map: a wide band. The 96×25 grid is 3.84:1, so give it the full
+     content width and let its height follow (~260px on a 390px phone). The
+     overlay is compacted so it doesn't swallow the map. */
+  .atlas {
+    height: auto;
+    min-height: 0;
+  }
+  .map-viewport {
+    flex: none;
+    height: min(64vw, 300px);
+  }
+  .atlas-overlay {
+    top: 10px;
+    left: 10px;
+    right: 10px;
+    max-width: none;
+    padding: 12px 14px 13px;
+  }
+  .atlas-overlay .hero-kicker { font-size: 0.6rem; margin-bottom: 4px; }
+  .atlas-title { font-size: 1.1rem; margin-bottom: 7px; }
+  .atlas-sub { display: none; }
+  .atlas-hint { font-size: 0.55rem; opacity: 0.85; }
+  .map-readout { font-size: 0.6rem; }
+}
