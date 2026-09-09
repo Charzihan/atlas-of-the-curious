@@ -116,11 +116,12 @@ Two notes before you ship:
 - **Run `pnpm build` first.** This validates the dataset and generates the
   per-place share pages in `places/<id>/` (the "Copy link" button points at
   these when they exist; without them it falls back to hash deep-links, which
-  also work).
+  also work). Commit the generated `places/` directory so it ships with the
+  site (it contains no build timestamps, so diffs stay clean).
 - **Skip the large source files.** `data/*.geojson` (≈ 970 KB) are only inputs
   to `pnpm build-map` and are ignored by `.gitignore`; don't upload them to a
-  static host. `node_modules/` and the generated `places/` are ignored too.
-  The service worker is same-origin only and never fetches external resources.
+  static host. `node_modules/` is ignored too. The service worker is
+  same-origin only and never fetches external resources.
 
 ## Project layout
 
