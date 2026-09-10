@@ -5,10 +5,19 @@
      - Land: per-cell palette color (country hue × dither step) + texture glyph
      - Sea:  spring simulation over water cells; stirred by pointer move/tap,
        marker hovers, and ambient pulses; rendered as reactive glyphs.
-     - Markers: colored dots (no text labels); hover/focus/tap shows a
-       pretext-wrapped hover card and lights the matching grid card.
+     - Markers: colored dots with a coastline-routed name label; hover/focus/tap
+       shows a pretext-wrapped hover card and lights the matching grid card.
+     - Labels: place names routed into free sea cells around each dot, plus
+       ocean and sea names set in spaced capitals (see "Labels on the map").
    CSP-safe: same-origin module import, no eval, textContent for all data. */
-import { prepareWithSegments, layoutWithLines } from "../vendor/pretext/layout.js";
+import {
+  prepareWithSegments,
+  layoutWithLines,
+  measureLineStats,
+  measureNaturalWidth
+} from "../vendor/pretext/layout.js";
+import { readFontRoles } from "./text.js";
+import { routeText } from "./text-route.js";
 
 (function () {
   "use strict";
@@ -170,6 +179,601 @@ import { prepareWithSegments, layoutWithLines } from "../vendor/pretext/layout.j
     .map((p) => ({ p, accent: (catById.get(p.category) || {}).accent || "#e8b45a" }))
     .filter((x) => parseCoords(x.p.coordinates));
 
+  /* ==================================================================== *
+   * Labels on the map                                                     *
+   * ==================================================================== *
+   *
+   * Every label — a place name, a place tagline, an ocean name — is text
+   * poured into *free water cells* of the same character grid the map is drawn
+   * on. Three ideas hold it together:
+   *
+   * 1. Two masks. `kind` (built above, never changes) says which cells are
+   *    land. `occupancy` is rebuilt from scratch on every placement and says
+   *    which cells this frame's labels have already claimed. A cell is free
+   *    when it is water and unclaimed.
+   *
+   * 2. Screen px, not map px. Labels counter-scale with 1/--zoom exactly like
+   *    the markers, so a label keeps a constant on-screen size at any zoom.
+   *    A grid cell, on the other hand, grows with the zoom: on screen it is
+   *    CHARW * zoom wide. So zooming in buys the label more cells for the same
+   *    number of characters — which is the whole reason the zoom tiers below
+   *    can afford to show more text the closer you get.
+   *
+   * 3. One line per grid row. Each label line is laid out at the width of its
+   *    own row's free run and painted with a line box exactly one grid row
+   *    tall, so what was routed and what is painted occupy the same cells.
+   *    ATLAS_MAP_DEBUG.checkLabels() re-derives those cells from the rendered
+   *    geometry and walks them against the land mask, which is what makes
+   *    "no label overlaps land or another label" a testable claim.
+   *
+   * Preparation (the expensive pretext pass) happens once per string; a zoom
+   * change only re-runs routing, never `prepareWithSegments()`. */
+
+  // Feature flags. js/text.js owns DEFAULT_FLAGS and this phase must not edit
+  // it, so the defaults for the three Phase 1 flags live here, read with
+  // "on unless explicitly false" semantics. `?flags=` / `?noflags=` still work:
+  // js/text.js has already merged the query string into window.ATLAS_FLAGS by
+  // the time this module runs (both are deferred, so document order holds).
+  const FLAGS = (window.ATLAS_FLAGS = window.ATLAS_FLAGS || {});
+  FLAGS.labels = FLAGS.labels !== false;
+  FLAGS.oceanLabels = FLAGS.oceanLabels !== false;
+  FLAGS.hoverFit = FLAGS.hoverFit !== false;
+
+  // Font roles, resolved straight out of the CSS registry so the canvas font
+  // pretext measures with is the font the browser paints (see js/text.js).
+  const ROLES = (function () {
+    try { return readFontRoles(document, ["map-label", "ocean-label", "hover-card"]); }
+    catch (e) { return {}; }
+  })();
+  const ROLE_LABEL = ROLES["map-label"] || null;
+  const ROLE_OCEAN = ROLES["ocean-label"] || null;
+  const ROLE_TAG = ROLES["hover-card"] || null;
+  function fontPxOf(role) {
+    const m = role && /(\d*\.?\d+)px/.exec(role.font);
+    return m ? parseFloat(m[1]) : 0;
+  }
+
+  // Labels are a desktop affordance: below 640px the hover card carries the
+  // name and the grid is far too small to route into.
+  const LABELS_ON = !isMobile && FLAGS.labels && !!ROLE_LABEL;
+  const OCEAN_ON = !isMobile && FLAGS.oceanLabels && !!ROLE_OCEAN;
+
+  // Zoom tiers. Below NAME the map is a picture, not a gazetteer; from NAME
+  // each dot gets its name; from TAG the name is joined by its tagline.
+  const TIER_NAME_Z = 1.4;
+  const TIER_TAG_Z = 2.4;
+  const NAME_MAX_LINES = 3;
+  const TAG_MAX_LINES = 3;
+  // How far from the dot an anchor may sit, in cells. Nothing in the dataset
+  // is further than 3 cells from water on the 150×39 grid (deserts and inland
+  // forests are the far ones), so 4 covers every marker.
+  const LABEL_MAX_OFFSET = 4;
+  const LABEL_RUN_LIMIT = 44;       // longest free run worth scanning, in cells
+  const MARKER_PX = 19;             // .map-marker { width: 19px } — kept clear
+  const ZOOM_STEP = 0.05;           // re-place once the zoom moves this much
+
+  // Ocean and sea names. Anchors are the point the name wants to be centred
+  // on; placement slides left/right along the row to find a free run, and any
+  // name that cannot find one at the current zoom is simply not drawn — the
+  // Mediterranean, for instance, is barely five cells of water on this grid,
+  // so it only appears once the zoom has made those five cells wide enough.
+  const OCEANS = [
+    { name: "Pacific Ocean", lat: 0, lon: -132 },
+    { name: "Pacific Ocean", lat: 2, lon: 172 },
+    { name: "Atlantic Ocean", lat: 33, lon: -42 },
+    { name: "Atlantic Ocean", lat: -28, lon: -18 },
+    { name: "Indian Ocean", lat: -22, lon: 78 },
+    { name: "Southern Ocean", lat: -60, lon: 26 },
+    { name: "Arctic Ocean", lat: 84, lon: 10 },
+    { name: "Mediterranean", lat: 37, lon: 15 },
+    { name: "Caribbean Sea", lat: 15, lon: -74 },
+    { name: "Arabian Sea", lat: 15, lon: 63 },
+    { name: "South China Sea", lat: 14, lon: 114 },
+    { name: "Tasman Sea", lat: -38, lon: 161 }
+  ];
+  // Ocean names breathe: the tracking opens up as you zoom in. pretext takes
+  // letter-spacing as a px number at prepare() time, so the value is quantized
+  // to four steps and each (name, step) is prepared at most once for the life
+  // of the page — a zoom never triggers a new prepare().
+  const OCEAN_LS_EM = [0.18, 0.22, 0.26, 0.30];
+
+  // Prepared-handle caches. Keyed by content, so they survive a rebuild
+  // (resize) untouched — the label fonts are fixed px sizes, independent of
+  // the map's cell size.
+  const nameHandles = new Map();    // place id -> handle (name, uppercased)
+  const tagHandles = new Map();     // place id -> handle (tagline)
+  const oceanHandles = new Map();   // name + "|" + step -> handle
+  function makeHandle(text, role) {
+    const str = String(text == null ? "" : text).replace(/\s+/g, " ").trim();
+    return {
+      text: str,
+      // CSS paints a letter-space after the last grapheme too; pretext counts
+      // only the gaps between them. Carrying the difference as `ls` keeps the
+      // routed width and the painted width the same number.
+      ls: role.letterSpacing || 0,
+      pre: prepareWithSegments(str, role.font,
+        role.letterSpacing ? { letterSpacing: role.letterSpacing } : undefined)
+    };
+  }
+  function nameHandleFor(x) {
+    let h = nameHandles.get(x.p.id);
+    // .map-label is `text-transform: uppercase` and pretext does not model
+    // text-transform, so the string is uppercased before it is measured.
+    if (!h) { h = makeHandle(String(x.p.name).toUpperCase(), ROLE_LABEL); nameHandles.set(x.p.id, h); }
+    return h;
+  }
+  function tagHandleFor(x) {
+    if (!ROLE_TAG) return null;
+    let h = tagHandles.get(x.p.id);
+    if (!h) { h = makeHandle(x.p.tagline, ROLE_TAG); tagHandles.set(x.p.id, h); }
+    return h;
+  }
+  function oceanHandleFor(name, step) {
+    const key = name + "|" + step;
+    let h = oceanHandles.get(key);
+    if (!h) {
+      const ls = OCEAN_LS_EM[step] * fontPxOf(ROLE_OCEAN);
+      h = makeHandle(name.toUpperCase(), { font: ROLE_OCEAN.font, letterSpacing: ls });
+      oceanHandles.set(key, h);
+    }
+    return h;
+  }
+
+  // Anchor directions, tried in this order at each offset. `dir` is the
+  // direction the text runs (+1 east, −1 west); `pen` biases the score so a
+  // label prefers to sit beside its dot rather than above or below it.
+  const LABEL_DIRS = [
+    { dc: 1, dr: 0, dir: 1, pen: 0 },    // E
+    { dc: -1, dr: 0, dir: -1, pen: 1 },  // W
+    { dc: 0, dr: -1, dir: 1, pen: 4 },   // N
+    { dc: 0, dr: 1, dir: 1, pen: 4 },    // S
+    { dc: 1, dr: -1, dir: 1, pen: 6 },   // NE
+    { dc: 1, dr: 1, dir: 1, pen: 6 },    // SE
+    { dc: -1, dr: -1, dir: -1, pen: 7 }, // NW
+    { dc: -1, dr: 1, dir: -1, pen: 7 }   // SW
+  ];
+
+  // One byte per grid cell, cleared on every placement.
+  const occupancy = new Uint8Array(COLS * ROWS);
+  let labelRecords = [];
+  let oceanRecords = [];
+  const labelEls = new Map();   // place id -> { el, lines: [span] }
+  const oceanEls = [];          // reused span pool
+  let markersEl = null;
+  let placementQueued = false, lastTier = -1, lastPlaceZoom = -1;
+  let visibleIds = null;        // search / category filter, null = everything
+  const placeStats = { placements: 0, lastMs: 0, totalMs: 0 };
+
+  const DEBUG_MAP = (function () {
+    try {
+      const h = location.hostname;
+      if (h === "localhost" || h === "127.0.0.1" || h === "[::1]" || h === "::1") return true;
+      return new URLSearchParams(location.search).get("debug") === "map";
+    } catch (e) { return false; }
+  })();
+
+  function tierFor(z) { return z >= TIER_TAG_Z ? 2 : (z >= TIER_NAME_Z ? 1 : 0); }
+  const toGridCol = (lon) => Math.max(0, Math.min(COLS - 1, Math.round(((lon + 180) / 360) * COLS)));
+  const toGridRow = (lat) => Math.max(0, Math.min(ROWS - 1, Math.round(((90 - lat) / 180) * ROWS)));
+
+  // Free water cells on `row`, starting at `col` and walking in `dir`.
+  function freeRun(row, col, dir, limit) {
+    if (row < 0 || row >= ROWS) return 0;
+    let n = 0, c = col;
+    while (n < limit && c >= 0 && c < COLS) {
+      const i = row * COLS + c;
+      if (kind[i] || occupancy[i]) break;
+      n++; c += dir;
+    }
+    return n;
+  }
+
+  // The cells a rendered label covers, derived from the geometry that also
+  // positions it: the anchor cell, the run direction, and each line's painted
+  // width. Placement marks these; checkLabels() re-walks them.
+  function cellsOf(rec) {
+    const out = [];
+    for (const line of rec.lines) {
+      const cells = Math.max(1, Math.ceil((line.width - 0.001) / rec.cellW));
+      const c0 = rec.dir > 0 ? rec.col : rec.col - cells + 1;
+      out.push({ row: line.row, c0: c0, c1: c0 + cells - 1 });
+    }
+    return out;
+  }
+  function markCells(cells) {
+    for (const s of cells) {
+      if (s.row < 0 || s.row >= ROWS) continue;
+      const base = s.row * COLS;
+      for (let c = Math.max(0, s.c0); c <= Math.min(COLS - 1, s.c1); c++) occupancy[base + c] = 1;
+    }
+  }
+
+  // ---- Routing one candidate ---------------------------------------------
+  // Read the free run on each row the label would use, hand those widths to
+  // the pure router one row at a time, and let it say whether the whole string
+  // survived. A candidate that would have to break a word mid-word comes back
+  // incomplete and is discarded.
+  function routeAt(handle, anchorRow, anchorCol, dir, cellW, maxLines, startRow) {
+    const widths = [];
+    for (let i = 0; i < maxLines; i++) {
+      widths.push(freeRun(startRow + i, anchorCol, dir, LABEL_RUN_LIMIT) * cellW);
+    }
+    return routeText(handle.pre, widths, 1, {
+      maxLines: maxLines,
+      text: handle.text,
+      startRow: startRow,
+      extraWidth: handle.ls,
+      minWidth: cellW,         // a single free cell is not worth a line
+      // The lines are painted as one stacked block, so they must live on
+      // consecutive rows: a blocked row ends this candidate rather than being
+      // skipped over. (Without this the next line renders one row higher than
+      // it was routed for, straight onto its neighbour's name.)
+      contiguous: true
+    });
+  }
+
+  // Best anchor for one marker, or null when the name cannot be fitted into
+  // the sea anywhere near it at this zoom.
+  function findAnchor(x, tier, cellW) {
+    const nameH = nameHandleFor(x);
+    const tagH = tier >= 2 ? tagHandleFor(x) : null;
+    let best = null;
+    for (let off = 1; off <= LABEL_MAX_OFFSET; off++) {
+      for (const d of LABEL_DIRS) {
+        const col = x.gcol + d.dc * off;
+        const row = x.grow + d.dr * off;
+        if (col < 0 || col >= COLS || row < 0 || row >= ROWS) continue;
+        if (kind[row * COLS + col] || occupancy[row * COLS + col]) continue;
+        const name = routeAt(nameH, row, col, d.dir, cellW, NAME_MAX_LINES, row);
+        if (!name.complete || !name.lines.length) continue;
+        let tagLines = [];
+        if (tagH) {
+          const from = name.lines[name.lines.length - 1].row + 1;
+          const tag = routeAt(tagH, row, col, d.dir, cellW, TAG_MAX_LINES, from);
+          if (tag.complete) tagLines = tag.lines;
+        }
+        const score = name.lines.length * 100 + off * 12 + d.pen + (tagH && !tagLines.length ? 40 : 0);
+        if (!best || score < best.score) {
+          best = { score: score, row: row, col: col, dir: d.dir, nameLines: name.lines, tagLines: tagLines };
+        }
+      }
+      if (best) break;   // nearest offset that works wins; distance matters
+    }
+    return best;
+  }
+
+  // ---- Rendering ----------------------------------------------------------
+  // The label is a child of the marker layer, so it pans and zooms with the
+  // map, and counter-scales by 1/--zoom (the same trick the markers use) so it
+  // stays a constant size on screen. A west-running label is pinned by its
+  // right edge instead of its left, so the text always ends at the anchor cell
+  // no matter how the measured and painted widths round.
+  function ensureLabelEl(x) {
+    let entry = labelEls.get(x.p.id);
+    if (entry) return entry;
+    const el = document.createElement("span");
+    el.className = "map-label";
+    el.dataset.placeId = x.p.id;
+    // The marker button already announces "<name>, <country> — open field
+    // note"; a second copy here would make every place read twice.
+    el.setAttribute("aria-hidden", "true");
+    el.addEventListener("mouseenter", function () { if (x.enter) x.enter(); });
+    el.addEventListener("mouseleave", function () { if (x.leave) x.leave(); });
+    el.addEventListener("click", function (e) {
+      e.stopPropagation();
+      const hash = "#/place/" + encodeURIComponent(x.p.id);
+      if (location.hash !== hash) location.hash = hash;
+    });
+    entry = { el: el, lines: [] };
+    labelEls.set(x.p.id, entry);
+    if (markersEl) markersEl.appendChild(el);
+    return entry;
+  }
+
+  function renderLabel(x, rec) {
+    const entry = ensureLabelEl(x);
+    const el = entry.el;
+    const texts = rec.lines.map(function (l) { return l.text; });
+    while (entry.lines.length < texts.length) {
+      const span = document.createElement("span");
+      span.className = "map-label-line";
+      el.appendChild(span);
+      entry.lines.push(span);
+    }
+    while (entry.lines.length > texts.length) entry.lines.pop().remove();
+    for (let i = 0; i < texts.length; i++) {
+      const span = entry.lines[i];
+      if (span.textContent !== texts[i]) span.textContent = texts[i];
+      const isTag = i >= rec.nameCount;
+      if (span.classList.contains("map-label-tag") !== isTag) span.classList.toggle("map-label-tag", isTag);
+    }
+    el.style.setProperty("top", (rec.lines[0].row * LINEH) + "px");
+    if (rec.dir > 0) {
+      el.style.removeProperty("right");
+      el.style.setProperty("left", (rec.col * CHARW) + "px");
+      if (el.dataset.dir !== "right") el.dataset.dir = "right";
+    } else {
+      el.style.removeProperty("left");
+      el.style.setProperty("right", (mapW - (rec.col + 1) * CHARW) + "px");
+      if (el.dataset.dir !== "left") el.dataset.dir = "left";
+    }
+    if (!el.classList.contains("is-placed")) el.classList.add("is-placed");
+  }
+
+  function hideLabel(x) {
+    const entry = labelEls.get(x.p.id);
+    if (entry && entry.el.classList.contains("is-placed")) entry.el.classList.remove("is-placed");
+  }
+
+  function oceanEl(index) {
+    let el = oceanEls[index];
+    if (el) return el;
+    el = document.createElement("span");
+    el.className = "map-ocean-label";
+    el.setAttribute("aria-hidden", "true");
+    oceanEls[index] = el;
+    if (markersEl) markersEl.appendChild(el);
+    return el;
+  }
+
+  // ---- Ocean and sea names ------------------------------------------------
+  // One row of free water, centred on the anchor and allowed to slide along
+  // the row to find it. Marked into the occupancy mask before any place label
+  // is routed, so place names flow around the ocean names rather than over
+  // them.
+  const OCEAN_SLIDE = 16;
+  function placeOceanLabels(cellW, z) {
+    const t = Math.max(0, Math.min(1, (z - 1) / (TIER_TAG_Z - 1)));
+    const step = Math.round(t * (OCEAN_LS_EM.length - 1));
+    const lsPx = OCEAN_LS_EM[step] * fontPxOf(ROLE_OCEAN);
+    let used = 0;
+    for (const ocean of OCEANS) {
+      const handle = oceanHandleFor(ocean.name, step);
+      const width = measureNaturalWidth(handle.pre) + handle.ls;
+      const need = Math.max(1, Math.ceil((width - 0.001) / cellW));
+      const row = toGridRow(ocean.lat);
+      const centre = toGridCol(ocean.lon) - Math.floor(need / 2);
+      let start = -1;
+      for (let slide = 0; slide <= OCEAN_SLIDE && start < 0; slide++) {
+        const tries = slide === 0 ? [0] : [-slide, slide];
+        for (const delta of tries) {
+          const c0 = centre + delta;
+          if (c0 < 0 || c0 + need > COLS) continue;
+          let ok = true;
+          for (let k = 0; k < need; k++) {
+            const i = row * COLS + c0 + k;
+            if (kind[i] || occupancy[i]) { ok = false; break; }
+          }
+          if (ok) { start = c0; break; }
+        }
+      }
+      if (start < 0) continue;   // no room on this grid at this zoom
+      const rec = {
+        id: ocean.name, row: row, col: start, dir: 1, cellW: cellW,
+        nameCount: 1, lines: [{ text: handle.text, width: width, row: row }]
+      };
+      rec.cells = cellsOf(rec);
+      markCells(rec.cells);
+      oceanRecords.push(rec);
+      const el = oceanEl(used++);
+      if (el.textContent !== handle.text) el.textContent = handle.text;
+      el.style.setProperty("letter-spacing", (Math.round(lsPx * 100) / 100) + "px");
+      el.style.setProperty("left", (start * CHARW) + "px");
+      el.style.setProperty("top", (row * LINEH) + "px");
+      if (!el.classList.contains("is-placed")) el.classList.add("is-placed");
+    }
+    for (let i = used; i < oceanEls.length; i++) oceanEls[i].classList.remove("is-placed");
+  }
+  function hideOceanLabels() {
+    for (const el of oceanEls) el.classList.remove("is-placed");
+  }
+
+  // ---- One placement pass -------------------------------------------------
+  function placeLabels() {
+    if (!markersEl || !view) return;
+    const started = performance.now();
+    const z = view.zoom;
+    const cellW = CHARW * z;                 // one grid cell, in screen px
+    const tier = LABELS_ON ? tierFor(z) : 0;
+    occupancy.fill(0);
+    labelRecords = [];
+    oceanRecords = [];
+
+    // The dots come first: no label may sit under one. A dot is a constant
+    // 19px on screen, so the number of cells it covers shrinks as you zoom in.
+    const dotCells = Math.max(0, Math.ceil((MARKER_PX / 2) / cellW) - 1);
+    for (const x of places) {
+      if (!x.pos) continue;
+      if (visibleIds && !visibleIds.has(x.p.id)) continue;
+      for (let dr = -dotCells; dr <= dotCells; dr++) {
+        const rr = x.grow + dr;
+        if (rr < 0 || rr >= ROWS) continue;
+        for (let dc = -dotCells; dc <= dotCells; dc++) {
+          const cc = x.gcol + dc;
+          if (cc < 0 || cc >= COLS) continue;
+          occupancy[rr * COLS + cc] = 1;
+        }
+      }
+    }
+
+    if (OCEAN_ON) placeOceanLabels(cellW, z);
+    else hideOceanLabels();
+
+    for (const x of places) {
+      if (tier === 0 || !x.pos || (visibleIds && !visibleIds.has(x.p.id))) { hideLabel(x); continue; }
+      const best = findAnchor(x, tier, cellW);
+      if (!best) { hideLabel(x); continue; }
+      const rec = {
+        id: x.p.id, row: best.row, col: best.col, dir: best.dir, cellW: cellW,
+        nameCount: best.nameLines.length,
+        lines: best.nameLines.concat(best.tagLines)
+      };
+      rec.cells = cellsOf(rec);
+      markCells(rec.cells);
+      labelRecords.push(rec);
+      renderLabel(x, rec);
+    }
+
+    lastTier = tier;
+    lastPlaceZoom = z;
+    placeStats.placements++;
+    placeStats.lastMs = performance.now() - started;
+    placeStats.totalMs += placeStats.lastMs;
+
+    if (DEBUG_MAP) {
+      const report = checkLabels();
+      if (report.overlaps) {
+        // eslint-disable-next-line no-console
+        console.warn("[atlas:map] " + report.overlaps + " label cell(s) overlap land or another label", report);
+      }
+    }
+  }
+
+  // At most one placement per frame, whatever asks for it.
+  function requestPlacement() {
+    if (!LABELS_ON && !OCEAN_ON) return;
+    if (placementQueued) return;
+    placementQueued = true;
+    requestAnimationFrame(function () {
+      placementQueued = false;
+      placeLabels();
+    });
+  }
+
+  // ---- Dev assertion ------------------------------------------------------
+  // Walk every rendered label's cells against the land mask and against a
+  // freshly built occupancy mask. Runs automatically after each placement on
+  // localhost or with ?debug=map, and scripts/smoke.mjs calls it directly.
+  function checkLabels() {
+    const seen = new Uint8Array(COLS * ROWS);
+    const problems = [];
+    let overlaps = 0;
+    const walk = function (rec, what) {
+      for (const s of cellsOf(rec)) {
+        for (let c = s.c0; c <= s.c1; c++) {
+          if (s.row < 0 || s.row >= ROWS || c < 0 || c >= COLS) {
+            overlaps++; problems.push({ what: what, id: rec.id, row: s.row, col: c, why: "off-grid" });
+            continue;
+          }
+          const i = s.row * COLS + c;
+          if (kind[i]) {
+            overlaps++; problems.push({ what: what, id: rec.id, row: s.row, col: c, why: "land" });
+          } else if (seen[i]) {
+            overlaps++; problems.push({ what: what, id: rec.id, row: s.row, col: c, why: "label" });
+          }
+          seen[i] = 1;
+        }
+      }
+    };
+    for (const rec of oceanRecords) walk(rec, "ocean");
+    for (const rec of labelRecords) walk(rec, "place");
+    return {
+      labels: labelRecords.length,
+      oceanLabels: oceanRecords.length,
+      overlaps: overlaps,
+      lines: labelRecords.reduce(function (n, r) { return n + r.lines.length; }, 0),
+      tier: lastTier,
+      zoom: view ? view.zoom : 0,
+      problems: problems.slice(0, 20)
+    };
+  }
+
+  // The same walk, but starting from the DOM instead of the placement record:
+  // every painted line box is mapped back onto the grid through
+  // getBoundingClientRect(). It is the slow, independent version of
+  // checkLabels() — it also proves the CSS half of the contract (the
+  // 1/--zoom counter-scale, the --row-h line box, the left/right pinning) is
+  // doing what the routing assumed. scripts/smoke.mjs runs it once per zoom.
+  function checkPainted() {
+    const problems = [];
+    let boxes = 0, overlaps = 0;
+    if (!zoomEl) return { boxes: 0, overlaps: 0, problems: problems };
+    const origin = zoomEl.getBoundingClientRect();
+    const z = view ? view.zoom : 1;
+    const seen = new Uint8Array(COLS * ROWS);
+    const EPS = 0.2;   // ignore a cell a box merely grazes
+    const walk = function (el, what, id) {
+      const r = el.getBoundingClientRect();
+      if (!r.width || !r.height) return;
+      boxes++;
+      const c0 = Math.floor((r.left - origin.left) / z / CHARW + EPS);
+      const c1 = Math.ceil((r.right - origin.left) / z / CHARW - EPS) - 1;
+      const r0 = Math.floor((r.top - origin.top) / z / LINEH + EPS);
+      const r1 = Math.ceil((r.bottom - origin.top) / z / LINEH - EPS) - 1;
+      for (let row = r0; row <= r1; row++) {
+        for (let col = c0; col <= c1; col++) {
+          if (row < 0 || row >= ROWS || col < 0 || col >= COLS) {
+            overlaps++; problems.push({ what: what, id: id, row: row, col: col, why: "off-grid" });
+            continue;
+          }
+          const i = row * COLS + col;
+          if (kind[i]) { overlaps++; problems.push({ what: what, id: id, row: row, col: col, why: "land" }); }
+          else if (seen[i]) { overlaps++; problems.push({ what: what, id: id, row: row, col: col, why: "label" }); }
+          seen[i] = 1;
+        }
+      }
+    };
+    for (const el of document.querySelectorAll(".map-ocean-label.is-placed")) walk(el, "ocean", el.textContent);
+    for (const el of document.querySelectorAll(".map-label.is-placed")) {
+      const id = el.dataset.placeId || "";
+      for (const line of el.querySelectorAll(".map-label-line")) walk(line, "place", id);
+    }
+    return { boxes: boxes, overlaps: overlaps, problems: problems.slice(0, 20) };
+  }
+
+  // ---- Debug / test surface ----------------------------------------------
+  // Not a public API: scripts/smoke.mjs drives the map through this instead of
+  // synthesising pointer events, and it is what makes the overlap assertion
+  // and the zoom-frame timing reproducible.
+  let showCardRef = null, hideCardRef = null;
+  window.ATLAS_MAP_DEBUG = {
+    enabled: DEBUG_MAP,
+    flags: { labels: LABELS_ON, oceanLabels: OCEAN_ON, hoverFit: FLAGS.hoverFit },
+    tiers: { name: TIER_NAME_Z, tagline: TIER_TAG_Z },
+    getZoom: function () { return view ? view.zoom : 1; },
+    // The same call the +/− buttons make: zoom about the viewport centre.
+    setZoom: function (z) {
+      if (!view) return 0;
+      vpW = viewport.clientWidth || vpW;
+      vpH = viewport.clientHeight || vpH;
+      zoomTo(z, vpW / 2, vpH / 2);
+      return view.zoom;
+    },
+    place: function () { placeLabels(); return checkLabels(); },
+    checkLabels: checkLabels,
+    checkPainted: checkPainted,
+    stats: function () {
+      return {
+        placements: placeStats.placements,
+        lastMs: placeStats.lastMs,
+        avgMs: placeStats.placements ? placeStats.totalMs / placeStats.placements : 0
+      };
+    },
+    labels: function () {
+      return labelRecords.map(function (r) {
+        return {
+          id: r.id, row: r.row, col: r.col, dir: r.dir,
+          lines: r.lines.map(function (l) { return { text: l.text, width: l.width, row: l.row }; }),
+          cells: cellsOf(r)
+        };
+      });
+    },
+    oceanLabels: function () {
+      return oceanRecords.map(function (r) { return { name: r.id, row: r.row, col: r.col }; });
+    },
+    showCard: function (id) {
+      const x = places.find(function (p) { return p.p.id === id; });
+      if (!x || !showCardRef) return null;
+      showCardRef(x);
+      return {
+        id: id,
+        width: parseFloat(card && card.style.width) || 0,
+        lines: (card ? card.querySelector(".map-card-tag").textContent : "").split("\n")
+      };
+    },
+    hideCard: function () { if (hideCardRef) hideCardRef(); }
+  };
+
   // ---- Mutable per-build state -------------------------------------------
   let PX, LINEH, CHARW, mapW, mapH;
   let disp, vel, animId = 0, ambientTimer = null, hoverTimer = null, hoveredX = null;
@@ -213,9 +817,15 @@ import { prepareWithSegments, layoutWithLines } from "../vendor/pretext/layout.j
   function applyView() {
     if (!zoomEl) return;
     zoomEl.style.transform = "translate(" + panX + "px, " + panY + "px) scale(" + view.zoom + ")";
-    // Counter-scale so markers keep a constant on-screen size at any zoom
-    // (CSS uses 1 / var(--zoom) for marker dimensions).
+    // Counter-scale so markers and labels keep a constant on-screen size at any
+    // zoom (CSS uses 1 / var(--zoom) for their dimensions).
     zoomEl.style.setProperty("--zoom", String(view.zoom));
+    // Panning moves labels with the map and changes nothing about where they
+    // fit; only a zoom does. Re-route when the tier flips or the zoom has
+    // drifted past a step — debounced to one placement per frame.
+    if (tierFor(view.zoom) !== lastTier || Math.abs(view.zoom - lastPlaceZoom) > ZOOM_STEP) {
+      requestPlacement();
+    }
   }
   // Zoom so that the map point under stage-local (sx,sy) stays fixed there.
   function zoomTo(newZoom, sx, sy) {
@@ -252,6 +862,14 @@ import { prepareWithSegments, layoutWithLines } from "../vendor/pretext/layout.j
     loopRunning = false;
     if (view) { view.zoom = 1; }
     panX = 0; panY = 0;
+    // The label DOM went with the stage; drop the element cache (the prepared
+    // pretext handles are keyed by text and deliberately survive a rebuild).
+    markersEl = null;
+    labelEls.clear();
+    oceanEls.length = 0;
+    labelRecords = [];
+    oceanRecords = [];
+    lastTier = -1; lastPlaceZoom = -1;
   }
 
   function build() {
@@ -324,6 +942,10 @@ import { prepareWithSegments, layoutWithLines } from "../vendor/pretext/layout.j
     zoomEl.className = "map-zoom";
     zoomEl.style.width = mapW + "px";
     zoomEl.style.height = mapH + "px";
+    // One grid row, in map px. Label line boxes are `calc(var(--row-h) *
+    // var(--zoom))` tall, which — under the 1/--zoom counter-scale — is exactly
+    // one grid row on screen, so a routed line and a painted line share cells.
+    zoomEl.style.setProperty("--row-h", LINEH + "px");
     stage.appendChild(zoomEl);
 
     // ---- Base canvas: static land + faint sea floor (drawn once) ------------
@@ -474,7 +1096,7 @@ import { prepareWithSegments, layoutWithLines } from "../vendor/pretext/layout.j
       cctx.globalAlpha = 1;
     }
 
-    const markersEl = document.createElement("div");
+    markersEl = document.createElement("div");
     markersEl.className = "map-markers";
     zoomEl.appendChild(markersEl);
 
@@ -577,24 +1199,93 @@ import { prepareWithSegments, layoutWithLines } from "../vendor/pretext/layout.j
     card.appendChild(cardCat); card.appendChild(cardName); card.appendChild(cardLoc);
     card.appendChild(cardTag); card.appendChild(cardCoords); card.appendChild(cardCta);
     stage.appendChild(card);
-    const CARD_W = isMobile ? Math.min(230, Math.round(mapW * 0.62)) : 252;
-    // The width the tagline actually gets. CARD_W above is the *positioning*
-    // width (it decides which side of the marker the card flips to); the card
-    // element itself is sized by .map-card in css/style.css. Read the content
-    // box of the tagline element once, here, rather than guessing — one DOM
-    // read at build time, none afterwards.
-    const CARD_PAD_X = 14; // .map-card { padding: 12px 14px } — fallback only
-    const CARD_TEXT_W = Math.max(40, cardTag.clientWidth || CARD_W - CARD_PAD_X * 2);
+
+    /* ---- A card that hugs its text ------------------------------------
+       The card used to be a fixed 252px box in CSS while js/map.js positioned
+       it against a CARD_W of 230 or 252 — the two disagreed on mobile, so the
+       flip-to-the-other-side decision was made against the wrong width. Now
+       the width is measured from the text and written from here; the CSS only
+       caps it. Everything below is read from the live elements once, at build
+       time, so the numbers cannot drift from the stylesheet. */
+    const cardStyle = getComputedStyle(card);
+    const CARD_CHROME =
+      (parseFloat(cardStyle.paddingLeft) || 0) + (parseFloat(cardStyle.paddingRight) || 0) +
+      (parseFloat(cardStyle.borderLeftWidth) || 0) + (parseFloat(cardStyle.borderRightWidth) || 0);
+    const CSS_CARD_MAX = parseFloat(cardStyle.maxWidth) || 252;
+    const CARD_MAX_W = isMobile
+      ? Math.max(180, Math.min(CSS_CARD_MAX, Math.round(mapW * 0.62)))
+      : CSS_CARD_MAX;
+    const CARD_MIN_W = Math.min(CARD_MAX_W, 190);
+    const CARD_TEXT_W = Math.max(40, CARD_MAX_W - CARD_CHROME);   // the widest the text may get
+    const CARD_MIN_TEXT = Math.max(40, CARD_MIN_W - CARD_CHROME);
+    let cardW = CARD_MAX_W, cardH = 200;
+
+    // Canvas font string + tracking for one of the card's own elements, so a
+    // line the site paints in Georgia is measured in Georgia.
+    function elFont(el) {
+      const s = getComputedStyle(el);
+      const style = s.fontStyle && s.fontStyle !== "normal" ? s.fontStyle + " " : "";
+      const weight = s.fontWeight && s.fontWeight !== "400" && s.fontWeight !== "normal"
+        ? s.fontWeight + " " : "";
+      const size = parseFloat(s.fontSize) || 12;
+      return {
+        font: style + weight + s.fontSize + " " + s.fontFamily,
+        ls: parseFloat(s.letterSpacing) || 0,
+        upper: s.textTransform === "uppercase",
+        lh: parseFloat(s.lineHeight) || size * 1.2,
+        mb: parseFloat(s.marginBottom) || 0,
+        chrome:
+          (parseFloat(s.paddingLeft) || 0) + (parseFloat(s.paddingRight) || 0) +
+          (parseFloat(s.borderLeftWidth) || 0) + (parseFloat(s.borderRightWidth) || 0),
+        chromeY:
+          (parseFloat(s.paddingTop) || 0) + (parseFloat(s.paddingBottom) || 0) +
+          (parseFloat(s.borderTopWidth) || 0) + (parseFloat(s.borderBottomWidth) || 0)
+      };
+    }
+    const CARD_FONTS = {
+      name: elFont(cardName), loc: elFont(cardLoc), coords: elFont(cardCoords),
+      cta: elFont(cardCta), cat: elFont(cardCat), tag: elFont(cardTag)
+    };
+    const CARD_CHROME_Y =
+      (parseFloat(cardStyle.paddingTop) || 0) + (parseFloat(cardStyle.paddingBottom) || 0) +
+      (parseFloat(cardStyle.borderTopWidth) || 0) + (parseFloat(cardStyle.borderBottomWidth) || 0);
+    // How much width one of the card's own lines really wants: the widest line
+    // it wraps to at the cap, never its unwrapped length. "Marble Caves
+    // (Grottoes of General Carrera)" is 336px of Georgia on one line — asking
+    // for that would pin every card to the cap and there would be nothing left
+    // to shrink-wrap.
+    const runPre = new Map();
+    function runHandle(role, text) {
+      const f = CARD_FONTS[role];
+      const str = f.upper ? String(text).toUpperCase() : String(text);
+      const key = role + "|" + str;
+      let pre = runPre.get(key);
+      if (!pre) {
+        pre = prepareWithSegments(str, f.font, f.ls ? { letterSpacing: f.ls } : undefined);
+        runPre.set(key, pre);
+      }
+      return { pre: pre, f: f, str: str };
+    }
+    function runWidth(role, text) {
+      const h = runHandle(role, text);
+      const room = Math.max(20, CARD_TEXT_W - h.f.chrome);
+      // + ls: CSS paints a letter-space after the final grapheme too.
+      return measureLineStats(h.pre, room).maxLineWidth + (h.str ? h.f.ls : 0) + h.f.chrome;
+    }
+    function runLines(role, text, textW) {
+      const h = runHandle(role, text);
+      return Math.max(1, measureLineStats(h.pre, Math.max(20, textW - h.f.chrome)).lineCount);
+    }
 
     // Wrap the tagline through the shared text-metrics module so the hover
     // card measures with the same font-role registry as the rest of the site
     // (role "hover-card" == the .map-card-tag rule). If js/text.js is absent
     // or its `metrics` flag is off, fall back to the local pretext call.
-    function tagLines(text) {
+    function tagLines(text, width) {
       const T = window.ATLAS_TEXT;
       if (T && typeof T.linesOfText === "function") {
         try {
-          const viaModule = T.linesOfText("hover-card", text, CARD_TEXT_W);
+          const viaModule = T.linesOfText("hover-card", text, width || CARD_TEXT_W);
           if (viaModule && viaModule.length) return trimEnds(viaModule);
         } catch (e) { /* fall through to the local path */ }
       }
@@ -606,15 +1297,99 @@ import { prepareWithSegments, layoutWithLines } from "../vendor/pretext/layout.j
       return lines.map(function (l) { return l.replace(/\s+$/, ""); })
         .filter(function (l) { return l.length; });
     }
+    // A last line holding one lonely word is the classic typographic widow.
+    function isWidow(lines) {
+      return lines.length >= 2 && !/\s/.test(lines[lines.length - 1].trim());
+    }
+
+    /* Shrink-wrap one tagline, then refuse to leave a one-word last line.
+       tightWidthOfText() gives the narrowest box with the same line count;
+       if that still ends on a single word, walk narrower (which pulls a word
+       down onto the last line) and then wider, and keep the first width that
+       reads properly. The chosen lines are baked into the <pre> with real
+       newlines, so widening the card for a long name cannot re-wrap them. */
+    const tagFits = new Map();
+    function tagFit(p) {
+      let fit = tagFits.get(p.id);
+      if (fit) return fit;
+      const T = window.ATLAS_TEXT;
+      const text = String(p.tagline || "");
+      if (!FLAGS.hoverFit || !T || typeof T.tightWidthOfText !== "function") {
+        fit = { width: CARD_TEXT_W, lines: tagLines(text, CARD_TEXT_W) };
+        tagFits.set(p.id, fit);
+        return fit;
+      }
+      let width = T.tightWidthOfText("hover-card", text, CARD_TEXT_W);
+      let lines = tagLines(text, width);
+      if (isWidow(lines)) {
+        const STEP = 3;
+        let found = null;
+        for (let w = width - STEP; w >= CARD_MIN_TEXT && !found; w -= STEP) {
+          const candidate = tagLines(text, w);
+          if (candidate.length > TAG_MAX_LINES + 1) break;   // do not grow it forever
+          if (!isWidow(candidate)) found = { width: w, lines: candidate };
+        }
+        for (let w = width + STEP; w <= CARD_TEXT_W && !found; w += STEP) {
+          const candidate = tagLines(text, w);
+          if (!isWidow(candidate)) found = { width: w, lines: candidate };
+        }
+        if (found) { width = found.width; lines = found.lines; }
+      }
+      fit = { width: width, lines: lines };
+      tagFits.set(p.id, fit);
+      return fit;
+    }
+
+    // Final card width: the widest thing it has to hold, capped by the CSS.
+    // The height comes out of the same line counts, so positionCard() can keep
+    // a tall card on screen without ever reading the DOM back.
+    const cardFits = new Map();
+    function cardFit(x) {
+      let fitted = cardFits.get(x.p.id);
+      if (fitted) return fitted;
+      const p = x.p;
+      const fit = tagFit(p);
+      const cat = catById.get(p.category);
+      const loc = p.country + " — " + p.region;
+      const coords = "≈ " + p.coordinates;
+      const cta = cardCta.textContent;
+      let textW = fit.width;
+      if (FLAGS.hoverFit) {
+        textW = Math.max(textW, runWidth("name", p.name));
+        textW = Math.max(textW, runWidth("loc", loc));
+        textW = Math.max(textW, runWidth("coords", coords));
+        textW = Math.max(textW, runWidth("cta", cta));
+        if (cat) textW = Math.max(textW, runWidth("cat", cat.label));
+        textW = Math.max(CARD_MIN_TEXT, Math.min(CARD_TEXT_W, textW));
+      } else {
+        textW = CARD_TEXT_W;
+      }
+      const F = CARD_FONTS;
+      const height = CARD_CHROME_Y +
+        (cat ? F.cat.lh + F.cat.chromeY + F.cat.mb : 0) +
+        runLines("name", p.name, textW) * F.name.lh + F.name.mb +
+        runLines("loc", loc, textW) * F.loc.lh + F.loc.mb +
+        fit.lines.length * F.tag.lh + F.tag.mb +
+        runLines("coords", coords, textW) * F.coords.lh + F.coords.mb +
+        runLines("cta", cta, textW) * F.cta.lh;
+      fitted = {
+        width: Math.ceil(textW + CARD_CHROME),
+        height: Math.ceil(height),
+        lines: fit.lines
+      };
+      cardFits.set(x.p.id, fitted);
+      return fitted;
+    }
 
     function positionCard(x) {
       // The card is a child of the (untransformed) stage, so position it in
       // stage/screen px, not map px. The marker's on-screen spot is toStage(pos).
+      // The flip and the clamp both use the card's real, measured width.
       const sp = toStage(x.pos.x, x.pos.y);
-      const flip = sp.x > vpW - CARD_W - 40;
-      const left = Math.max(6, Math.min(vpW - CARD_W - 6,
-        flip ? sp.x - 16 - CARD_W : sp.x + 16));
-      const top = Math.max(8, Math.min(Math.max(8, vpH - 200), sp.y - 60));
+      const flip = sp.x > vpW - cardW - 40;
+      const left = Math.max(6, Math.min(vpW - cardW - 6,
+        flip ? sp.x - 16 - cardW : sp.x + 16));
+      const top = Math.max(8, Math.min(Math.max(8, vpH - cardH - 8), sp.y - 60));
       card.style.left = left + "px";
       card.style.top = top + "px";
       card.dataset.side = flip ? "left" : "right";
@@ -623,12 +1398,16 @@ import { prepareWithSegments, layoutWithLines } from "../vendor/pretext/layout.j
       if (cardVisibleId === x.p.id) { positionCard(x); return; }
       cardVisibleId = x.p.id;
       const cat = catById.get(x.p.category);
+      const fit = cardFit(x);
+      cardW = fit.width;
+      cardH = fit.height;
+      card.style.setProperty("width", cardW + "px");
       cardCat.textContent = cat ? cat.label : "";
       cardCat.style.color = x.accent;
       cardCat.style.borderColor = x.accent;
       cardName.textContent = x.p.name;
       cardLoc.textContent = x.p.country + " — " + x.p.region;
-      cardTag.textContent = tagLines(x.p.tagline).join("\n");
+      cardTag.textContent = fit.lines.join("\n");
       cardCoords.textContent = "≈ " + x.p.coordinates;
       card.style.setProperty("--accent", x.accent);
       positionCard(x);
@@ -694,6 +1473,13 @@ import { prepareWithSegments, layoutWithLines } from "../vendor/pretext/layout.j
       }
       if (!any) break;
     }
+    // The grid cell the dot actually sits in after the nudge. Labels anchor
+    // off this (not off x.pos) so a nudged dot and its name stay together.
+    for (const x of places) {
+      if (!x.pos) continue;
+      x.gcol = Math.max(0, Math.min(COLS - 1, Math.floor(x.dx / CHARW)));
+      x.grow = Math.max(0, Math.min(ROWS - 1, Math.floor(x.dy / LINEH)));
+    }
     // Build the marker buttons.
     for (const x of places) {
       if (!x.pos) continue;
@@ -713,10 +1499,16 @@ import { prepareWithSegments, layoutWithLines } from "../vendor/pretext/layout.j
       markersEl.appendChild(m);
       markerRefs.push({ id: p.id, el: m });
 
+      const labelEl = () => {
+        const entry = labelEls.get(p.id);
+        return entry ? entry.el : null;
+      };
       const enter = () => {
         showCard(x);
         lightCard(p.id, true);
         m.classList.add("is-hot");
+        const le = labelEl();
+        if (le) le.classList.add("is-hot");
         hoveredX = x;
         const tick = () => { if (hoveredX === x) stir(x.pos.col, x.pos.row, 0.85); };
         tick();
@@ -729,7 +1521,13 @@ import { prepareWithSegments, layoutWithLines } from "../vendor/pretext/layout.j
         hideCard();
         lightCard(p.id, false);
         m.classList.remove("is-hot");
+        const le = labelEl();
+        if (le) le.classList.remove("is-hot");
       };
+      // The name label hovers like its dot (js/map.js's label layer calls
+      // these), and both light the same grid card.
+      x.enter = enter;
+      x.leave = leave;
       m.addEventListener("mouseenter", enter);
       m.addEventListener("mouseleave", leave);
       m.addEventListener("focus", enter);
@@ -745,7 +1543,10 @@ import { prepareWithSegments, layoutWithLines } from "../vendor/pretext/layout.j
         }
       });
     }
+    showCardRef = showCard;
+    hideCardRef = hideCard;
     applyView();
+    requestPlacement();   // ocean names at tier 0, place names from 1.4×
 
     // ---- Pulse a marker when its place is opened from the grid/dialog (#4) ----
     window.addEventListener("atlas:highlight", (e) => {
@@ -1039,6 +1840,10 @@ import { prepareWithSegments, layoutWithLines } from "../vendor/pretext/layout.j
   // whenever the grid is filtered. Non-matching markers dim + de-emphasize so
   // the hero map responds to the search box, not just the grid below.
   function setMarkersVisible(ids) {
+    visibleIds = ids || null;
+    // A filtered-out dot must not keep its name in the sea, and the cells it
+    // gives up are then free for its neighbours — so re-route.
+    requestPlacement();
     for (const ref of markerRefs) {
       const on = ids == null || ids.has(ref.id);
       ref.el.classList.toggle("is-dimmed", !on);

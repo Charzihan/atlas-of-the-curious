@@ -889,35 +889,107 @@ dialog::backdrop {
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
 
+/* Place name routed into the sea beside its marker (js/map.js).
+
+   Geometry contract with js/map.js, which is what keeps a routed line and a
+   painted line on the same grid cells:
+     - the label lives in the marker layer, so it pans and zooms with the map,
+       and counter-scales by 1 / var(--zoom) to stay a constant size on screen,
+       exactly like .map-marker;
+     - it is pinned by its left edge when the text runs east and by its right
+       edge when it runs west (js/map.js sets one of `left` / `right` and the
+       matching data-dir), so the text always ends at the anchor cell;
+     - each line box is one grid row tall — --row-h is the row height in map px
+       and the counter-scale cancels the zoom back out;
+     - a flex column with fit-content items means each line's ink is exactly as
+       wide as its own routed width, never as wide as the widest line.
+   No box, no padding: a background rectangle would cover the union of the
+   lines and spill onto land. Legibility over the moving water comes from the
+   halo instead. */
 .map-label {
   position: absolute;
+  display: none;
+  flex-direction: column;
+  align-items: flex-start;
   font: var(--font-map-label);
   line-height: var(--lh-map-label);
   letter-spacing: var(--ls-map-label);
   text-transform: uppercase;
   color: var(--ink);
-  background: rgba(10, 15, 32, 0.85);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  padding: 2px 6px;
   cursor: pointer;
   white-space: nowrap;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transform: scale(calc(1 / var(--zoom, 1)));
+  transform-origin: 0 0;
   z-index: 3;
+  animation: label-in 0.3s ease backwards;
 }
 
-.map-label-line { display: block; }
+.map-label.is-placed { display: flex; }
+.map-label[data-dir="left"] { align-items: flex-end; transform-origin: 100% 0; }
 
-.map-label:hover, .map-label.is-hot {
-  border-color: var(--gold);
-  box-shadow: 0 0 10px rgba(0, 0, 0, 0.45);
-  z-index: 7;
+.map-label-line {
+  display: block;
+  line-height: calc(var(--row-h, 16px) * var(--zoom, 1));
+  text-shadow:
+    0 0 3px rgba(6, 10, 24, 0.95),
+    0 0 7px rgba(6, 10, 24, 0.8),
+    0 1px 0 rgba(6, 10, 24, 0.9);
+  transition: color 0.15s ease;
 }
 
-/* Hover card: place details that pop up beside a marker. */
+/* The tagline lines that join the name from 2.4× — same routing, quieter. */
+.map-label-tag {
+  font: var(--font-hover-card);
+  line-height: calc(var(--row-h, 16px) * var(--zoom, 1));
+  letter-spacing: var(--ls-hover-card);
+  text-transform: none;
+  color: var(--ink-dim);
+}
+
+.map-label:hover .map-label-line,
+.map-label.is-hot .map-label-line { color: var(--gold); }
+
+@keyframes label-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* Ocean and sea names in spaced capitals. Decorative and inert: the marker
+   labels and the hover card carry the information, so these never take a
+   pointer and never reach the accessibility tree. js/map.js writes the
+   letter-spacing (it widens with the zoom) and the position. */
+.map-ocean-label {
+  position: absolute;
+  display: none;
+  font: var(--font-ocean-label);
+  line-height: calc(var(--row-h, 16px) * var(--zoom, 1));
+  letter-spacing: var(--ls-ocean-label);
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: rgba(174, 214, 246, 0.62);
+  text-shadow: 0 0 6px rgba(6, 10, 24, 0.85);
+  transform: scale(calc(1 / var(--zoom, 1)));
+  transform-origin: 0 0;
+  pointer-events: none;
+  z-index: 2;
+  animation: label-in 0.4s ease backwards;
+}
+
+.map-ocean-label.is-placed { display: block; }
+
+@media (prefers-reduced-motion: reduce) {
+  .map-label, .map-ocean-label { animation: none; }
+  .map-label-line { transition: none; }
+}
+
+/* Hover card: place details that pop up beside a marker. Its width is written
+   by js/map.js from the measured text (flag `hoverFit`); the declared width is
+   only the fallback for a card JS has not sized, and the cap both agree on is
+   the max-width below. */
 .map-card {
   position: absolute;
   width: 252px;
+  max-width: 252px;
   background: rgba(9, 13, 28, 0.94);
   backdrop-filter: blur(6px);
   border: 1px solid var(--line);
@@ -929,6 +1001,13 @@ dialog::backdrop {
   pointer-events: none;
   transition: opacity 0.18s ease, transform 0.18s ease;
   font-family: Verdana, Geneva, sans-serif;
+  /* .map-stage is `white-space: nowrap` (the character grid must not reflow)
+     and the card inherits it, so a long name or location line used to run
+     straight out of the box — "Marble Caves (Grottoes of General Carrera)" is
+     336px of Georgia on one line. Let the card wrap, which is also what the
+     measurements above it assume. */
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 
 .map-card.is-visible { opacity: 1; pointer-events: auto; }
@@ -1065,4 +1144,9 @@ dialog::backdrop {
   .atlas-sub { display: none; }
   .atlas-hint { font-size: 0.55rem; opacity: 0.85; }
   .map-readout { font-size: 0.6rem; }
+
+  /* No labels on a phone: the 96×25 grid has no room to route a name into,
+     and the hover card already carries it. js/map.js skips the placement
+     entirely below 640px; this is the belt to that pair of braces. */
+  .map-label, .map-ocean-label { display: none !important; }
 }

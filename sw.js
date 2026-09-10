@@ -17,6 +17,7 @@ const CORE = [
   "/js/data.js",
   "/js/landmap.js",
   "/js/text.js",
+  "/js/text-route.js",
   "/js/app.js",
   "/js/map.js",
   "/js/place.js",

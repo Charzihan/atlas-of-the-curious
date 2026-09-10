@@ -53,7 +53,13 @@ dataset check, so deploying never requires a browser.
 
 `pnpm smoke` loads `index.html` at 1280x800 and 390x844, waits for the text
 metrics and the map, and fails on any console error or uncaught page error.
-Run it after any change to the layout, the fonts or the map.
+It also drives the map through `window.ATLAS_MAP_DEBUG` and checks that at
+1.5x and 2.5x no label cell overlaps land, another place label or an ocean
+name (verified twice: from the placement records and from the painted DOM
+boxes mapped back onto the grid), that none of the 40 hover-card taglines ends
+on a one-word last line, that a scripted zoom from 1x to 2.5x stays cheap, and
+that the phone viewport renders no labels at all. Run it after any change to
+the layout, the fonts or the map.
 
 ## Features
 
@@ -65,8 +71,29 @@ Run it after any change to the layout, the fonts or the map.
   word-wrapped by pretext (measured with the browser's own font engine, no
   DOM reflow). Hover a marker for a live field readout; click to open the
   detail dialog. The corresponding grid card lights up on hover.
-- **Pan & zoom** the map (buttons, wheel, or drag); markers stay a constant
-  on-screen size so you can zoom into the glyph detail.
+- **Coastline-routed place labels**: each name is poured into the *free water
+  cells* beside its dot. Eight anchor directions are tried at growing offsets;
+  for each one the free run of sea is read row by row off the land grid and fed
+  to pretext's variable-width router (`layoutNextLineRange`, the routine its
+  dynamic-layout demo uses to flow text around a floated image), so a label
+  hugs the coast instead of crossing it. Candidates are scored on line count,
+  distance from the dot and collisions; a name that cannot be fitted anywhere
+  nearby is simply not drawn. Nothing ever overlaps land, another label or an
+  ocean name — `pnpm smoke` asserts exactly that.
+- **Zoom-level typography**: no labels below 1.4x, the name from 1.4x, and the
+  name plus its tagline from 2.4x. Each string is prepared once; a zoom change
+  re-runs only the routing, debounced to at most one placement per frame.
+- **Ocean names in spaced capitals**: oceans and seas set in tracked uppercase,
+  with the tracking opening from 0.18em to 0.3em as you zoom in. They claim
+  their cells before the place names are routed, so the names flow around them.
+- **Pan & zoom** the map (buttons, wheel, or drag); markers and labels stay a
+  constant on-screen size so you can zoom into the glyph detail — which is
+  what buys the higher zoom tiers the room to show more text.
+- **A hover card that hugs its text**: the card's width is measured from its
+  own content (the shrink-wrapped tagline, the name, the location, the coords)
+  rather than fixed in CSS, and the card refuses to leave a one-word last line
+  — it re-wraps the tagline until the last line has company. The measured
+  width is what decides which side of the marker the card opens on.
 - **Locate me**: drop a "you are here" marker from your GPS position and label
   the nearest wonder with its distance, then sort the list by distance.
 - **Live search** across names, countries, regions, full story text, and the
@@ -125,9 +152,34 @@ re-measures the first five cards after the first render and warns in the console
 if pretext and the browser disagree by more than one line height.
 
 **Feature flags.** `window.ATLAS_FLAGS` carries the defaults from `js/text.js`;
-`?flags=a,b` turns features on and `?noflags=a,b` turns them off. `metrics` is
-the flag for the text-metrics module itself — with `?noflags=metrics` the page
-still works and the map falls back to its own wrapping.
+`?flags=a,b` turns features on and `?noflags=a,b` turns them off. Every flag is
+on unless it is explicitly turned off, so a phase can be bisected in the
+browser without a rebuild:
+
+| flag | owner | off means |
+| --- | --- | --- |
+| `metrics` | `js/text.js` | no `window.ATLAS_TEXT`; the map falls back to its own wrapping |
+| `labels` | `js/map.js` | no place-name labels on the map |
+| `oceanLabels` | `js/map.js` | no ocean or sea names |
+| `hoverFit` | `js/map.js` | the hover card stays at its maximum width instead of shrink-wrapping |
+
+For example `?noflags=labels,oceanLabels` gives the pre-Phase-1 map, which is
+also what `pnpm smoke` loads to get a frame-timing baseline.
+
+**Routing text through a ragged column.** `js/text-route.js` is the piece of
+the label engine worth reusing: given a pretext `prepareWithSegments()` handle
+and one available width per row, it lays the text out a row at a time and
+reports whether the whole string survived (a candidate that would have to break
+a word mid-word is rejected rather than drawn). It imports the vendored layout
+kernel and nothing else — no `document`, no `window` — so it can move into a
+Web Worker unchanged.
+
+**Map debugging.** Served from `localhost` (or with `?debug=map`), every
+placement is followed by an assertion pass that walks each rendered label's
+cells against the land mask and warns in the console on any overlap. The same
+entry points are on `window.ATLAS_MAP_DEBUG`: `setZoom(z)`, `place()`,
+`checkLabels()`, `checkPainted()`, `labels()`, `oceanLabels()`, `stats()` and
+`showCard(id)`.
 
 ## Security
 
@@ -189,7 +241,10 @@ js/text.js       — text metrics on top of pretext: the font role registry,
                     window.ATLAS_TEXT, feature flags, dev agreement check
 js/app.js        — search, filters, URL state, dialog, routing, daily pick,
                     geolocation, distance sort, service-worker registration
+js/text-route.js — pure variable-width text routing (worker-ready): pretext
+                    handle + per-row widths -> the lines that fit
 js/map.js        — the Text Atlas (character-grid map, uses pretext), pan/zoom,
+                    coastline-routed labels, ocean names, hover card,
                     locate-me marker, off-screen pause
 js/place.js      — behaviour for the generated per-place share pages
 sw.js            — service worker (offline cache)
