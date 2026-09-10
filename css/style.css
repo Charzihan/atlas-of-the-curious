@@ -39,6 +39,25 @@
   --lh-card-tagline: 1.55;
   --ls-card-tagline: 0px;
 
+  /* Grid card location line — .card-loc.
+     Rendered uppercase: measure the uppercased string, not the raw text. */
+  --font-card-loc: normal 0.72rem var(--font-sans);
+  --lh-card-loc: 1.55;
+  --ls-card-loc: 0.08em;
+
+  /* Grid card "read the field note" link — .card-more */
+  --font-card-link: normal 0.78rem var(--font-sans);
+  --lh-card-link: 1.55;
+  --ls-card-link: 0px;
+
+  /* Hero headline — .hero h1. The declared size is the ceiling of the fitting
+     search; js/app.js writes the chosen size into --hero-size and the matching
+     shrink-wrapped box into --hero-width, so the headline lands on exactly two
+     whole-word lines at every viewport. */
+  --font-hero-title: normal 3.2rem var(--font-serif);
+  --lh-hero-title: 1.12;
+  --ls-hero-title: 0px;
+
   /* Long-form body copy — .dialog-story */
   --font-story: normal 1rem var(--font-serif);
   --lh-story: 1.55;
@@ -151,9 +170,14 @@ body {
 }
 
 .hero h1 {
-  font-size: clamp(1.9rem, 4.5vw, 3rem);
-  line-height: 1.12; margin: 0 0 14px; font-weight: normal;
-  max-width: 18ch;
+  font: var(--font-hero-title);
+  /* --hero-size / --hero-width are written by the headline fitter in
+     js/app.js; the fallbacks are what a no-JS visitor gets. */
+  font-size: var(--hero-size, clamp(1.9rem, 4.5vw, 3rem));
+  line-height: var(--lh-hero-title);
+  letter-spacing: var(--ls-hero-title);
+  margin: 0 0 14px; font-weight: normal;
+  max-width: var(--hero-width, 18ch);
 }
 
 .hero-lede { color: var(--ink-dim); max-width: 60ch; margin: 0 0 26px; }
@@ -254,8 +278,10 @@ body {
 
 /* ---------- Grid & cards (JS masonry, chenglou.me/pretext style) ----------
    #grid is a positioning context; app.js absolutely positions each card
-   (shortest-column placement) and sets the container height. Cards are
-   pooled, so filter/sort changes animate left/top instead of reflowing. */
+   (shortest-column placement) and sets the container height. Card heights are
+   predicted by pretext before anything is written, so left/top land in one
+   pass and the movement itself is a FLIP transform (Web Animations), never a
+   transition on left/top — that would be a second layout per frame. */
 .grid {
   position: relative;
   padding: 14px 0 48px;
@@ -265,6 +291,16 @@ body {
 
 /* No-animation first layout (also used when the grid is rebuilt cold). */
 .grid.masonry-no-anim .card { transition: none !important; }
+
+/* Off-screen probe: the one card whose chrome (padding, border, symbol block,
+   link line, expansion gaps) is read from computed style at boot. Everything
+   afterwards is arithmetic. */
+.card.card-probe {
+  visibility: hidden;
+  left: -10000px; top: 0;
+  pointer-events: none;
+  opacity: 1; transform: none; transition: none;
+}
 
 .card {
   --card-accent: var(--gold);
@@ -277,16 +313,22 @@ body {
   opacity: 0;
   transform: translateY(14px);
   transition:
-    opacity 0.5s ease,
-    transform 0.5s ease,
-    left 0.45s cubic-bezier(0.22, 0.7, 0.3, 1),
-    top 0.45s cubic-bezier(0.22, 0.7, 0.3, 1),
+    opacity 0.42s ease,
+    transform 0.18s ease,
     box-shadow 0.18s ease,
     border-color 0.18s ease;
-  will-change: left, top;
+  will-change: transform;
 }
 
 .card.is-in { opacity: 1; transform: none; }
+
+/* Filtered out: fades where it stands, then app.js detaches it. */
+.card.is-leaving { opacity: 0; pointer-events: none; z-index: 0; }
+
+/* Expandable cards are real buttons for the keyboard (role/tabindex are set
+   by app.js only on the viewports where the in-place expansion is offered). */
+.card[role="button"] { cursor: pointer; }
+.card[role="button"]:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
 
 .card::before {
   content: "";
@@ -314,14 +356,19 @@ body {
 .card h3 {
   margin: 10px 0 2px;
   font: var(--font-card-name);
+  /* A long name steps down a notch (or two) so it still fits on one line;
+     app.js writes the chosen size here and predicts the height at that size. */
+  font-size: var(--name-size, 1.15rem);
   line-height: var(--lh-card-name);
   letter-spacing: var(--ls-card-name);
 }
 
 .card-loc {
-  font-family: Verdana, Geneva, sans-serif;
-  font-size: 0.72rem; color: var(--ink-dim);
-  text-transform: uppercase; letter-spacing: 0.08em;
+  font: var(--font-card-loc);
+  line-height: var(--lh-card-loc);
+  letter-spacing: var(--ls-card-loc);
+  color: var(--ink-dim);
+  text-transform: uppercase;
   margin: 0 0 10px;
 }
 
@@ -337,10 +384,52 @@ body {
 .card-more {
   display: inline-block; margin-top: 14px;
   color: var(--gold); text-decoration: none;
-  font-family: Verdana, Geneva, sans-serif; font-size: 0.78rem;
+  font: var(--font-card-link);
+  line-height: var(--lh-card-link);
+  letter-spacing: var(--ls-card-link);
 }
 
 .card-more:hover, .card-more:focus-visible { text-decoration: underline; }
+
+/* ---- In-place expansion (the accordion technique, inside the masonry) ----
+   Created once per card and kept `hidden` while collapsed, so a collapsed card
+   costs exactly what it did before. The expanded height is predicted the same
+   way the collapsed one is; the card's own height and its neighbours' slots
+   are written in the same frame. */
+.card-expand {
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.card-story {
+  margin: 0 0 12px;
+  font: var(--font-story);
+  line-height: var(--lh-story);
+  letter-spacing: var(--ls-story);
+  color: var(--ink);
+}
+
+.card-note {
+  border-left: 2px solid var(--card-accent);
+  padding-left: 12px;
+  margin: 0;
+}
+
+.card-note-label {
+  display: block; margin-bottom: 4px;
+  font-family: Verdana, Geneva, sans-serif;
+  font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.16em;
+  color: var(--gold);
+}
+
+.card-note p {
+  margin: 0;
+  font: var(--font-story);
+  line-height: var(--lh-story);
+  letter-spacing: var(--ls-story);
+  color: var(--ink-dim);
+}
 
 .empty {
   text-align: center; color: var(--ink-dim);

@@ -112,6 +112,60 @@
     }
   }
 
+  // --- Text metrics, flags, motion, viewport ----------------------------
+  // js/text.js is a module that runs before this classic script, so its
+  // instance is already published. Everything below degrades to the old
+  // measured path when it is missing, or when a flag turns it off.
+  var T = window.ATLAS_TEXT || null;
+  var FLAGS = window.ATLAS_FLAGS || {};
+  function flag(name) { return FLAGS[name] !== false; }
+
+  var motionQ = window.matchMedia
+    ? window.matchMedia("(prefers-reduced-motion: reduce)") : null;
+  function reducedMotion() { return !!(motionQ && motionQ.matches); }
+
+  // The predicted-vs-rendered agreement check is development-only.
+  var DEBUG_METRICS = (function () {
+    var h = location.hostname;
+    if (h === "localhost" || h === "127.0.0.1" || h === "[::1]" || h === "::1") return true;
+    try { return new URLSearchParams(location.search).get("debug") === "metrics"; }
+    catch (e) { return false; }
+  })();
+
+  var GLIDE_MS = 420;                        // filter reflow / expansion
+  var ENTER_MS = 320;                        // a card rising into a new slot
+  var LEAVE_MS = 260;                        // a filtered-out card fading
+  var GLIDE_EASE = "cubic-bezier(0.22, 0.7, 0.3, 1)";
+  var EXPAND_MIN_WIDTH = 900;                // narrower than this: use the modal
+  var LINK_TEXT = "Read the field note →";   // exactly what buildCard() writes
+
+  function r2(n) { return Math.round(n * 100) / 100; }
+  function pxOf(v) { var n = parseFloat(v); return isFinite(n) ? n : 0; }
+  function locTextFor(p) { return p.country + " · " + p.region; }
+
+  // Everything layoutMasonry() needs to know about the viewport. Refreshed at
+  // boot and on resize — never inside a layout pass, which does writes only.
+  var viewport = { width: 0, gridWidth: 0 };
+  function readViewport() {
+    viewport.width = document.documentElement.clientWidth || window.innerWidth || 0;
+    viewport.gridWidth = grid.clientWidth || 0;
+  }
+  function canExpand() {
+    return flag("expandInPlace") && viewport.width >= EXPAND_MIN_WIDTH;
+  }
+
+  // Register the strings this file renders that js/text.js does not know
+  // about, so each is prepared exactly once. The uppercasing matches the CSS
+  // `text-transform: uppercase` on .card-loc.
+  function registerCardText() {
+    if (!T) return;
+    try {
+      DATA.places.forEach(function (p) {
+        T.register("card-loc", p.id, locTextFor(p).toUpperCase());
+      });
+    } catch (e) { T = null; } // a role the CSS no longer defines: fall back
+  }
+
   // --- Cards (pooled so filter changes can animate, not recreate) --------
   var cardPool = new Map();
   var masonryIO = null;
@@ -128,15 +182,12 @@
     }, { rootMargin: "0px 0px -6% 0px", threshold: 0.05 });
   }
 
-  function cardFor(p, accent) {
-    var existing = cardPool.get(p.id);
-    if (existing) {
-      existing.style.setProperty("--card-accent", accent);
-      return existing;
-    }
+  // One card's DOM, built once. The expansion block is created here too (and
+  // kept `hidden` while collapsed), so opening a card is an attribute plus a
+  // height write rather than a DOM build.
+  function buildCard(p) {
     var card = document.createElement("article");
     card.className = "card";
-    card.style.setProperty("--card-accent", accent);
     card.setAttribute("data-place-id", p.id);
 
     var sym = document.createElement("span");
@@ -150,26 +201,138 @@
 
     var loc = document.createElement("p");
     loc.className = "card-loc";
-    loc.textContent = p.country + " · " + p.region;
+    loc.textContent = locTextFor(p);
 
     var tag = document.createElement("p");
     tag.className = "card-tag";
     tag.textContent = p.tagline;
 
+    var expand = document.createElement("div");
+    expand.className = "card-expand";
+    expand.hidden = true;
+
+    var story = document.createElement("p");
+    story.className = "card-story";
+    story.textContent = p.story;
+
+    var note = document.createElement("div");
+    note.className = "card-note";
+    var noteLabel = document.createElement("span");
+    noteLabel.className = "card-note-label";
+    noteLabel.textContent = "Field note";
+    var noteP = document.createElement("p");
+    noteP.textContent = p.fact;
+    note.appendChild(noteLabel);
+    note.appendChild(noteP);
+    expand.appendChild(story);
+    expand.appendChild(note);
+
     var link = document.createElement("a");
     link.className = "card-more";
     link.href = hashForPlace(p.id);
-    link.textContent = "Read the field note →";
+    link.textContent = LINK_TEXT;
 
     card.appendChild(sym);
     card.appendChild(h);
     card.appendChild(loc);
     card.appendChild(tag);
+    card.appendChild(expand);
     card.appendChild(link);
+
+    return {
+      card: card, sym: sym, h3: h, loc: loc, tag: tag,
+      expand: expand, story: story, note: note, noteLabel: noteLabel, link: link
+    };
+  }
+
+  function cardFor(p, accent) {
+    var existing = cardPool.get(p.id);
+    if (existing) {
+      existing.style.setProperty("--card-accent", accent);
+      return existing;
+    }
+    var parts = buildCard(p);
+    var card = parts.card;
+    card.style.setProperty("--card-accent", accent);
+    card._atlas = parts;
     cardPool.set(p.id, card);
     if (masonryIO) masonryIO.observe(card);
     else card.classList.add("is-in");
     return card;
+  }
+
+  // --- The card's chrome, read exactly once -----------------------------
+  // Everything that is not text: paddings, borders, the symbol block, the
+  // margins between the rows, the expansion's rule and gaps. One probe card,
+  // one pass of computed style — then never a layout read again.
+  var CHROME = null;
+
+  function lineBoxOf(cs, el) {
+    var lh = pxOf(cs.lineHeight);
+    return lh > 0 ? lh : el.offsetHeight;
+  }
+
+  function readChrome() {
+    if (!T || !DATA.places.length) return null;
+    var parts = buildCard(DATA.places[0]);
+    var el = parts.card;
+    el.classList.add("card-probe", "is-in");
+    el.style.width = "320px";
+    parts.expand.hidden = false; // the expansion chrome is measured too
+    grid.appendChild(el);
+
+    var c;
+    try {
+      var gridCS = getComputedStyle(grid);
+      var cardCS = getComputedStyle(el);
+      var symCS = getComputedStyle(parts.sym);
+      var h3CS = getComputedStyle(parts.h3);
+      var locCS = getComputedStyle(parts.loc);
+      var tagCS = getComputedStyle(parts.tag);
+      var linkCS = getComputedStyle(parts.link);
+      var expCS = getComputedStyle(parts.expand);
+      var storyCS = getComputedStyle(parts.story);
+      var noteCS = getComputedStyle(parts.note);
+      var labelCS = getComputedStyle(parts.noteLabel);
+
+      c = {
+        padX: pxOf(cardCS.paddingLeft) + pxOf(cardCS.paddingRight) +
+              pxOf(cardCS.borderLeftWidth) + pxOf(cardCS.borderRightWidth),
+        padY: pxOf(cardCS.paddingTop) + pxOf(cardCS.paddingBottom) +
+              pxOf(cardCS.borderTopWidth) + pxOf(cardCS.borderBottomWidth),
+        symbol: lineBoxOf(symCS, parts.sym) +
+                pxOf(symCS.marginTop) + pxOf(symCS.marginBottom),
+        nameMargin: pxOf(h3CS.marginTop) + pxOf(h3CS.marginBottom),
+        locMargin: pxOf(locCS.marginTop) + pxOf(locCS.marginBottom),
+        tagMargin: pxOf(tagCS.marginTop) + pxOf(tagCS.marginBottom),
+        linkMargin: pxOf(linkCS.marginTop) + pxOf(linkCS.marginBottom),
+        gridPadY: pxOf(gridCS.paddingTop) + pxOf(gridCS.paddingBottom),
+        expandBox: pxOf(expCS.marginTop) + pxOf(expCS.marginBottom) +
+                   pxOf(expCS.paddingTop) + pxOf(expCS.paddingBottom) +
+                   pxOf(expCS.borderTopWidth) + pxOf(expCS.borderBottomWidth),
+        storyMargin: pxOf(storyCS.marginTop) + pxOf(storyCS.marginBottom),
+        noteBox: pxOf(noteCS.marginTop) + pxOf(noteCS.marginBottom) +
+                 pxOf(noteCS.paddingTop) + pxOf(noteCS.paddingBottom) +
+                 pxOf(noteCS.borderTopWidth) + pxOf(noteCS.borderBottomWidth),
+        notePadX: pxOf(noteCS.paddingLeft) + pxOf(noteCS.paddingRight) +
+                  pxOf(noteCS.borderLeftWidth) + pxOf(noteCS.borderRightWidth),
+        noteLabel: lineBoxOf(labelCS, parts.noteLabel) +
+                   pxOf(labelCS.marginTop) + pxOf(labelCS.marginBottom)
+      };
+      // The name ladder: 1.15rem → 1.05rem → 0.95rem, expressed as fractions
+      // of the role's own declared size so the CSS stays the source of truth.
+      var basePx = T.fontFor("card-name").fontPx || 0;
+      if (!basePx) throw new Error("card-name has no px size");
+      c.nameSizes = [basePx, basePx * (1.05 / 1.15), basePx * (0.95 / 1.15)];
+    } catch (e) {
+      c = null;
+    }
+    grid.removeChild(el);
+    if (!c) return null;
+    c.fixed = c.padY + c.symbol + c.nameMargin + c.locMargin +
+              c.tagMargin + c.linkMargin;
+    c.expandFixed = c.expandBox + c.storyMargin + c.noteBox + c.noteLabel;
+    return c;
   }
 
   // --- Masonry layout (shortest column, chenglou.me/pretext style) --------
@@ -183,9 +346,314 @@
     return Math.max(2, n);
   }
 
-  function layoutMasonry() {
-    var places = visiblePlaces();
-    var w = grid.clientWidth;
+  // Layout bookkeeping. `slots` is the single source of truth for where every
+  // visible card is and how tall it is — the FLIP offsets and the scroll
+  // anchor are computed from it, never from the DOM.
+  var slots = new Map();     // id -> { left, top, height, ... }
+  var attached = new Map();  // id -> el, cards currently owned by the layout
+  var leaving = new Map();   // id -> timeout, cards fading out before removal
+  var expandedId = null;
+  var hoverId = null;        // the last card the pointer was over
+  var writeCounts = new Map();
+  var lastLayout = null;
+  var layoutRuns = 0;
+
+  // The largest size on the ladder whose one-line width still fits the column.
+  function fitNameSize(p, textW) {
+    var sizes = CHROME.nameSizes;
+    for (var i = 0; i < sizes.length; i++) {
+      if (T.naturalWidthOfText("card-name", p.name, sizes[i]) <= textW) return sizes[i];
+    }
+    return sizes[sizes.length - 1]; // the floor: it takes two lines there
+  }
+
+  // Shrink-wrap a text block to the narrowest box that keeps the line count it
+  // was measured at. Two things fall out of that: the last line carries its
+  // share of the words (balanced text), and the browser's own line breaking is
+  // no longer being asked a borderline question — a container within a
+  // fraction of a pixel of the text's natural width is exactly where pretext
+  // and Chrome's sub-pixel glyph rounding can disagree by a whole line. One
+  // px of slack, capped at the column, removes that class of drift.
+  function wrapWidth(tight, textW) {
+    return Math.min(textW, Math.ceil(tight) + 1);
+  }
+
+  // A card's height, as arithmetic. Nothing here touches the DOM.
+  function predictCard(p, textW, expanded) {
+    var fit = flag("fitText");
+    var nameSize = fit ? fitNameSize(p, textW) : CHROME.nameSizes[0];
+    var h = CHROME.fixed +
+      T.heightOfAt("card-name", p.id, textW, nameSize) +
+      T.heightOf("card-loc", p.id, textW) +
+      T.heightOf("card-tagline", p.id, textW) +
+      T.heightOfText("card-link", LINK_TEXT, textW);
+    var nameWidth = 0, locWidth = 0, tagWidth = 0;
+    if (fit) {
+      nameWidth = wrapWidth(
+        T.tightWidthOfTextAt("card-name", p.name, textW, nameSize), textW);
+      locWidth = wrapWidth(T.tightWidth("card-loc", p.id, textW), textW);
+      tagWidth = wrapWidth(T.tightWidth("card-tagline", p.id, textW), textW);
+    }
+    var extra = expanded
+      ? CHROME.expandFixed +
+        T.heightOf("story", p.id, textW) +
+        T.heightOfText("story", p.fact, textW - CHROME.notePadX)
+      : 0;
+    return {
+      height: h + extra, nameSize: nameSize,
+      nameWidth: nameWidth, locWidth: locWidth, tagWidth: tagWidth
+    };
+  }
+
+  // Which card should keep its on-screen position through a reflow: the one
+  // holding keyboard focus, else the last one the pointer was over.
+  function anchorId() {
+    if (!flag("scrollAnchor")) return null;
+    var active = document.activeElement;
+    if (active && active !== document.body && grid.contains(active) && active.closest) {
+      var focused = active.closest(".card[data-place-id]");
+      if (focused) return focused.getAttribute("data-place-id");
+    }
+    return hoverId;
+  }
+
+  function countWrite(id) {
+    writeCounts.set(id, (writeCounts.get(id) || 0) + 1);
+  }
+
+  function setWrapWidth(el, width) {
+    if (width) el.style.setProperty("max-width", r2(width) + "px");
+    else el.style.removeProperty("max-width");
+  }
+
+  function scrollByInstant(dy) {
+    // html { scroll-behavior: smooth } would animate this; the whole point is
+    // that the anchored card never appears to move at all.
+    try { window.scrollBy({ top: dy, left: 0, behavior: "instant" }); }
+    catch (e) { window.scrollBy(0, dy); }
+  }
+
+  function stopLeaving(id, el) {
+    var t = leaving.get(id);
+    if (t == null) return;
+    clearTimeout(t);
+    leaving.delete(id);
+    el.classList.remove("is-leaving");
+  }
+
+  function detachCard(id, el, animate) {
+    attached.delete(id);
+    if (!animate) {
+      if (el.parentNode === grid) grid.removeChild(el);
+      return;
+    }
+    el.classList.add("is-leaving"); // CSS transitions the opacity down
+    leaving.set(id, setTimeout(function () {
+      leaving.delete(id);
+      el.classList.remove("is-leaving");
+      if (el.parentNode === grid) grid.removeChild(el);
+    }, LEAVE_MS + 60));
+  }
+
+  // WRITES ONLY. Every number comes from pretext plus the boot-time chrome
+  // probe; there is no offsetHeight / getBoundingClientRect / clientWidth in
+  // this function or in anything it calls.
+  function layoutMasonry(placesArg, opts) {
+    var places = placesArg || visiblePlaces();
+    if (!(T && CHROME && flag("predictiveGrid"))) {
+      layoutMeasured(places);
+      return;
+    }
+    var w = viewport.gridWidth;
+    if (!w) return;
+
+    if (expandedId && !canExpand()) expandedId = null;
+    if (expandedId) {
+      var stillThere = false;
+      for (var k = 0; k < places.length; k++) {
+        if (places[k].id === expandedId) { stillThere = true; break; }
+      }
+      if (!stillThere) expandedId = null;
+    }
+
+    var n = colCountFor(w);
+    var colW = (w - GAP * (n - 1)) / n;
+    var textW = colW - CHROME.padX;
+    var colH = [];
+    for (var i = 0; i < n; i++) colH.push(0);
+
+    // 1. Decide everything, arithmetically.
+    var next = new Map();
+    places.forEach(function (p) {
+      var pred = predictCard(p, textW, p.id === expandedId);
+      var col = 0;
+      for (var j = 1; j < n; j++) if (colH[j] < colH[col]) col = j;
+      next.set(p.id, {
+        left: r2(col * (colW + GAP)),
+        top: r2(colH[col]),
+        height: pred.height,
+        nameSize: pred.nameSize,
+        nameWidth: pred.nameWidth,
+        locWidth: pred.locWidth,
+        tagWidth: pred.tagWidth,
+        textW: textW,
+        expanded: p.id === expandedId
+      });
+      colH[col] += pred.height + GAP;
+    });
+
+    // 2. How far the anchored card is about to move, so the page can be
+    //    scrolled by exactly that much in this same frame, before paint.
+    var first = !slots.size;
+    var scrollDelta = 0;
+    // A resize moves the whole page under the reader anyway (the hero and the
+    // map resize too), so grid-relative compensation would fight it.
+    if (!first && !(opts && opts.noAnchor)) {
+      var aid = anchorId();
+      var was = aid && slots.get(aid);
+      var will = aid && next.get(aid);
+      if (was && will) scrollDelta = will.top - was.top;
+    }
+
+    var animate = flag("flip") && !first && !reducedMotion() &&
+                  typeof Element.prototype.animate === "function" &&
+                  !grid.classList.contains("masonry-no-anim");
+    var moved = 0, positionWrites = 0;
+
+    // 3. Write. One pass; at most one position write per card.
+    var prevNode = null;
+    places.forEach(function (p) {
+      var cat = categoryById.get(p.category);
+      var el = cardFor(p, cat ? cat.accent : "#e8b45a");
+      var slot = next.get(p.id);
+      var old = slots.get(p.id);
+      var isNew = !attached.has(p.id);
+
+      stopLeaving(p.id, el);
+      if (el.parentNode !== grid) grid.appendChild(el);
+      attached.set(p.id, el);
+
+      // Keep DOM order == list order (tree reads only; no layout is flushed).
+      var want = prevNode ? prevNode.nextSibling : grid.firstChild;
+      if (el !== want) grid.insertBefore(el, want);
+      prevNode = el;
+
+      el.style.width = r2(colW) + "px";
+      if (slot.nameSize) el.style.setProperty("--name-size", r2(slot.nameSize) + "px");
+      setWrapWidth(el._atlas.h3, slot.nameWidth);
+      setWrapWidth(el._atlas.loc, slot.locWidth);
+      setWrapWidth(el._atlas.tag, slot.tagWidth);
+
+      if (!old || old.left !== slot.left || old.top !== slot.top) {
+        el.style.left = slot.left + "px";
+        el.style.top = slot.top + "px";
+        positionWrites++;
+        countWrite(p.id);
+      }
+
+      // Expansion: reveal (or hide) the story and field note, and animate the
+      // card's own height in the same frame the neighbours are re-slotted.
+      var wasExpanded = old ? old.expanded : false;
+      var expandEl = el._atlas.expand;
+      var heightAnim = null;
+      if (slot.expanded) {
+        if (expandEl.hidden) expandEl.hidden = false;
+        el.style.height = r2(slot.height) + "px";
+      } else {
+        el.style.removeProperty("height");
+      }
+      if (animate && old && slot.expanded !== wasExpanded) {
+        // Re-toggling mid-flight would otherwise leave two height animations
+        // racing, and the loser's finish handler hiding a block that is open.
+        if (el._atlasHeightAnim) el._atlasHeightAnim.cancel();
+        heightAnim = el.animate(
+          [{ height: r2(old.height) + "px" }, { height: r2(slot.height) + "px" }],
+          { duration: GLIDE_MS, easing: GLIDE_EASE }
+        );
+        el._atlasHeightAnim = heightAnim;
+        if (slot.expanded) {
+          expandEl.animate([{ opacity: 0 }, { opacity: 1 }],
+            { duration: 260, delay: 140, easing: "ease-out", fill: "backwards" });
+        } else {
+          var settle = function () {
+            if (expandedId !== p.id) expandEl.hidden = true;
+          };
+          heightAnim.onfinish = settle;
+          heightAnim.oncancel = settle;
+        }
+      } else if (!slot.expanded && !expandEl.hidden) {
+        expandEl.hidden = true;
+      }
+
+      // FLIP, in viewport space: the offset also cancels the scroll we are
+      // about to apply, so nothing but the page itself appears to jump.
+      if (animate && old && !isNew) {
+        var dx = old.left - slot.left;
+        var dy = old.top - slot.top + scrollDelta;
+        if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
+          if (el._atlasGlide) el._atlasGlide.cancel(); // no stacked glides
+          el._atlasGlide = el.animate(
+            [{ transform: "translate(" + r2(dx) + "px, " + r2(dy) + "px)" },
+             { transform: "none" }],
+            { duration: GLIDE_MS, easing: GLIDE_EASE }
+          );
+          moved++;
+        }
+      } else if (animate && isNew && el.classList.contains("is-in")) {
+        el.animate(
+          [{ opacity: 0, transform: "translateY(12px)" }, { opacity: 1, transform: "none" }],
+          { duration: ENTER_MS, easing: GLIDE_EASE }
+        );
+      }
+
+      // Expandable cards are buttons for the keyboard, on the viewports that
+      // offer the in-place expansion at all.
+      if (canExpand()) {
+        if (el.getAttribute("role") !== "button") {
+          el.setAttribute("role", "button");
+          el.setAttribute("tabindex", "0");
+        }
+        var ariaNow = slot.expanded ? "true" : "false";
+        if (el.getAttribute("aria-expanded") !== ariaNow) {
+          el.setAttribute("aria-expanded", ariaNow);
+        }
+      } else if (el.hasAttribute("role")) {
+        el.removeAttribute("role");
+        el.removeAttribute("tabindex");
+        el.removeAttribute("aria-expanded");
+      }
+    });
+
+    // 4. Cards the filter dropped: they fade where they stand, then detach.
+    var gone = [];
+    attached.forEach(function (el, id) { if (!next.has(id)) gone.push(id); });
+    gone.forEach(function (id) { detachCard(id, attached.get(id), animate); });
+
+    // 5. Container height, then the scroll compensation — same frame, no paint
+    //    in between, so the anchored card never moves on screen.
+    var maxH = 0;
+    for (var m = 0; m < n; m++) if (colH[m] > maxH) maxH = colH[m];
+    var gridH = places.length ? Math.max(0, maxH - GAP) + CHROME.gridPadY : 0;
+    grid.style.height = r2(gridH) + "px";
+    if (scrollDelta) scrollByInstant(scrollDelta);
+
+    slots = next;
+    layoutRuns++;
+    lastLayout = {
+      columns: n, columnWidth: r2(colW), textWidth: r2(textW),
+      cards: places.length, positionWrites: positionWrites, moved: moved,
+      scrollDelta: r2(scrollDelta), animated: animate, expanded: expandedId
+    };
+    if (DEBUG_METRICS) scheduleAgreement();
+  }
+
+  // Fallback when pretext is unavailable (or ?noflags=predictiveGrid): the
+  // original measured layout, one offsetHeight per card.
+  function layoutMeasured(places) {
+    grid.textContent = "";
+    attached.clear();
+    slots.clear();
+    var w = viewport.gridWidth || grid.clientWidth;
     if (!w) return;
     if (!places.length) { grid.style.height = "0px"; return; }
     var n = colCountFor(w);
@@ -199,18 +667,159 @@
       var el = cardFor(p, cat ? cat.accent : "#e8b45a");
       el.style.width = colW + "px";
       grid.appendChild(el); // pooled: re-appending moves the node
+      attached.set(p.id, el);
       entries.push({ el: el, h: el.offsetHeight });
     });
     entries.forEach(function (e) {
       var col = 0;
-      for (var i = 1; i < n; i++) if (colH[i] < colH[col]) col = i;
+      for (var j = 1; j < n; j++) if (colH[j] < colH[col]) col = j;
       e.el.style.left = (col * (colW + GAP)) + "px";
       e.el.style.top = colH[col] + "px";
       colH[col] += e.h + GAP;
     });
     var maxH = 0;
-    for (var j = 0; j < n; j++) if (colH[j] > maxH) maxH = colH[j];
+    for (var k = 0; k < n; k++) if (colH[k] > maxH) maxH = colH[k];
     grid.style.height = Math.max(0, maxH - GAP) + "px";
+    layoutRuns++;
+    lastLayout = { columns: n, cards: places.length, measured: true };
+  }
+
+  // --- The fitted hero headline -----------------------------------------
+  // Search the size ladder for the largest size that keeps the headline inside
+  // its line budget, then shrink-wrap the box to exactly that many balanced,
+  // whole-word lines. Re-run (debounced) on resize.
+  var heroTitle = $("hero-title");
+  var heroText = heroTitle ? heroTitle.textContent : "";
+  var heroFit = null;
+
+  function fitHero() {
+    if (!heroTitle || !T || !flag("fitText")) return;
+    var vw = viewport.width || 1280;
+    var avail = Math.min(1080, vw) - 40; // .wrap: max-width 1080, padding 0 20
+    if (avail <= 0) return;
+    var maxLines = vw <= 640 ? 3 : 2;    // phones get a third line
+    var info;
+    try { info = T.fontAt("hero-title", null); }
+    catch (e) { return; }
+    var ceiling = Math.min(info.fontPx, Math.max(info.fontPx * 0.6, vw * 0.05));
+    var floor = info.fontPx * 0.45;
+    var chosen = floor, lines = 0;
+    for (var s = ceiling; s >= floor - 0.01; s -= 0.5) {
+      var lc = T.lineCountOfTextAt("hero-title", heroText, avail, s);
+      if (lc <= maxLines) { chosen = s; lines = lc; break; }
+    }
+    if (!lines) lines = T.lineCountOfTextAt("hero-title", heroText, avail, floor);
+    // Never leave a lonely single line: shrink the box until it breaks in two.
+    var target = Math.min(maxLines, Math.max(2, lines));
+    var boxWidth = Math.min(
+      avail,
+      Math.ceil(T.tightWidthOfTextAt("hero-title", heroText, avail, chosen, target)) + 1
+    );
+    heroTitle.style.setProperty("--hero-size", r2(chosen) + "px");
+    heroTitle.style.setProperty("--hero-width", boxWidth + "px");
+    heroFit = {
+      sizePx: r2(chosen),
+      lineHeight: r2(T.fontAt("hero-title", chosen).lineHeight),
+      lines: target, maxLines: maxLines, maxWidth: boxWidth, available: avail
+    };
+  }
+
+  // --- Expand a card in place -------------------------------------------
+  function toggleExpand(id) {
+    if (!canExpand() || !(T && CHROME && flag("predictiveGrid"))) return;
+    expandedId = (expandedId === id) ? null : id;
+    layoutMasonry();
+  }
+
+  // --- Development check: does the prediction match what was painted? ----
+  // Compares the predicted top/left/height of every laid-out card against the
+  // DOM, and asserts that the shrink-wrapped tagline still wraps to the same
+  // number of lines the height was computed from.
+  var agreementScheduled = false;
+  function scheduleAgreement() {
+    if (agreementScheduled) return;
+    agreementScheduled = true;
+    requestAnimationFrame(function () {
+      agreementScheduled = false;
+      var res = agreement();
+      if (res.warnings) {
+        console.warn("[atlas:grid] " + res.warnings +
+          " card(s) disagree with the prediction: " + JSON.stringify(res.mismatches));
+      }
+    });
+  }
+
+  function agreement() {
+    var out = {
+      checked: 0, warnings: 0, mismatches: [],
+      topTolerance: 1, heightTolerance: 0,
+      maxTopDelta: 0, maxLeftDelta: 0, maxHeightDelta: 0,
+      animating: 0, taglineLineMismatches: 0, expanded: expandedId,
+      predicted: !!(T && CHROME && flag("predictiveGrid")),
+      layouts: layoutRuns
+    };
+    if (!out.predicted) { out.reason = "measured fallback path"; return out; }
+    out.heightTolerance = r2(T.fontFor("card-tagline").lineHeight);
+    slots.forEach(function (slot, id) {
+      var el = cardPool.get(id);
+      if (!el || el.parentNode !== grid || el.classList.contains("is-leaving")) return;
+      out.checked++;
+      var top = el.offsetTop, left = el.offsetLeft, h = el.offsetHeight;
+      var dTop = Math.abs(top - slot.top);
+      var dLeft = Math.abs(left - slot.left);
+      var dH = Math.abs(h - slot.height);
+      // A card whose height is mid-animation (an expansion opening or closing)
+      // is between two predicted values by design. Its top and left are final
+      // — those are written outright — so only the height check waits.
+      var busy = el.getAnimations ? el.getAnimations().length > 0 : false;
+      if (busy) out.animating++;
+      var checkHeight = !slot.expanded && !busy;
+      if (dTop > out.maxTopDelta) out.maxTopDelta = r2(dTop);
+      if (dLeft > out.maxLeftDelta) out.maxLeftDelta = r2(dLeft);
+      // An expanded card is given its height explicitly, so comparing that back
+      // would be circular; its neighbours' tops still prove the arithmetic.
+      if (checkHeight && dH > out.maxHeightDelta) out.maxHeightDelta = r2(dH);
+
+      var what = null;
+      if (dTop > out.topTolerance) what = "top";
+      else if (dLeft > out.topTolerance) what = "left";
+      else if (checkHeight && dH > out.heightTolerance) what = "height";
+
+      // Shrink-wrapping must never change the line count the height was
+      // computed from — that is the whole contract of tightWidth().
+      var p = placesById.get(id);
+      if (p && slot.tagWidth) {
+        var pairs = [
+          ["card-tagline", p.tagline, slot.tagWidth],
+          ["card-loc", locTextFor(p).toUpperCase(), slot.locWidth]
+        ];
+        for (var q = 0; q < pairs.length; q++) {
+          var full = T.lineCountOfText(pairs[q][0], pairs[q][1], slot.textW);
+          var tight = T.lineCountOfText(pairs[q][0], pairs[q][1], pairs[q][2]);
+          if (full !== tight) {
+            out.taglineLineMismatches++;
+            if (!what) what = pairs[q][0] + "-lines";
+          }
+        }
+        var nameFull = T.lineCountOfTextAt("card-name", p.name, slot.textW, slot.nameSize);
+        var nameTight = T.lineCountOfTextAt("card-name", p.name, slot.nameWidth, slot.nameSize);
+        if (nameFull !== nameTight) {
+          out.taglineLineMismatches++;
+          if (!what) what = "card-name-lines";
+        }
+      }
+      if (what) {
+        out.warnings++;
+        out.mismatches.push({
+          id: id, what: what,
+          predictedTop: slot.top, actualTop: top,
+          predictedLeft: slot.left, actualLeft: left,
+          predictedHeight: r2(slot.height), actualHeight: h
+        });
+      }
+    });
+    window.ATLAS_GRID_AGREEMENT = out;
+    return out;
   }
 
   // Tell the map which places are visible so its dots dim to match the search.
@@ -226,7 +835,6 @@
   var firstLayout = true;
 
   function render() {
-    grid.textContent = ""; // detach pooled cards; layoutMasonry re-appends
     var places = visiblePlaces();
     placeCount.textContent = DATA.places.length + " wonders, " + DATA.categories.length + " regions of wonder";
     resultsStatus.textContent = places.length
@@ -238,14 +846,13 @@
     // Tell the map which places are currently visible so its dots dim to match.
     dispatchVisible(places);
 
+    if (firstLayout) grid.classList.add("masonry-no-anim");
+    layoutMasonry(places);
     if (firstLayout) {
-      grid.classList.add("masonry-no-anim");
       firstLayout = false;
-    }
-    layoutMasonry();
-    if (grid.classList.contains("masonry-no-anim")) {
-      void grid.offsetWidth; // flush, then re-enable transitions
-      grid.classList.remove("masonry-no-anim");
+      // Drop the no-animation guard on the next frame rather than flushing the
+      // style with a forced reflow (`void grid.offsetWidth`).
+      requestAnimationFrame(function () { grid.classList.remove("masonry-no-anim"); });
     }
   }
 
@@ -510,13 +1117,95 @@
 
   window.addEventListener("hashchange", route);
 
+  // --- Grid interaction: hover anchor + expand in place -------------------
+  // The pointer's last card is remembered (not cleared on mouseleave): a chip
+  // click or a keystroke happens with the pointer somewhere else entirely, and
+  // that card is still the one the reader was looking at. It only counts as an
+  // anchor while it is still in the filtered list.
+  grid.addEventListener("mouseover", function (e) {
+    var t = e.target;
+    if (!t || !t.closest) return;
+    var card = t.closest(".card[data-place-id]");
+    if (card && !card.classList.contains("is-leaving")) {
+      hoverId = card.getAttribute("data-place-id");
+    }
+  });
+
+  grid.addEventListener("click", function (e) {
+    var t = e.target;
+    if (!t || !t.closest) return;
+    if (t.closest("a")) return; // "Read the field note →" still opens the dialog
+    var card = t.closest(".card[data-place-id]");
+    if (!card || card.classList.contains("is-leaving")) return;
+    if (!canExpand()) return;   // phones (and deep links) keep the modal
+    toggleExpand(card.getAttribute("data-place-id"));
+  });
+
+  grid.addEventListener("keydown", function (e) {
+    if (e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar") return;
+    var t = e.target;
+    if (!t || !t.closest || t.tagName === "A") return;
+    var card = t.closest('.card[role="button"][data-place-id]');
+    if (!card) return;
+    e.preventDefault(); // Space must not scroll the page
+    toggleExpand(card.getAttribute("data-place-id"));
+  });
+
   // Re-layout the masonry when the viewport width changes (column count /
-  // column widths can change). Debounced; cheap on an idle page.
+  // column widths can change) and refit the headline. Debounced; the viewport
+  // is re-read here, never inside layoutMasonry().
   var resizeTimer = null;
   window.addEventListener("resize", function () {
     clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(function () { layoutMasonry(); }, 120);
+    resizeTimer = setTimeout(function () {
+      readViewport();
+      fitHero();
+      layoutMasonry(null, { noAnchor: true });
+    }, 120);
   });
+
+  // If pretext boots late (or is re-published), pick it up and switch to the
+  // predictive path instead of staying on the measured fallback.
+  window.addEventListener("atlas:text-ready", function (e) {
+    if (T || !(e.detail && e.detail.metrics)) return;
+    T = e.detail.metrics;
+    FLAGS = window.ATLAS_FLAGS || FLAGS;
+    registerCardText();
+    readViewport();
+    CHROME = readChrome();
+    fitHero();
+    slots = new Map();
+    render();
+  });
+
+  // Development / smoke-test surface. Everything here reads the layout's own
+  // bookkeeping; `agreement()` is the only part that touches the DOM.
+  window.ATLAS_GRID_DEBUG = {
+    agreement: agreement,
+    lastLayout: function () { return lastLayout; },
+    layouts: function () { return layoutRuns; },
+    chrome: function () { return CHROME; },
+    hero: function () { return heroFit; },
+    flags: function () { return FLAGS; },
+    slots: function () {
+      var out = {};
+      slots.forEach(function (s, id) { out[id] = s; });
+      return out;
+    },
+    // Position writes per card id, so "every card moved exactly once" is a
+    // countable claim rather than an impression.
+    writes: function () {
+      var out = {};
+      writeCounts.forEach(function (n, id) { out[id] = n; });
+      return out;
+    },
+    resetWrites: function () { writeCounts = new Map(); },
+    expandedId: function () { return expandedId; },
+    anchorId: anchorId,
+    setHover: function (id) { hoverId = id; },
+    toggleExpand: toggleExpand,
+    relayout: function () { layoutMasonry(); }
+  };
 
   // --- Init -----------------------------------------------------------------
   restoreStateFromUrl();
@@ -524,6 +1213,10 @@
   sortSelect.value = state.sort;
   if (state.sort === "distance" && !state.userLoc) sortSelect.value = "featured"; // no fix yet
   setupReveal();
+  registerCardText();
+  readViewport();
+  CHROME = readChrome();   // the one and only chrome measurement pass
+  fitHero();
   placeCount.textContent = DATA.places.length + " wonders across " + new Set(DATA.places.map(function (p) { return p.country; })).size + " countries";
   renderChips();
   renderDaily();

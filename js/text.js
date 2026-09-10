@@ -31,7 +31,8 @@ import {
   prepareWithSegments,
   layout,
   layoutWithLines,
-  measureLineStats
+  measureLineStats,
+  measureNaturalWidth
 } from "../vendor/pretext/layout.js";
 
 /* ------------------------------------------------------------------ *
@@ -42,14 +43,25 @@ import {
 // oldest ones are dropped. Text registered by id is pinned and never evicted.
 const TEXT_CACHE_MAX = 512;
 
+// The px size inside an already-resolved canvas font string. Splitting it out
+// once lets a role be re-measured at an alternate size (fitted card names, the
+// fitted hero headline) without leaving this pure function.
+const FONT_SIZE_PX = /(\d*\.?\d+)px/;
+
 export function createMetrics(fontRoles) {
   const roles = new Map();
   const src = fontRoles || {};
   for (const name of Object.keys(src)) {
     const r = src[name] || {};
+    const font = String(r.font || "");
+    const at = FONT_SIZE_PX.exec(font);
     roles.set(name, {
       name: name,
-      font: String(r.font || ""),
+      font: font,
+      // The role's own size, plus the two halves of its font string around it.
+      fontPx: at ? parseFloat(at[1]) : 0,
+      fontHead: at ? font.slice(0, at.index) : "",
+      fontTail: at ? font.slice(at.index + at[0].length) : "",
       lineHeight: Number(r.lineHeight) || 0,
       letterSpacing: Number(r.letterSpacing) || 0
     });
@@ -119,6 +131,64 @@ export function createMetrics(fontRoles) {
     return entry;
   }
 
+  /* --- The same role at another font size ------------------------------
+     Fitted text (a long card name stepped down a notch, a headline sized to
+     land on exactly two lines) is still the role's font stack, weight and
+     style — only the size moves. These keep a separate cache so the role's own
+     prepared handles are never disturbed, and stay pure: no DOM, no window.
+
+     `--lh-<role>` is a unitless multiplier in the registry, so the line height
+     scales with the size. `--ls-<role>` was already resolved to px at boot and
+     is carried over unchanged (every role that is measured at an alternate
+     size declares `0px`, so there is nothing to scale). */
+  const preparedAt = new Map(); // roleName -> Map(sizeKey -> Map(text -> entry))
+  const evictableAt = [];       // [roleName, sizeKey, text], oldest first
+
+  function round2px(n) { return Math.round(n * 100) / 100; }
+
+  function fontAtPx(role, fontPx) {
+    if (!role.fontPx) return role.font;
+    return role.fontHead + round2px(fontPx) + "px" + role.fontTail;
+  }
+  function lineHeightAtPx(role, fontPx) {
+    if (!role.fontPx) return role.lineHeight;
+    return (role.lineHeight * fontPx) / role.fontPx;
+  }
+
+  function entryAt(role, fontPx, text, needLines) {
+    // The role's own size already has a (possibly pinned) handle — reuse it.
+    if (!role.fontPx || Math.abs(fontPx - role.fontPx) < 0.01) {
+      return adHoc(role, text, needLines);
+    }
+    const key = String(round2px(fontPx));
+    let bySize = preparedAt.get(role.name);
+    if (!bySize) { bySize = new Map(); preparedAt.set(role.name, bySize); }
+    let bucket = bySize.get(key);
+    if (!bucket) { bucket = new Map(); bySize.set(key, bucket); }
+    let entry = bucket.get(text);
+    if (!entry) {
+      const font = fontAtPx(role, fontPx);
+      entry = {
+        segments: !!needLines,
+        pre: needLines
+          ? prepareWithSegments(text, font, optionsFor(role))
+          : prepare(text, font, optionsFor(role))
+      };
+      bucket.set(text, entry);
+      evictableAt.push([role.name, key, text]);
+      while (evictableAt.length > TEXT_CACHE_MAX) {
+        const gone = evictableAt.shift();
+        const bySizeOld = preparedAt.get(gone[0]);
+        const old = bySizeOld && bySizeOld.get(gone[1]);
+        if (old) old.delete(gone[2]);
+      }
+    } else if (needLines && !entry.segments) {
+      entry.pre = prepareWithSegments(text, fontAtPx(role, fontPx), optionsFor(role));
+      entry.segments = true;
+    }
+    return entry;
+  }
+
   function textForId(role, id) {
     const m = ids.get(role.name);
     const text = m && m.get(id);
@@ -172,7 +242,10 @@ export function createMetrics(fontRoles) {
     // --- the role's own metrics ---------------------------------------
     fontFor: function (role) {
       const r = roleOf(role);
-      return { font: r.font, lineHeight: r.lineHeight, letterSpacing: r.letterSpacing };
+      return {
+        font: r.font, fontPx: r.fontPx,
+        lineHeight: r.lineHeight, letterSpacing: r.letterSpacing
+      };
     },
 
     // --- registered text, by id ---------------------------------------
@@ -217,6 +290,57 @@ export function createMetrics(fontRoles) {
       const r = roleOf(role);
       const e = adHoc(r, text == null ? "" : String(text), true);
       return shrink(e.pre, maxWidth, measureLineStats(e.pre, maxWidth).lineCount);
+    },
+
+    // --- the same roles, measured at an alternate font size --------------
+    // `fontPx` is a CSS px size. The role's stack, weight/style and letter
+    // spacing are unchanged; the line height scales with the size.
+    fontAt: function (role, fontPx) {
+      const r = roleOf(role);
+      const px = fontPx == null ? r.fontPx : fontPx;
+      return {
+        font: fontAtPx(r, px), fontPx: px,
+        lineHeight: lineHeightAtPx(r, px), letterSpacing: r.letterSpacing
+      };
+    },
+    heightOfAt: function (role, id, width, fontPx) {
+      const r = roleOf(role);
+      const e = entryAt(r, fontPx, textForId(r, id), false);
+      return layout(e.pre, width, lineHeightAtPx(r, fontPx)).height;
+    },
+    lineCountOfAt: function (role, id, width, fontPx) {
+      const r = roleOf(role);
+      const e = entryAt(r, fontPx, textForId(r, id), false);
+      return layout(e.pre, width, lineHeightAtPx(r, fontPx)).lineCount;
+    },
+    heightOfTextAt: function (role, text, width, fontPx) {
+      const r = roleOf(role);
+      const e = entryAt(r, fontPx, text == null ? "" : String(text), false);
+      return layout(e.pre, width, lineHeightAtPx(r, fontPx)).height;
+    },
+    lineCountOfTextAt: function (role, text, width, fontPx) {
+      const r = roleOf(role);
+      const e = entryAt(r, fontPx, text == null ? "" : String(text), false);
+      return layout(e.pre, width, lineHeightAtPx(r, fontPx)).lineCount;
+    },
+    // Widest forced line: the narrowest box that still keeps the text on one
+    // line. `fontPx` defaults to the role's own size.
+    naturalWidthOfText: function (role, text, fontPx) {
+      const r = roleOf(role);
+      const px = fontPx == null ? r.fontPx : fontPx;
+      const e = entryAt(r, px, text == null ? "" : String(text), true);
+      return measureNaturalWidth(e.pre);
+    },
+    // tightWidthOfText with an explicit target line count and font size, so a
+    // headline can be shrink-wrapped to exactly N balanced lines.
+    tightWidthOfTextAt: function (role, text, maxWidth, fontPx, targetLines) {
+      const r = roleOf(role);
+      const px = fontPx == null ? r.fontPx : fontPx;
+      const e = entryAt(r, px, text == null ? "" : String(text), true);
+      const target = targetLines == null
+        ? measureLineStats(e.pre, maxWidth).lineCount
+        : targetLines;
+      return shrink(e.pre, maxWidth, target);
     }
   };
 
@@ -234,6 +358,9 @@ function lineText(l) { return l.text; }
 export const ROLE_NAMES = [
   "card-name",
   "card-tagline",
+  "card-loc",
+  "card-link",
+  "hero-title",
   "story",
   "quote",
   "chip",
@@ -314,7 +441,13 @@ export function readFontRoles(doc, names) {
 // Defaults live here; ?flags=a,b turns features on and ?noflags=a,b turns them
 // off, so a phase can be bisected in the browser without a rebuild.
 export const DEFAULT_FLAGS = {
-  metrics: true
+  metrics: true,
+  // Phase 2 — the predictive grid.
+  predictiveGrid: true, // card heights are arithmetic; layoutMasonry only writes
+  flip: true,           // cards glide from their old slot to the new one
+  scrollAnchor: true,   // the card under the pointer / focus keeps its place
+  fitText: true,        // balanced taglines, fitted names, fitted headline
+  expandInPlace: true   // click a card to open its story inside the grid
 };
 
 export function resolveFlags(search, preset) {
@@ -371,7 +504,11 @@ function checkAgreement(metrics, doc, win) {
       if (childStyle.position === "absolute" || childStyle.display === "none") continue;
       let height;
       if (child.tagName === "H3") {
-        height = metrics.heightOf("card-name", id, child.clientWidth);
+        // Long names are fitted by stepping the font size down (--name-size),
+        // so measure at the size the browser actually used.
+        height = metrics.heightOfAt(
+          "card-name", id, child.clientWidth, parseFloat(childStyle.fontSize)
+        );
         parts.push({ part: "name", predicted: height, actual: child.offsetHeight });
       } else if (child.classList.contains("card-tag")) {
         height = metrics.heightOf("card-tagline", id, child.clientWidth);
