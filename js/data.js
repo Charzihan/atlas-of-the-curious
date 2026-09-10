@@ -19,6 +19,8 @@
     {
       id: "salar-de-uyuni",
       name: "Salar de Uyuni",
+      nativeName: "Salar de Uyuni",
+      nativeLang: "es",
       country: "Bolivia",
       region: "Altiplano, southwest Bolivia",
       category: "geology",
@@ -33,6 +35,8 @@
     {
       id: "pamukkale",
       name: "Pamukkale",
+      nativeName: "Pamukkale",
+      nativeLang: "tr",
       country: "Türkiye",
       region: "Denizli Province, southwestern Türkiye",
       category: "geology",
@@ -47,6 +51,8 @@
     {
       id: "wadi-rum",
       name: "Wadi Rum",
+      nativeName: "وادي رم",
+      nativeLang: "ar",
       country: "Jordan",
       region: "Southern Jordan, near the Saudi border",
       category: "geology",
@@ -61,6 +67,8 @@
     {
       id: "marble-caves",
       name: "Marble Caves (Grottoes of General Carrera)",
+      nativeName: "Capillas de Mármol",
+      nativeLang: "es",
       country: "Chile",
       region: "Aysén Region, Lake General Carrera, Chile/Argentina border",
       category: "geology",
@@ -77,6 +85,8 @@
     {
       id: "ha-long-bay",
       name: "Ha Long Bay",
+      nativeName: "Vịnh Hạ Long",
+      nativeLang: "vi",
       country: "Vietnam",
       region: "Quang Ninh Province, northern Vietnam",
       category: "coastal",
@@ -91,6 +101,8 @@
     {
       id: "komodo",
       name: "Komodo National Park",
+      nativeName: "Taman Nasional Komodo",
+      nativeLang: "id",
       country: "Indonesia",
       region: "Lesser Sunda Islands, between Bali and Sulawesi",
       category: "coastal",
@@ -105,6 +117,8 @@
     {
       id: "dahab-blue-hole",
       name: "The Blue Hole, Dahab",
+      nativeName: "البلو هول، دهب",
+      nativeLang: "ar",
       country: "Egypt",
       region: "Gulf of Aqaba, Sinai Peninsula",
       category: "coastal",
@@ -119,6 +133,8 @@
     {
       id: "yucatan-cenotes",
       name: "Cenotes of the Yucatán",
+      nativeName: "Cenotes de Yucatán",
+      nativeLang: "es",
       country: "Mexico",
       region: "Yucatán Peninsula, Mexico",
       category: "coastal",
@@ -135,6 +151,8 @@
     {
       id: "libyan-glass-desert",
       name: "The Libyan Glass Desert",
+      nativeName: "صحراء الزجاج الليبي",
+      nativeLang: "ar",
       country: "Libya",
       region: "Western Sahara, near the Egyptian border",
       category: "desert",
@@ -149,6 +167,8 @@
     {
       id: "valley-of-the-moons",
       name: "Valley of the Moon",
+      nativeName: "Mondlandschaft",
+      nativeLang: "de",
       country: "Namibia",
       region: "Erongo Region, central Namibia",
       category: "desert",
@@ -163,6 +183,8 @@
     {
       id: "erg-chebbi",
       name: "Erg Chebbi",
+      nativeName: "عرق الشبي",
+      nativeLang: "ar",
       country: "Morocco",
       region: "Drâa-Tafilalet Region, southeast Morocco",
       category: "desert",
@@ -177,6 +199,8 @@
     {
       id: "siwa-oasis",
       name: "Siwa Oasis",
+      nativeName: "واحة سيوة",
+      nativeLang: "ar",
       country: "Egypt",
       region: "Western Desert, near the Libyan border",
       category: "desert",
@@ -193,6 +217,8 @@
     {
       id: "danum-valley",
       name: "Danum Valley",
+      nativeName: "Lembah Danum",
+      nativeLang: "ms",
       country: "Malaysia (Borneo)",
       region: "Sabah, Malaysian Borneo",
       category: "forest",
@@ -207,6 +233,8 @@
     {
       id: "hoh-rainforest",
       name: "Hoh Rainforest",
+      nativeName: "Hoh Rainforest",
+      nativeLang: "en",
       country: "United States",
       region: "Olympic National Park, Washington State",
       category: "forest",
@@ -221,6 +249,8 @@
     {
       id: "yasuni",
       name: "Yasuní",
+      nativeName: "Parque Nacional Yasuní",
+      nativeLang: "es",
       country: "Ecuador",
       region: "Amazon Basin, eastern Ecuador",
       category: "forest",
@@ -235,6 +265,8 @@
     {
       id: "baobab-avenue",
       name: "Avenue of the Baobabs",
+      nativeName: "Allée des Baobabs",
+      nativeLang: "fr",
       country: "Madagascar",
       region: "Mongoly, western Madagascar",
       category: "forest",
@@ -251,6 +283,8 @@
     {
       id: "perito-moreno",
       name: "Perito Moreno Glacier",
+      nativeName: "Glaciar Perito Moreno",
+      nativeLang: "es",
       country: "Argentina",
       region: "Los Glaciares National Park, Patagonia",
       category: "glacier",
@@ -265,6 +299,8 @@
     {
       id: "jokulsarlon",
       name: "Jökulsárlón",
+      nativeName: "Jökulsárlón",
+      nativeLang: "is",
       country: "Iceland",
       region: "Southeast Iceland, below Vatnajökull",
       category: "glacier",
@@ -279,6 +315,8 @@
     {
       id: "vatnajokull-blue-ice",
       name: "Vatnajökull Blue Ice Caves",
+      nativeName: "Íshellar í Vatnajökli",
+      nativeLang: "is",
       country: "Iceland",
       region: "Vatnajökull National Park, southeast Iceland",
       category: "glacier",
@@ -293,6 +331,8 @@
     {
       id: "baltoro-glacier",
       name: "Baltoro Glacier",
+      nativeName: "بالتورو گلیشیئر",
+      nativeLang: "ur",
       country: "Pakistan",
       region: "Gilgit-Baltistan, Karakoram range",
       category: "glacier",
@@ -309,6 +349,8 @@
     {
       id: "angkor-wat",
       name: "Angkor Wat",
+      nativeName: "អង្គរវត្ត",
+      nativeLang: "km",
       country: "Cambodia",
       region: "Siem Reap, northwestern Cambodia",
       category: "sacred",
@@ -323,6 +365,8 @@
     {
       id: "rapa-nui",
       name: "Rapa Nui (Easter Island)",
+      nativeName: "Rapa Nui",
+      nativeLang: "rap",
       country: "Chile",
       region: "Polynesia, eastern Pacific Ocean",
       category: "sacred",
@@ -337,6 +381,8 @@
     {
       id: "petra",
       name: "Petra",
+      nativeName: "البتراء",
+      nativeLang: "ar",
       country: "Jordan",
       region: "Ma'an Governorate, southern Jordan",
       category: "sacred",
@@ -351,6 +397,8 @@
     {
       id: "tikal",
       name: "Tikal",
+      nativeName: "Tikal",
+      nativeLang: "es",
       country: "Guatemala",
       region: "Petén Basin, northern Guatemala",
       category: "sacred",
@@ -367,6 +415,8 @@
     {
       id: "shibuya-crossing",
       name: "Shibuya Scramble Crossing",
+      nativeName: "渋谷スクランブル交差点",
+      nativeLang: "ja",
       country: "Japan",
       region: "Tokyo, Shibuya Ward",
       category: "urban",
@@ -381,6 +431,8 @@
     {
       id: "thimphu",
       name: "Thimphu",
+      nativeName: "ཐིམ་ཕུག",
+      nativeLang: "dz",
       country: "Bhutan",
       region: "Thimphu Valley, central Bhutan",
       category: "urban",
@@ -395,6 +447,8 @@
     {
       id: "potosi",
       name: "Potosí",
+      nativeName: "Potosí",
+      nativeLang: "es",
       country: "Bolivia",
       region: "Cerro Rico, southern Bolivia",
       category: "urban",
@@ -409,6 +463,8 @@
     {
       id: "fez-medina",
       name: "The Medina of Fez",
+      nativeName: "فاس",
+      nativeLang: "ar",
       country: "Morocco",
       region: "Fez, northwestern Morocco",
       category: "urban",
@@ -425,6 +481,8 @@
     {
       id: "zhangjiajie",
       name: "Zhangjiajie National Forest Park",
+      nativeName: "张家界国家森林公园",
+      nativeLang: "zh-Hans",
       country: "China",
       region: "Hunan Province, central China",
       category: "geology",
@@ -439,6 +497,8 @@
     {
       id: "kilimanjaro",
       name: "Mount Kilimanjaro",
+      nativeName: "Mlima Kilimanjaro",
+      nativeLang: "sw",
       country: "Tanzania",
       region: "Kilimanjaro Region, northern Tanzania",
       category: "geology",
@@ -453,6 +513,8 @@
     {
       id: "milford-sound",
       name: "Milford Sound",
+      nativeName: "Piopiotahi",
+      nativeLang: "mi",
       country: "New Zealand",
       region: "Fiordland, South Island",
       category: "coastal",
@@ -467,6 +529,8 @@
     {
       id: "lofoten",
       name: "Lofoten Islands",
+      nativeName: "Lofoten",
+      nativeLang: "no",
       country: "Norway",
       region: "Lofoten, Nordland County, northern Norway",
       category: "coastal",
@@ -481,6 +545,8 @@
     {
       id: "sossusvase",
       name: "Sossusvlei and Deadvlei",
+      nativeName: "Sossusvlei en Dooievlei",
+      nativeLang: "af",
       country: "Namibia",
       region: "Namib-Naukluft National Park, Namib Desert",
       category: "desert",
@@ -495,6 +561,8 @@
     {
       id: "atacama",
       name: "The Atacama Desert",
+      nativeName: "Desierto de Atacama",
+      nativeLang: "es",
       country: "Chile",
       region: "Antofagasta / Calama, northern Chile",
       category: "desert",
@@ -509,6 +577,8 @@
     {
       id: "bialowieza",
       name: "Białowieża Forest",
+      nativeName: "Puszcza Białowieska",
+      nativeLang: "pl",
       country: "Poland / Belarus",
       region: "southeastern Poland and northeastern Belarus",
       category: "forest",
@@ -523,6 +593,8 @@
     {
       id: "kakadu",
       name: "Kakadu National Park",
+      nativeName: "Kakadu National Park",
+      nativeLang: "en",
       country: "Australia",
       region: "Northern Territory, Australia",
       category: "forest",
@@ -537,6 +609,8 @@
     {
       id: "aletsch",
       name: "Aletsch Glacier",
+      nativeName: "Aletschgletscher",
+      nativeLang: "de",
       country: "Switzerland",
       region: "Valais, the Swiss Alps",
       category: "glacier",
@@ -551,6 +625,8 @@
     {
       id: "sigiriya",
       name: "Sigiriya Rock Fortress",
+      nativeName: "සීගිරිය",
+      nativeLang: "si",
       country: "Sri Lanka",
       region: "North Central Province, Sri Lanka",
       category: "sacred",
@@ -565,6 +641,8 @@
     {
       id: "borobudur",
       name: "Borobudur",
+      nativeName: "Candi Borobudur",
+      nativeLang: "id",
       country: "Indonesia",
       region: "Central Java, Indonesia",
       category: "sacred",
@@ -579,6 +657,8 @@
     {
       id: "istanbul",
       name: "Istanbul",
+      nativeName: "İstanbul",
+      nativeLang: "tr",
       country: "Türkiye",
       region: "spanning Europe and Asia, at the Bosphorus",
       category: "urban",

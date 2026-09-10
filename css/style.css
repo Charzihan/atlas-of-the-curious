@@ -112,6 +112,37 @@
   --font-notebook: normal 0.95rem var(--font-serif);
   --lh-notebook: 1.6;
   --ls-notebook: 0px;
+
+  /* ---------- Phase 4: the name in its own script ----------
+     There are no web fonts here, so a script the serif/mono stacks do not
+     cover falls through to whatever face the system has for it. Canvas takes
+     exactly the same fallback path as CSS, which is why pretext and the
+     browser still agree on where the line breaks — on a machine with no CJK
+     or Arabic face at all the glyphs render as tofu, but they wrap in the
+     same places and the boxes are the same size. */
+
+  /* Hover card and dialog — .map-card-native, .dialog-native */
+  --font-native-name: normal 0.92rem var(--font-serif);
+  --lh-native-name: 1.6;
+  --ls-native-name: 0px;
+
+  /* Grid card, under the Latin name — .card-native */
+  --font-card-native: normal 0.8rem var(--font-serif);
+  --lh-card-native: 1.55;
+  --ls-card-native: 0px;
+
+  /* The map label's middle line — .map-label-native. The map-label font, but
+     never uppercased: `text-transform` is a Latin idea. */
+  --font-map-label-native: normal 11px var(--font-mono);
+  --lh-map-label-native: 1.35;
+  --ls-map-label-native: 0.05em;
+
+  /* The bold half of a highlighted search match — .card-tag .hl. Same family
+     and size as --font-card-tagline, one weight up, so the rich-inline flow
+     can measure the two runs against each other. */
+  --font-card-tagline-strong: bold 0.92rem var(--font-serif);
+  --lh-card-tagline-strong: 1.55;
+  --ls-card-tagline-strong: 0px;
   color-scheme: dark;
 }
 
@@ -382,6 +413,27 @@ body {
   letter-spacing: var(--ls-card-name);
 }
 
+/* The same name in its own language and script, under the Latin one. Only
+   rendered when it actually differs (js/app.js keeps it `hidden` otherwise),
+   so "Salar de Uyuni" is not printed twice. `dir` is written per place from
+   pretext's bidi levels; `data-wb` mirrors the word-break the measurement was
+   asked for. */
+.card-native {
+  font: var(--font-card-native);
+  line-height: var(--lh-card-native);
+  letter-spacing: var(--ls-card-native);
+  color: var(--ink-dim);
+  margin: 0 0 4px;
+  opacity: 0.9;
+  /* Shrink-wrapped: an RTL name aligns from its own right edge, so without
+     this it would drift to the far side of the card instead of sitting under
+     the Latin name. The wrap width is unchanged, so the predicted height is
+     too. */
+  width: fit-content;
+  max-width: 100%;
+}
+.card-native[data-wb="keep-all"] { word-break: keep-all; }
+
 .card-loc {
   font: var(--font-card-loc);
   line-height: var(--lh-card-loc);
@@ -398,6 +450,26 @@ body {
   letter-spacing: var(--ls-card-tagline);
   margin: 0;
   flex: 1 1 auto;
+}
+
+/* ---- A tagline with the search terms picked out ----------------------
+   While a search is running the tagline is flowed by pretext's rich-inline
+   helper over two fonts (the role and its bold variant) and painted one line
+   per block. Each fragment keeps its own spaces (`white-space: pre`) and the
+   line boxes are already the width pretext measured, so the browser has no
+   wrapping decision left to make — and the card's predicted height is the
+   rich-inline line count. Clearing the search puts the plain balanced tagline
+   back. */
+.card-tag .tag-line {
+  display: block;
+  white-space: pre;
+}
+
+.card-tag .hl {
+  font: var(--font-card-tagline-strong);
+  line-height: var(--lh-card-tagline-strong);
+  letter-spacing: var(--ls-card-tagline-strong);
+  color: var(--ink);
 }
 
 .card-more {
@@ -487,6 +559,19 @@ dialog::backdrop {
 .dialog-symbol { font-size: 2.6rem; line-height: 1; }
 
 .dialog-head h2 { margin: 6px 0 2px; font-size: 1.5rem; font-weight: normal; }
+
+/* The name in its own language and script, under the title. Same role as the
+   hover card's line, so both are prepared once, in the place's own locale. */
+.dialog-native {
+  margin: 0 0 4px;
+  font: var(--font-native-name);
+  line-height: var(--lh-native-name);
+  letter-spacing: var(--ls-native-name);
+  color: var(--ink-dim);
+  width: fit-content;
+  max-width: 100%;
+}
+.dialog-native[data-wb="keep-all"] { word-break: keep-all; }
 
 .dialog-loc {
   margin: 0; color: var(--ink-dim);
@@ -1153,6 +1238,18 @@ dialog::backdrop {
   transition: color 0.15s ease;
 }
 
+/* The native-name line(s) between the name and the tagline from 2.4×. Same
+   routing, same map-label font — but never uppercased, because uppercasing is
+   a Latin operation that pretext (rightly) does not model for other scripts. */
+.map-label-native {
+  font: var(--font-map-label-native);
+  line-height: calc(var(--row-h, 16px) * var(--zoom, 1));
+  letter-spacing: var(--ls-map-label-native);
+  text-transform: none;
+  color: var(--ink);
+  opacity: 0.88;
+}
+
 /* The tagline lines that join the name from 2.4× — same routing, quieter. */
 .map-label-tag {
   font: var(--font-hover-card);
@@ -1250,6 +1347,21 @@ dialog::backdrop {
   color: var(--ink);
   margin-bottom: 2px;
 }
+
+/* The native name, under the Latin one. `lang` and `dir` are written per
+   place by js/map.js — the direction comes from pretext's per-segment bidi
+   levels, not from a guess about the tag. */
+.map-card-native {
+  display: block;
+  font: var(--font-native-name);
+  line-height: var(--lh-native-name);
+  letter-spacing: var(--ls-native-name);
+  color: var(--ink-dim);
+  margin-bottom: 3px;
+  width: fit-content;
+  max-width: 100%;
+}
+.map-card-native[data-wb="keep-all"] { word-break: keep-all; }
 
 .map-card-loc {
   display: block;

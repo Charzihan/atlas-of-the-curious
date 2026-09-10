@@ -822,6 +822,49 @@ function boot(win, doc) {
   let lastReveal = { lines: 0, stepMs: 0, totalMs: 0, played: false };
   let lastStep = { from: 0, to: 0 };   // what the last step animation did
 
+  /* ---- The name in its own script ---------------------------------
+     Shown only when it is genuinely a second name; printing "Pamukkale"
+     twice would be noise. The direction is asked of pretext's per-segment
+     bidi levels on the very handle js/text.js prepared under the place's own
+     locale, so an Arabic name gets dir="rtl" because its first strong segment
+     resolved to an odd embedding level — not because "ar" is on a list. */
+  const nativeEl = $("dialog-native");
+
+  function nativeInfoFor(place) {
+    if (!nativeEl || !flag("nativeNames")) return null;
+    const text = String(place.nativeName || "");
+    if (!text || text === place.name) return null;
+    let dir = "ltr";
+    try { dir = T.directionOf("native-name", place.id, place.nativeLang); }
+    catch (e) { dir = T.directionOfText("native-name", text, place.nativeLang); }
+    const wb = T.localeFor("native-name", place.id);
+    return {
+      text: text, lang: place.nativeLang || "", dir: dir,
+      wordBreak: (wb && wb.wordBreak) || "normal",
+      locale: (wb && wb.locale) || ""
+    };
+  }
+
+  function fillNative(place) {
+    if (!nativeEl) return;
+    const info = nativeInfoFor(place);
+    if (!info) {
+      nativeEl.hidden = true;
+      nativeEl.textContent = "";
+      nativeEl.removeAttribute("lang");
+      nativeEl.removeAttribute("dir");
+      nativeEl.removeAttribute("data-wb");
+      return;
+    }
+    nativeEl.hidden = false;
+    nativeEl.textContent = info.text;
+    if (info.lang) nativeEl.setAttribute("lang", info.lang);
+    else nativeEl.removeAttribute("lang");
+    nativeEl.setAttribute("dir", info.dir);
+    if (info.wordBreak === "keep-all") nativeEl.setAttribute("data-wb", "keep-all");
+    else nativeEl.removeAttribute("data-wb");
+  }
+
   function fillChrome(place) {
     const cat = categoryById.get(place.category);
     $("dialog-symbol").textContent = place.symbol;
@@ -833,6 +876,7 @@ function boot(win, doc) {
     // typesetter would; they are zero-width and stripped from the search /
     // accessible copies below.
     $("dialog-title").textContent = flag("hyphens") ? hyphenate(place.name) : place.name;
+    fillNative(place);
     $("dialog-loc").textContent = place.country + " — " + place.region;
     $("dialog-tagline").textContent = place.tagline;
     storyEl.textContent = place.story;   // the accessible, un-hyphenated copy
@@ -1059,8 +1103,23 @@ function boot(win, doc) {
         flags: {
           editorial: flag("editorial"), justify: flag("justify"),
           reveal: flag("reveal"), hyphens: flag("hyphens"),
-          chips: flag("chips"), dialogAnimate: flag("dialogAnimate")
+          chips: flag("chips"), dialogAnimate: flag("dialogAnimate"),
+          nativeNames: flag("nativeNames")
         },
+        // The second name, and what the DOM ended up carrying for it.
+        native: (function () {
+          const info = nativeInfoFor(current.place);
+          return {
+            shown: !!info && !nativeEl.hidden,
+            planned: info,
+            rendered: nativeEl ? {
+              text: nativeEl.textContent,
+              lang: nativeEl.getAttribute("lang"),
+              dir: nativeEl.getAttribute("dir"),
+              wordBreak: nativeEl.getAttribute("data-wb")
+            } : null
+          };
+        })(),
         // Handy for the accessibility assertions.
         accessible: {
           story: storyEl.textContent,

@@ -10,8 +10,16 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+// The very same helpers the browser uses (js/text.js is a module whose boot
+// half is guarded on `document`), so the script a place is counted under here
+// is the script the page reasons about.
+import { scriptOfText, dirForLang } from "../js/text.js";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
+
+// BCP 47, as much of it as this dataset needs: a 2-3 letter primary subtag
+// followed by any number of script / region / variant subtags.
+const LANG_RE = /^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$/;
 
 // The map (js/map.js) uses exactly this regex; a coordinate the validator
 // accepts here is a coordinate that will project correctly on the map.
@@ -20,7 +28,10 @@ const COORD_RE =
 
 const REQUIRED = [
   "id", "name", "country", "region", "category", "symbol",
-  "tagline", "story", "fact", "coordinates", "bestTime", "nearestCity"
+  "tagline", "story", "fact", "coordinates", "bestTime", "nearestCity",
+  // Phase 4: the name in the local language and script, and the tag that says
+  // which language that is.
+  "nativeName", "nativeLang"
 ];
 
 function load() {
@@ -66,6 +77,11 @@ function main() {
     seen.add(p.id);
     if (!catIds.has(p.category)) errors.push(`${where}: unknown category "${p.category}"`);
 
+    if (typeof p.nativeLang === "string" && p.nativeLang.trim() &&
+        !LANG_RE.test(p.nativeLang)) {
+      errors.push(`${where}: nativeLang "${p.nativeLang}" is not a BCP 47 tag`);
+    }
+
     const c = parseCoords(p.coordinates);
     if (!c) {
       errors.push(`${where}: coordinates do not match the map's regex: "${p.coordinates}"`);
@@ -80,10 +96,31 @@ function main() {
   for (const p of places) byCat.set(p.category, (byCat.get(p.category) || 0) + 1);
   const countries = new Set(places.map((p) => p.country));
 
+  // Phase 4: how many writing systems the atlas now carries, and how many of
+  // the names run right to left.
+  const byScript = new Map();
+  const langs = new Set();
+  let rtl = 0, distinct = 0;
+  for (const p of places) {
+    const script = scriptOfText(p.nativeName || "");
+    byScript.set(script, (byScript.get(script) || 0) + 1);
+    langs.add(p.nativeLang);
+    if (dirForLang(p.nativeLang) === "rtl") rtl++;
+    if (String(p.nativeName || "") !== String(p.name || "")) distinct++;
+  }
+  const scripts = Array.from(byScript.keys()).sort();
+
   console.log(`dataset: ${places.length} places, ${categories.length} categories, ${countries.size} countries`);
   for (const c of categories) {
     console.log(`  ${c.label}: ${byCat.get(c.id) || 0}`);
   }
+  console.log(
+    `native names: ${scripts.length} script(s), ${langs.size} language tag(s), ` +
+    `${rtl} right-to-left, ${distinct} that differ from the Latin name`
+  );
+  console.log(
+    "  " + scripts.map((s) => `${s} ${byScript.get(s)}`).join(", ")
+  );
 
   for (const w of warnings) console.warn(`  warning: ${w}`);
   if (errors.length) {

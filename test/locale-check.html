@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Atlas of the Curious — locale line-breaking checks</title>
+  <!-- Development-only page. It is opened by scripts/check-text.mjs in headless
+       Chromium; it is not part of the site and sw.js does not precache it.
+       css/style.css is loaded because it *is* the font-role registry: the
+       string measured here is measured in the very font the site paints. -->
+  <link rel="stylesheet" href="../css/style.css">
+  <script src="../js/data.js" defer></script>
+  <script src="../js/text.js" type="module" defer></script>
+  <script src="./locale-check.js" type="module" defer></script>
+</head>
+<body>
+  <h1>Locale line-breaking checks</h1>
+  <p id="status">running…</p>
+  <!-- The probe the browser lays the same string out in. js/text.js writes its
+       font, width and word-break from the font-role registry, so nothing about
+       it is guessed. -->
+  <div id="probe-host"></div>
+  <pre id="report"></pre>
+</body>
+</html>

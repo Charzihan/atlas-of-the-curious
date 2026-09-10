@@ -12,6 +12,9 @@
 import { readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+// dirForLang is the same helper the page itself uses for a name whose script
+// has no strong RTL run to read levels from.
+import { dirForLang } from "../js/text.js";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const OUT = path.join(root, "places");
@@ -35,6 +38,17 @@ function esc(s) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+// The name in its own language and script, under the H1. Printed only when it
+// is genuinely a second name, and carrying its own `lang` and `dir` (an
+// Arabic, Hebrew, Persian or Urdu tag runs right to left).
+function nativeBlock(p) {
+  const text = String(p.nativeName || "");
+  if (!text || text === p.name) return "";
+  const lang = String(p.nativeLang || "");
+  const dir = dirForLang(lang);
+  return `\n        <p class="native"${lang ? ` lang="${esc(lang)}"` : ""} dir="${dir}">${esc(text)}</p>`;
 }
 
 function pageFor(p, cat) {
@@ -68,7 +82,7 @@ function pageFor(p, cat) {
       <span class="symbol" data-accent="${esc(accent)}" aria-hidden="true">${esc(p.symbol)}</span>
       <div>
         <span class="badge" data-accent="${esc(accent)}">${esc(cat ? cat.label : "")}</span>
-        <h1>${esc(p.name)}</h1>
+        <h1>${esc(p.name)}</h1>${nativeBlock(p)}
         <p class="loc">${esc(p.country)} &mdash; ${esc(p.region)}</p>
       </div>
     </div>

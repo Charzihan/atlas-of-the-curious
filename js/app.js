@@ -166,6 +166,41 @@
     } catch (e) { T = null; } // a role the CSS no longer defines: fall back
   }
 
+  // --- The name in its own script ---------------------------------------
+  // A card shows it only when it is genuinely a second name — printing
+  // "Pamukkale" twice would be noise, and the height arithmetic below adds
+  // the line only for the cards that carry one. js/text.js already prepared
+  // every native name under its own locale (role "card-native"), so nothing
+  // here re-prepares anything.
+  function nativeTextFor(p) {
+    if (!flag("nativeNames")) return "";
+    var s = String(p.nativeName || "");
+    return !s || s === p.name ? "" : s;
+  }
+  // Without the metrics module there are no bidi levels to read, so the tag
+  // decides on its own. (js/text.js owns the real list; this is the last-ditch
+  // copy for the ?noflags=metrics path, where window.ATLAS_TEXT is absent.)
+  var RTL_TAGS = /^(ar|he|fa|ur|ps|sd|yi|dv|ckb|ug|arc|nqo|syr)(-|$)/i;
+  var nativeInfo = new Map();
+  function nativeFor(p) {
+    var info = nativeInfo.get(p.id);
+    if (info) return info;
+    var text = nativeTextFor(p);
+    info = {
+      text: text, lang: p.nativeLang || "", wordBreak: "normal",
+      dir: RTL_TAGS.test(p.nativeLang || "") ? "rtl" : "ltr"
+    };
+    if (text && T) {
+      try {
+        info.dir = T.directionOf("card-native", p.id, p.nativeLang);
+        var rec = T.localeFor("card-native", p.id);
+        if (rec) info.wordBreak = rec.wordBreak;
+      } catch (e) { /* the role is missing: the defaults are fine */ }
+    }
+    nativeInfo.set(p.id, info);
+    return info;
+  }
+
   // --- Cards (pooled so filter changes can animate, not recreate) --------
   var cardPool = new Map();
   var masonryIO = null;
@@ -198,6 +233,18 @@
     var h = document.createElement("h3");
     h.className = "card-name";
     h.textContent = p.name;
+
+    var native = document.createElement("p");
+    native.className = "card-native";
+    var nat = nativeFor(p);
+    if (nat.text) {
+      native.textContent = nat.text;
+      if (nat.lang) native.setAttribute("lang", nat.lang);
+      native.setAttribute("dir", nat.dir);
+      if (nat.wordBreak === "keep-all") native.setAttribute("data-wb", "keep-all");
+    } else {
+      native.hidden = true;
+    }
 
     var loc = document.createElement("p");
     loc.className = "card-loc";
@@ -234,13 +281,14 @@
 
     card.appendChild(sym);
     card.appendChild(h);
+    card.appendChild(native);
     card.appendChild(loc);
     card.appendChild(tag);
     card.appendChild(expand);
     card.appendChild(link);
 
     return {
-      card: card, sym: sym, h3: h, loc: loc, tag: tag,
+      card: card, sym: sym, h3: h, native: native, loc: loc, tag: tag,
       expand: expand, story: story, note: note, noteLabel: noteLabel, link: link
     };
   }
@@ -279,6 +327,7 @@
     el.classList.add("card-probe", "is-in");
     el.style.width = "320px";
     parts.expand.hidden = false; // the expansion chrome is measured too
+    parts.native.hidden = false; // …and so is the native name's margin box
     grid.appendChild(el);
 
     var c;
@@ -287,6 +336,7 @@
       var cardCS = getComputedStyle(el);
       var symCS = getComputedStyle(parts.sym);
       var h3CS = getComputedStyle(parts.h3);
+      var nativeCS = getComputedStyle(parts.native);
       var locCS = getComputedStyle(parts.loc);
       var tagCS = getComputedStyle(parts.tag);
       var linkCS = getComputedStyle(parts.link);
@@ -303,6 +353,8 @@
         symbol: lineBoxOf(symCS, parts.sym) +
                 pxOf(symCS.marginTop) + pxOf(symCS.marginBottom),
         nameMargin: pxOf(h3CS.marginTop) + pxOf(h3CS.marginBottom),
+        // Only paid by the cards that actually carry a native name.
+        nativeMargin: pxOf(nativeCS.marginTop) + pxOf(nativeCS.marginBottom),
         locMargin: pxOf(locCS.marginTop) + pxOf(locCS.marginBottom),
         tagMargin: pxOf(tagCS.marginTop) + pxOf(tagCS.marginBottom),
         linkMargin: pxOf(linkCS.marginTop) + pxOf(linkCS.marginBottom),
@@ -367,6 +419,141 @@
     return sizes[sizes.length - 1]; // the floor: it takes two lines there
   }
 
+  /* --- Search matches, picked out in bold -------------------------------
+     While a query is running the tagline stops being one string the browser
+     wraps and becomes a rich-inline flow over two fonts — the `card-tagline`
+     role and its bold variant `card-tagline-strong`. pretext measures the
+     mixed run, the card's predicted height is that flow's line count
+     (measureRichInlineStats), and each line is painted as its own block, so
+     the browser has no wrapping decision of its own left to make. Clearing
+     the search puts the plain, balanced tagline back. */
+  function queryTokens() {
+    var q = state.query.trim().toLowerCase();
+    if (!q) return [];
+    return q.split(/\s+/).filter(function (t) { return t.length >= 2; });
+  }
+  function highlighting() {
+    return !!(T && flag("searchHighlight") &&
+              typeof T.prepareRich === "function" && queryTokens().length);
+  }
+
+  // Alternating plain / matched runs of `text`, or null when nothing matched.
+  // Overlapping tokens are merged into one run rather than nested.
+  function markRuns(text, tokens) {
+    var hay = text.toLowerCase();
+    var hit = new Uint8Array(text.length);
+    var any = false;
+    for (var t = 0; t < tokens.length; t++) {
+      var tok = tokens[t];
+      var from = 0;
+      for (;;) {
+        var at = hay.indexOf(tok, from);
+        if (at === -1) break;
+        for (var i = at; i < at + tok.length; i++) hit[i] = 1;
+        any = true;
+        from = at + tok.length;
+      }
+    }
+    if (!any) return null;
+    var runs = [];
+    var start = 0;
+    for (var j = 1; j <= text.length; j++) {
+      if (j === text.length || hit[j] !== hit[j - 1]) {
+        runs.push({ text: text.slice(start, j), match: !!hit[start] });
+        start = j;
+      }
+    }
+    return runs;
+  }
+
+  // One prepared flow per (place, width, query). Nothing here touches the DOM.
+  var flowCache = new Map();
+  function taglineFlow(p, textW) {
+    if (!highlighting()) return null;
+    var tokens = queryTokens();
+    var key = p.id + "|" + r2(textW) + "|" + tokens.join(" ");
+    if (flowCache.has(key)) return flowCache.get(key);
+    var runs = markRuns(p.tagline, tokens);
+    var flow = null;
+    if (runs) {
+      try {
+        var plain = T.fontFor("card-tagline");
+        var strong = T.fontFor("card-tagline-strong");
+        var items = runs.map(function (run) {
+          return {
+            text: run.text,
+            font: run.match ? strong.font : plain.font,
+            letterSpacing: run.match ? strong.letterSpacing : plain.letterSpacing
+          };
+        });
+        var rich = T.prepareRich(items);
+        var stats = T.richStats(rich, textW);
+        flow = {
+          rich: rich, runs: runs, width: textW,
+          lineCount: Math.max(1, stats.lineCount),
+          maxLineWidth: stats.maxLineWidth,
+          lineHeight: plain.lineHeight,
+          matches: runs.filter(function (run) { return run.match; }).length
+        };
+      } catch (e) { flow = null; }
+    }
+    if (flowCache.size > 600) flowCache.clear();
+    flowCache.set(key, flow);
+    return flow;
+  }
+
+  // Paint (or un-paint) one card's tagline. The generated lines are
+  // aria-hidden and a plain, visually hidden copy carries the sentence, so a
+  // screen reader and find-in-page still see one ordinary tagline.
+  function renderTagline(el, p, flow) {
+    if (!flow) {
+      if (el.getAttribute("data-flowed") !== null || el.firstElementChild) {
+        el.textContent = p.tagline;
+        el.removeAttribute("data-flowed");
+      } else if (el.textContent !== p.tagline) {
+        el.textContent = p.tagline;
+      }
+      return;
+    }
+    var lines = T.richLines(flow.rich, flow.width);
+    el.textContent = "";
+    var plainEl = document.createElement("span");
+    plainEl.className = "visually-hidden";
+    plainEl.textContent = p.tagline;
+    el.appendChild(plainEl);
+    for (var i = 0; i < lines.length; i++) {
+      var lineEl = document.createElement("span");
+      lineEl.className = "tag-line";
+      lineEl.setAttribute("aria-hidden", "true");
+      var frags = lines[i].fragments;
+      for (var f = 0; f < frags.length; f++) {
+        var frag = frags[f];
+        var txt = frag.text;
+        if (f === 0) txt = txt.replace(/^\s+/, "");
+        if (f === frags.length - 1) txt = txt.replace(/\s+$/, "");
+        if (!txt) continue;
+        // The rich-inline compiler trims the space between two items and
+        // carries it as `gapBefore` (a width, not a character). Every gap here
+        // came from a plain run — a search token can never begin or end with
+        // whitespace — so painting one plain space back is exactly the width
+        // pretext counted.
+        if (frag.gapBefore > 0 && lineEl.firstChild) {
+          var gap = document.createElement("span");
+          gap.textContent = " ";
+          lineEl.appendChild(gap);
+        }
+        var run = flow.runs[frag.itemIndex];
+        var isMatch = !!(run && run.match);
+        var span = document.createElement(isMatch ? "strong" : "span");
+        if (isMatch) span.className = "hl";
+        span.textContent = txt;
+        lineEl.appendChild(span);
+      }
+      el.appendChild(lineEl);
+    }
+    el.setAttribute("data-flowed", String(lines.length));
+  }
+
   // Shrink-wrap a text block to the narrowest box that keeps the line count it
   // was measured at. Two things fall out of that: the last line carries its
   // share of the words (balanced text), and the browser's own line breaking is
@@ -382,17 +569,26 @@
   function predictCard(p, textW, expanded) {
     var fit = flag("fitText");
     var nameSize = fit ? fitNameSize(p, textW) : CHROME.nameSizes[0];
+    var native = nativeFor(p);
+    // A highlighted tagline is measured as a rich-inline flow instead; the
+    // line count that comes back is what the card is made tall enough for.
+    var flow = taglineFlow(p, textW);
     var h = CHROME.fixed +
       T.heightOfAt("card-name", p.id, textW, nameSize) +
+      (native.text
+        ? CHROME.nativeMargin + T.heightOfText("card-native", native.text, textW)
+        : 0) +
       T.heightOf("card-loc", p.id, textW) +
-      T.heightOf("card-tagline", p.id, textW) +
+      (flow ? flow.lineCount * flow.lineHeight : T.heightOf("card-tagline", p.id, textW)) +
       T.heightOfText("card-link", LINK_TEXT, textW);
     var nameWidth = 0, locWidth = 0, tagWidth = 0;
     if (fit) {
       nameWidth = wrapWidth(
         T.tightWidthOfTextAt("card-name", p.name, textW, nameSize), textW);
       locWidth = wrapWidth(T.tightWidth("card-loc", p.id, textW), textW);
-      tagWidth = wrapWidth(T.tightWidth("card-tagline", p.id, textW), textW);
+      // A flowed tagline is already laid out line by line; shrink-wrapping the
+      // box under it would only invite the browser to disagree.
+      if (!flow) tagWidth = wrapWidth(T.tightWidth("card-tagline", p.id, textW), textW);
     }
     var extra = expanded
       ? CHROME.expandFixed +
@@ -401,7 +597,8 @@
       : 0;
     return {
       height: h + extra, nameSize: nameSize,
-      nameWidth: nameWidth, locWidth: locWidth, tagWidth: tagWidth
+      nameWidth: nameWidth, locWidth: locWidth, tagWidth: tagWidth,
+      tagFlow: flow, native: native.text ? native : null
     };
   }
 
@@ -496,6 +693,8 @@
         nameWidth: pred.nameWidth,
         locWidth: pred.locWidth,
         tagWidth: pred.tagWidth,
+        tagFlow: pred.tagFlow,
+        native: pred.native,
         textW: textW,
         expanded: p.id === expandedId
       });
@@ -543,6 +742,7 @@
       setWrapWidth(el._atlas.h3, slot.nameWidth);
       setWrapWidth(el._atlas.loc, slot.locWidth);
       setWrapWidth(el._atlas.tag, slot.tagWidth);
+      renderTagline(el._atlas.tag, p, slot.tagFlow);
 
       if (!old || old.left !== slot.left || old.top !== slot.top) {
         el.style.left = slot.left + "px";
@@ -755,6 +955,10 @@
       topTolerance: 1, heightTolerance: 0,
       maxTopDelta: 0, maxLeftDelta: 0, maxHeightDelta: 0,
       animating: 0, taglineLineMismatches: 0, expanded: expandedId,
+      // Phase 4: how many cards are showing a highlighted tagline, and how
+      // many of those disagree with the flow that was predicted for them.
+      highlighted: 0, taglineFlowMismatches: 0,
+      query: state.query,
       predicted: !!(T && CHROME && flag("predictiveGrid")),
       layouts: layoutRuns
     };
@@ -788,11 +992,10 @@
       // Shrink-wrapping must never change the line count the height was
       // computed from — that is the whole contract of tightWidth().
       var p = placesById.get(id);
-      if (p && slot.tagWidth) {
-        var pairs = [
-          ["card-tagline", p.tagline, slot.tagWidth],
-          ["card-loc", locTextFor(p).toUpperCase(), slot.locWidth]
-        ];
+      if (p) {
+        var pairs = [];
+        if (slot.tagWidth) pairs.push(["card-tagline", p.tagline, slot.tagWidth]);
+        if (slot.locWidth) pairs.push(["card-loc", locTextFor(p).toUpperCase(), slot.locWidth]);
         for (var q = 0; q < pairs.length; q++) {
           var full = T.lineCountOfText(pairs[q][0], pairs[q][1], slot.textW);
           var tight = T.lineCountOfText(pairs[q][0], pairs[q][1], pairs[q][2]);
@@ -801,11 +1004,29 @@
             if (!what) what = pairs[q][0] + "-lines";
           }
         }
-        var nameFull = T.lineCountOfTextAt("card-name", p.name, slot.textW, slot.nameSize);
-        var nameTight = T.lineCountOfTextAt("card-name", p.name, slot.nameWidth, slot.nameSize);
-        if (nameFull !== nameTight) {
-          out.taglineLineMismatches++;
-          if (!what) what = "card-name-lines";
+        if (slot.nameWidth) {
+          var nameFull = T.lineCountOfTextAt("card-name", p.name, slot.textW, slot.nameSize);
+          var nameTight = T.lineCountOfTextAt("card-name", p.name, slot.nameWidth, slot.nameSize);
+          if (nameFull !== nameTight) {
+            out.taglineLineMismatches++;
+            if (!what) what = "card-name-lines";
+          }
+        }
+        // A highlighted tagline: the DOM has to carry exactly the lines the
+        // rich-inline flow predicted, and no line may have re-wrapped (each
+        // one is its own block, so a re-wrap would show up as a taller box).
+        if (slot.tagFlow) {
+          out.highlighted++;
+          var tagEl = el._atlas.tag;
+          var painted = tagEl.querySelectorAll(".tag-line");
+          if (painted.length !== slot.tagFlow.lineCount) {
+            out.taglineFlowMismatches++;
+            if (!what) what = "card-tagline-flow";
+          }
+          if (tagEl.scrollWidth > tagEl.clientWidth + 1) {
+            out.taglineFlowMismatches++;
+            if (!what) what = "card-tagline-overflow";
+          }
         }
       }
       if (what) {
@@ -1220,6 +1441,35 @@
       return out;
     },
     resetWrites: function () { writeCounts = new Map(); },
+    // Phase 4: drive the search from a test without going through the
+    // debounced input handler, and read back what each tagline was flowed to.
+    setQuery: function (q) {
+      state.query = String(q == null ? "" : q);
+      searchInput.value = state.query;
+      render();
+      return state.query;
+    },
+    query: function () { return state.query; },
+    flows: function () {
+      var out = {};
+      slots.forEach(function (s, id) {
+        if (!s.tagFlow) return;
+        out[id] = {
+          lines: s.tagFlow.lineCount, width: r2(s.tagFlow.width),
+          lineHeight: r2(s.tagFlow.lineHeight),
+          maxLineWidth: r2(s.tagFlow.maxLineWidth),
+          matches: s.tagFlow.matches
+        };
+      });
+      return out;
+    },
+    natives: function () {
+      var out = {};
+      slots.forEach(function (s, id) {
+        if (s.native) out[id] = s.native;
+      });
+      return out;
+    },
     expandedId: function () { return expandedId; },
     anchorId: anchorId,
     setHover: function (id) { hoverId = id; },

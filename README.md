@@ -44,12 +44,21 @@ the dependency or changing the map grid settings. Run `pnpm build` after editing
 `js/data.js` so the per-place share pages and the dataset stay in sync.
 
 `pnpm validate` runs two stages: `scripts/validate-data.mjs` (pure Node — ids,
-coordinates, required fields) and then `scripts/check-text.mjs`, which needs a
-real font engine and so starts the dev server and opens `test/text-check.html`
-in headless Chromium. If the browser is missing it prints the install command
-and exits 0, so the dataset check still gates a commit; pass `--strict` to turn
-that skip into a failure. `pnpm build` deliberately runs only the pure-Node
-dataset check, so deploying never requires a browser.
+coordinates, required fields, native names and their BCP 47 tags, plus a count
+of the distinct scripts in the dataset) and then `scripts/check-text.mjs`,
+which needs a real font engine and so starts the dev server and opens
+`test/text-check.html` and `test/locale-check.html` in headless Chromium. If
+the browser is missing it prints the install command and exits 0, so the
+dataset check still gates a commit; pass `--strict` to turn that skip into a
+failure. `pnpm build` deliberately runs only the pure-Node dataset check, so
+deploying never requires a browser.
+
+`test/locale-check.html` is the evidence behind the locale-aware preparation:
+for a Japanese, a Thai (no spaces at all), an Arabic and a Simplified-Chinese
+sentence, at three widths, it compares the lines pretext computed with the
+lines Chromium actually painted (read back a grapheme at a time with
+`Range.getClientRects()`), and asserts that no Thai or Arabic break falls
+inside an `Intl.Segmenter` word.
 
 `pnpm smoke` loads `index.html` at 1280x800 and 390x844, waits for the text
 metrics and the map, and fails on any console error or uncaught page error.
@@ -71,6 +80,16 @@ fitted hero headline lands on exactly two lines. The map checks run first: the
 grid checks scroll the grid to the top of the viewport, which pauses the map's
 animation loop.
 
+It then checks the second name every place now carries. For each of the 13
+places whose native name is not Latin script it opens the hover card and reads
+the painted line boxes back off the element: every break must land on an
+`Intl.Segmenter` word boundary (grapheme boundaries for CJK). Because a short
+name does not wrap in a real card, each name is then squeezed into a box
+exactly as wide as its own widest word — wrapping forced, no word ever asked to
+break — and judged again. Finally it runs five searches and asserts that every
+highlighted tagline is painted as exactly the lines the rich-inline flow
+predicted, with the grid still at zero mismatches while the search is active.
+
 Finally it opens the detail dialog in three page visits of its own (360, 768
 and 1280 px wide) and, for all 40 places at each width, asserts that every
 hand-laid-out line box sits inside its column — checked twice, once against the
@@ -90,7 +109,24 @@ Run it after any change to the layout, the fonts or the map.
 
 - **40 places** across 7 categories (geology, coastal, deserts, forests,
   glaciers, sacred sites, urban oddities), each with a story, a field note, a
-  best time to visit, and the nearest major city.
+  best time to visit, the nearest major city, and its name in the local
+  language and script.
+- **Names in their own script**: every place carries a `nativeName` and a
+  `nativeLang` — 张家界国家森林公园, البتراء, អង្គរវត្ត, ཐིམ་ཕུག, සීගිරිය,
+  渋谷スクランブル交差点, Vịnh Hạ Long, Puszcza Białowieska — shown under the
+  Latin name on the card, in the hover card, in the dialog and on the generated
+  share page, and as the middle line of the map label from 2.4×. Each span
+  carries its own `lang` and a `dir` taken from pretext's per-segment bidi
+  levels (an odd embedding level on the first strong segment means right to
+  left), not from a guess about the tag. Seven scripts, eight right-to-left
+  names.
+- **Search matches, picked out**: while a search is running a card's tagline
+  stops being one string the browser wraps and becomes a pretext *rich-inline*
+  flow over two fonts — the tagline role and its bold variant. The card's
+  predicted height is that flow's line count, and each line is painted as its
+  own block, so the browser has no wrapping decision left to make and the grid
+  stays at zero mismatches mid-search. Clearing the search restores the plain,
+  balanced tagline.
 - **The Text Atlas**: an ASCII world map — land drawn from real Natural Earth
   coastlines, every marker projected from its own lat/lon, name labels
   word-wrapped by pretext (measured with the browser's own font engine, no
@@ -106,8 +142,11 @@ Run it after any change to the layout, the fonts or the map.
   nearby is simply not drawn. Nothing ever overlaps land, another label or an
   ocean name — `pnpm smoke` asserts exactly that.
 - **Zoom-level typography**: no labels below 1.4x, the name from 1.4x, and the
-  name plus its tagline from 2.4x. Each string is prepared once; a zoom change
-  re-runs only the routing, debounced to at most one placement per frame.
+  name, the native name and the tagline from 2.4x. Each string is prepared
+  once; a zoom change re-runs only the routing, debounced to at most one
+  placement per frame. The native line is routed like any other and dropped
+  (rather than crossing land) when the water beside the dot is too narrow for
+  it, so the "nothing overlaps anything" assertion is unchanged.
 - **Ocean names in spaced capitals**: oceans and seas set in tracked uppercase,
   with the tracking opening from 0.18em to 0.3em as you zoom in. They claim
   their cells before the place names are routed, so the names flow around them.
@@ -218,6 +257,37 @@ the cap exactly three body lines tall), `field` and `field-chip` (the plain
 runs and the pills of the metadata flows) — and every one is still declared in
 the CSS and consumed by the rule that paints it.
 
+Phase 4 added four: `native-name` (the hover card's and the dialog's second
+line), `card-native` (the grid card's), `map-label-native` (the map label's
+middle line — the `map-label` font, never uppercased) and
+`card-tagline-strong` (the bold half of a highlighted search match: the same
+family and size as `card-tagline`, one weight up, so the rich-inline flow can
+measure the two runs against each other). Nineteen roles in all.
+
+**Text in another language.** pretext segments through `Intl.Segmenter`, which
+is locale-sensitive — Thai has no spaces at all and is broken by dictionary —
+so a native name has to be prepared under its own locale. `setLocale()` is
+global and clears pretext's shared measurement caches (already-prepared handles
+stay valid), which makes calling it per render ruinous. `js/text.js` therefore
+takes the strings in two steps: `prepareLocalized(role, id, text, { locale,
+wordBreak })` *queues* one, and `flushLocalized()` prepares the whole queue
+grouped by locale — `setLocale(locale)` once per group, then a single
+`setLocale()` back to the default before anything else in the page is prepared.
+CJK tags are queued with `wordBreak: "keep-all"`, and the rules that paint them
+carry the matching `word-break: keep-all` (via a `data-wb` attribute), so the
+measurement and the CSS are asking for the same thing. `directionOf(role, id,
+lang)` answers "which way does this run?" from the prepared handle's
+`segLevels`, with the language tag only as the fallback for a string with no
+strong RTL character.
+
+One caveat worth stating plainly: `word-break: keep-all` turns an overlong CJK
+run into a single unbreakable word, and the break then falls to
+`overflow-wrap`, which pretext documents as approximate — Chromium and pretext
+do disagree there. `test/locale-check.html` measures that disagreement and
+reports it (it does not fail on it), and `pnpm smoke` asserts that no native
+name in the dataset is long enough to reach that path in the card a reader
+actually sees.
+
 `js/text.js` reads the registry once at boot, resolves `rem`/`em` into `px`,
 turns each shorthand into a canvas font string and hands the result to
 `createMetrics()` — a pure factory that touches neither `document` nor `window`
@@ -266,6 +336,9 @@ browser without a rebuild:
 | `hyphens` | `js/dialog.js` | no soft hyphens are injected into long names |
 | `chips` | `js/dialog.js` | the two metadata fields stay plain text instead of a rich inline flow |
 | `dialogAnimate` | `js/dialog.js` | prev/next swaps the content without animating the body's height |
+| `nativeNames` | `js/text.js` | no second name anywhere — no card line, no hover-card line, no dialog line, and the map label goes back to name + tagline |
+| `searchHighlight` | `js/app.js` | a search leaves the taglines as plain, balanced text instead of flowing them with the matches bold |
+| `localeText` | `js/text.js` | native names are prepared at the page's own locale instead of each place's (the `word-break` option is still applied) |
 
 For example `?noflags=labels,oceanLabels` gives the pre-Phase-1 map, which is
 also what `pnpm smoke` loads to get a frame-timing baseline.
@@ -282,13 +355,17 @@ Web Worker unchanged.
 placement is followed by an assertion pass that walks each rendered label's
 cells against the land mask and warns in the console on any overlap. The same
 entry points are on `window.ATLAS_MAP_DEBUG`: `setZoom(z)`, `place()`,
-`checkLabels()`, `checkPainted()`, `labels()`, `oceanLabels()`, `stats()` and
-`showCard(id)`.
+`checkLabels()`, `checkPainted()`, `labels()`, `oceanLabels()`, `nativeLabels()`,
+`stats()` and `showCard(id)` (whose result now carries the hover card's native
+line: its text, `lang`, `dir` and predicted line count).
 
 **Grid debugging.** `window.ATLAS_GRID_DEBUG` exposes the layout's own
 bookkeeping for the same reason: `agreement()` re-checks every card's predicted
-top/height against the DOM, `writes()` counts position writes per card,
-`slots()`, `hero()` and `lastLayout()` report what the last pass decided.
+top/height against the DOM (and, mid-search, that each flowed tagline carries
+exactly the lines it was predicted to), `writes()` counts position writes per
+card, `slots()`, `hero()` and `lastLayout()` report what the last pass decided,
+and `setQuery(q)` / `flows()` / `natives()` drive and inspect the Phase 4
+search highlighting without going through the debounced input handler.
 
 **Dialog debugging.** `window.ATLAS_DIALOG` is both the dialog's public surface
 — `open(id)`, `close()`, `step(dir)`, `currentId()`, `relayout()` — and its
@@ -296,7 +373,8 @@ inspection surface. `debug()` returns the whole spread as data and touches no
 DOM: the column boxes, every line's `{col, row, x, y, width, justified,
 hyphenated}`, the drop cap's size, the pull quote's box, the three column-width
 trials with the river run each produced, the chosen `rivers` report
-(`maxRun`, `riverCount`, `worst`), the two field flows with their chip counts,
+(`maxRun`, `riverCount`, `worst`), the two field flows with their chip counts, the second name under the title
+(planned and as rendered),
 the height bookkeeping the step animation uses, the last reveal's timing, and
 the accessible copies of the story, field note and title. `pnpm smoke` drives
 the whole Phase 3 check-list through it.
@@ -367,10 +445,13 @@ Two notes before you ship:
 index.html        — page shell + strict CSP + Open Graph meta
 css/style.css     — all styling (no external assets)
 css/place.css     — styling for the generated per-place share pages
-js/data.js        — the dataset (40 places, 7 categories)
+js/data.js        — the dataset (40 places, 7 categories; every place also
+                    carries nativeName + nativeLang)
 js/landmap.js     — generated ASCII land grid (120×40, from Natural Earth)
 js/text.js       — text metrics on top of pretext: the font role registry,
-                    window.ATLAS_TEXT, feature flags, dev agreement check
+                    window.ATLAS_TEXT, feature flags, dev agreement check,
+                    grouped locale-aware preparation, bidi direction, and the
+                    rich-inline wrappers a classic script can reach
 js/app.js        — predictive masonry (FLIP, scroll anchor, fitted text,
                     expand in place), search, filters, URL state, routing,
                     daily pick, geolocation, distance sort, sw reg; delegates
@@ -400,6 +481,8 @@ scripts/browser-harness.mjs — dev server + Chromium plumbing for those two
 scripts/build-place-pages.mjs — generates the places/<id>/ share pages
 test/text-check.html      — dev-only page the overflow checks run in
 test/text-check.js        — the overflow rules themselves (not shipped)
+test/locale-check.html    — dev-only page the locale line-break checks run in
+test/locale-check.js      — pretext vs the browser, per language and width
 data/world-110m-*.geojson — source coastlines (Natural Earth 110m; not deployed)
 server.mjs       — zero-dependency dev server (pnpm start)
 package.json     — scripts + devDependencies (@chenglou/pretext, playwright)

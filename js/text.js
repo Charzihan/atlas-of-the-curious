@@ -32,8 +32,15 @@ import {
   layout,
   layoutWithLines,
   measureLineStats,
-  measureNaturalWidth
+  measureNaturalWidth,
+  setLocale
 } from "../vendor/pretext/layout.js";
+import {
+  prepareRichInline,
+  measureRichInlineStats,
+  walkRichInlineLineRanges,
+  materializeRichInlineLineRange
+} from "../vendor/pretext/rich-inline.js";
 
 /* ------------------------------------------------------------------ *
  * 1. The pure core                                                    *
@@ -47,6 +54,69 @@ const TEXT_CACHE_MAX = 512;
 // once lets a role be re-measured at an alternate size (fitted card names, the
 // fitted hero headline) without leaving this pure function.
 const FONT_SIZE_PX = /(\d*\.?\d+)px/;
+
+/* --- Scripts and writing direction (pure; also used by the Node scripts) ---
+   Phase 4 carries a second name for every place, in its own language and
+   script. Two questions follow from that: which script is this (so the
+   dataset check can count them) and which way does it run (so the span can
+   carry the right `dir`).
+
+   The direction answer prefers pretext's own per-segment bidi levels — the
+   richer prepared handle carries approximate `segLevels`, and an odd level is
+   a right-to-left run — and falls back to the BCP 47 tag when the text has no
+   strong RTL character at all (`segLevels` is then null by design). */
+
+// A tag whose primary subtag (or explicit script subtag) is written RTL.
+const RTL_LANGS = new Set([
+  "ar", "he", "fa", "ur", "ps", "sd", "yi", "dv", "ckb", "ug", "arc", "nqo", "syr"
+]);
+const RTL_SCRIPTS = new Set(["arab", "hebr", "thaa", "syrc", "nkoo", "adlm", "aran"]);
+
+// "ar", "ar-EG", "az-Arab" -> "rtl"; everything else -> "ltr".
+export function dirForLang(tag) {
+  const parts = String(tag || "").toLowerCase().split("-");
+  if (RTL_LANGS.has(parts[0])) return "rtl";
+  for (let i = 1; i < parts.length; i++) if (RTL_SCRIPTS.has(parts[i])) return "rtl";
+  return "ltr";
+}
+
+// Tested in order: kana beats Han (Japanese mixes both), Hangul beats Han.
+export const SCRIPT_TESTS = [
+  ["Arabic", /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/],
+  ["Hebrew", /[\u0590-\u05FF]/],
+  ["Japanese", /[\u3040-\u309F\u30A0-\u30FF]/],
+  ["Hangul", /[\u1100-\u11FF\uAC00-\uD7AF]/],
+  ["Han", /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/],
+  ["Thai", /[\u0E00-\u0E7F]/],
+  ["Khmer", /[\u1780-\u17FF]/],
+  ["Tibetan", /[\u0F00-\u0FFF]/],
+  ["Sinhala", /[\u0D80-\u0DFF]/],
+  ["Devanagari", /[\u0900-\u097F]/],
+  ["Cyrillic", /[\u0400-\u04FF]/],
+  ["Greek", /[\u0370-\u03FF]/],
+  ["Latin", /[A-Za-z\u00C0-\u024F]/]
+];
+
+export function scriptOfText(text) {
+  const str = String(text == null ? "" : text);
+  for (const test of SCRIPT_TESTS) if (test[1].test(str)) return test[0];
+  return "Unknown";
+}
+
+// Direction of the first strong segment of a prepared (with segments) handle.
+// `fallback` is used when the text carries no strong RTL character, which is
+// exactly when pretext leaves `segLevels` null.
+export function directionFromLevels(pre, fallback) {
+  const levels = pre && pre.segLevels;
+  const dir = fallback === "rtl" ? "rtl" : "ltr";
+  if (!levels || !levels.length) return dir;
+  const kinds = (pre && pre.kinds) || null;
+  for (let i = 0; i < levels.length; i++) {
+    if (kinds && kinds[i] !== "text") continue;   // spaces and tabs are neutral
+    return (levels[i] & 1) ? "rtl" : "ltr";
+  }
+  return (levels[0] & 1) ? "rtl" : "ltr";
+}
 
 export function createMetrics(fontRoles) {
   const roles = new Map();
@@ -75,6 +145,24 @@ export function createMetrics(fontRoles) {
   const ids = new Map();
   // role -> array of unpinned texts, oldest first (cheap FIFO eviction)
   const evictable = new Map();
+
+  /* --- Localized preparation (Phase 4) --------------------------------
+     A native name has to be segmented in its own language: pretext reads the
+     locale through Intl.Segmenter, and `setLocale()` is a *global* switch that
+     also clears the shared measurement caches (already-prepared handles stay
+     valid). Calling it per render would throw the caches away dozens of times
+     a frame, so every localized string is queued here and prepared in one
+     grouped pass: setLocale(locale) once per group, prepare that group, and a
+     single setLocale() back to the default at the end. */
+  const localizedQueue = [];
+  // role -> Map(text -> { locale, wordBreak }) — what a handle was built with.
+  const localeOf = new Map();
+
+  function noteLocale(role, text, locale, wordBreak) {
+    let m = localeOf.get(role.name);
+    if (!m) { m = new Map(); localeOf.set(role.name, m); }
+    m.set(text, { locale: locale, wordBreak: wordBreak });
+  }
 
   function roleOf(name) {
     const r = roles.get(name);
@@ -239,6 +327,122 @@ export function createMetrics(fontRoles) {
     },
     roleNames: function () { return Array.from(roles.keys()); },
 
+    // --- registration in another language ------------------------------
+    // Queue one string to be prepared under `options.locale` (and optionally
+    // `options.wordBreak: "keep-all"`, which is what CJK/Hangul want). Nothing
+    // is prepared until flushLocalized() runs — see the comment above.
+    prepareLocalized: function (role, id, text, options) {
+      const r = roleOf(role);
+      const str = text == null ? "" : String(text);
+      const locale = (options && options.locale) || "";
+      const wordBreak = (options && options.wordBreak) || "normal";
+      localizedQueue.push({
+        role: r, id: id, text: str, locale: locale, wordBreak: wordBreak
+      });
+      // Answer has()/textForId() straight away: the handle arrives at flush.
+      let m = ids.get(r.name);
+      if (!m) { m = new Map(); ids.set(r.name, m); }
+      m.set(id, str);
+      return api;
+    },
+
+    // Prepare everything prepareLocalized() queued, grouped by locale so
+    // pretext's global caches are cleared once per group instead of once per
+    // string, and leave the library back on the default locale.
+    flushLocalized: function () {
+      const out = { groups: 0, prepared: 0, reused: 0, locales: [] };
+      if (!localizedQueue.length) return out;
+      const groups = new Map();
+      for (const q of localizedQueue) {
+        const key = q.locale + " " + q.wordBreak;
+        let g = groups.get(key);
+        if (!g) { g = []; groups.set(key, g); }
+        g.push(q);
+      }
+      localizedQueue.length = 0;
+      for (const group of groups.values()) {
+        const locale = group[0].locale;
+        const wordBreak = group[0].wordBreak;
+        out.groups++;
+        if (out.locales.indexOf(locale || "(default)") === -1) {
+          out.locales.push(locale || "(default)");
+        }
+        setLocale(locale || undefined);
+        for (const q of group) {
+          let bucket = prepared.get(q.role.name);
+          if (!bucket) { bucket = new Map(); prepared.set(q.role.name, bucket); }
+          const already = bucket.get(q.text);
+          if (already && already.pinned && already.segments) { out.reused++; continue; }
+          const options = {};
+          if (q.role.letterSpacing) options.letterSpacing = q.role.letterSpacing;
+          if (wordBreak !== "normal") options.wordBreak = wordBreak;
+          bucket.set(q.text, {
+            text: q.text, segments: true, pinned: true,
+            pre: prepareWithSegments(q.text, q.role.font, options)
+          });
+          noteLocale(q.role, q.text, locale, wordBreak);
+          out.prepared++;
+        }
+      }
+      setLocale(); // back to the page's own locale, exactly once
+      return out;
+    },
+
+    // What a registered string was prepared with, or null.
+    localeFor: function (role, id) {
+      const r = roleOf(role);
+      const m = localeOf.get(r.name);
+      const text = (ids.get(r.name) || new Map()).get(id);
+      const rec = m && typeof text === "string" ? m.get(text) : null;
+      return rec ? { locale: rec.locale, wordBreak: rec.wordBreak } : null;
+    },
+
+    // --- writing direction ---------------------------------------------
+    // "rtl" / "ltr" from pretext's own per-segment bidi levels, with the
+    // language tag as the fallback for text that carries no strong RTL run.
+    directionOf: function (role, id, langTag) {
+      const r = roleOf(role);
+      const e = entryFor(r, textForId(r, id), true);
+      return directionFromLevels(e.pre, dirForLang(langTag));
+    },
+    directionOfText: function (role, text, langTag) {
+      const r = roleOf(role);
+      const e = adHoc(r, text == null ? "" : String(text), true);
+      return directionFromLevels(e.pre, dirForLang(langTag));
+    },
+
+    // --- rich inline flow (chips, and Phase 4's highlighted taglines) ----
+    // Thin, pure wrappers over pretext's rich-inline helper so a classic
+    // script (js/app.js cannot import a module) can reach it through
+    // window.ATLAS_TEXT.
+    prepareRich: function (items) { return prepareRichInline(items || []); },
+    richStats: function (rich, width) { return measureRichInlineStats(rich, width); },
+    // One entry per laid-out line: the fragments with their x offsets, in
+    // source-item order, ready to be painted as one block per line.
+    richLines: function (rich, width) {
+      const out = [];
+      walkRichInlineLineRanges(rich, width, function (range) {
+        const line = materializeRichInlineLineRange(rich, range);
+        let x = 0;
+        const fragments = [];
+        for (const f of line.fragments) {
+          x += f.gapBefore;
+          fragments.push({
+            itemIndex: f.itemIndex, text: f.text, x: x,
+            width: f.occupiedWidth,
+            // The compiler trims whitespace off an item's edges and carries it
+            // here as a width instead of a character. A caller that paints the
+            // fragments in normal inline flow (rather than at `x`) has to put
+            // that space back, or the words run together.
+            gapBefore: f.gapBefore
+          });
+          x += f.occupiedWidth;
+        }
+        out.push({ fragments: fragments, width: x });
+      });
+      return out;
+    },
+
     // --- the raw prepared handle --------------------------------------
     // Manual line layout (the dialog's justified columns) needs the
     // per-segment widths, break kinds and hyphen width that only
@@ -258,6 +462,13 @@ export function createMetrics(fontRoles) {
       const px = fontPx == null ? r.fontPx : fontPx;
       return entryAt(r, px, text == null ? "" : String(text), true).pre;
     },
+
+    // The pure script / direction helpers, published on the instance so a
+    // classic script (and scripts/smoke.mjs, which cannot import a module into
+    // the page) can reach the same answers this module gives.
+    scriptOf: scriptOfText,
+    dirForLang: dirForLang,
+    keepAllFor: keepAllFor,
 
     // --- the role's own metrics ---------------------------------------
     fontFor: function (role) {
@@ -390,7 +601,13 @@ export const ROLE_NAMES = [
   "map-label",
   "ocean-label",
   "hover-card",
-  "notebook"
+  "notebook",
+  // Phase 4 — the name in its own script, and the bold half of a highlighted
+  // search match.
+  "native-name",        // .map-card-native and .dialog-native
+  "card-native",        // .card-native, the small line under a card's name
+  "map-label-native",   // .map-label-native, the label's middle line
+  "card-tagline-strong" // the bold run inside a highlighted card tagline
 ];
 
 // The font-size token inside a CSS `font` shorthand: the first length that
@@ -477,7 +694,12 @@ export const DEFAULT_FLAGS = {
   reveal: true,         // the laid-out lines fade in one at a time
   hyphens: true,        // soft hyphens are injected into long place names
   chips: true,          // best-time / nearest-city set as rich inline chips
-  dialogAnimate: true   // prev/next animates the dialog body's height
+  dialogAnimate: true,  // prev/next animates the dialog body's height
+  // Phase 4 — names in their own script.
+  nativeNames: true,    // the native name under the Latin one (card, hover
+                        // card, dialog) and as the map label's middle line
+  searchHighlight: true,// matched tokens in a card tagline are set bold
+  localeText: true      // native strings are prepared under their own locale
 };
 
 export function resolveFlags(search, preset) {
@@ -564,6 +786,19 @@ function checkAgreement(metrics, doc, win) {
   return { checked: cards.length, warnings: warnings };
 }
 
+// The three roles a native name is painted in. All three are prepared in the
+// same locale group, so the map label, the card and the hover card / dialog
+// all break the same string the same way.
+const NATIVE_ROLES = ["native-name", "card-native", "map-label-native"];
+
+// CSS `word-break: keep-all` (and pretext's matching option) is for the
+// scripts that write without spaces between words and whose glue rules
+// pretext models: Chinese, Japanese and Korean.
+const KEEP_ALL_LANGS = new Set(["zh", "ja", "ko", "yue", "wuu", "cmn"]);
+export function keepAllFor(tag) {
+  return KEEP_ALL_LANGS.has(String(tag || "").toLowerCase().split("-")[0]);
+}
+
 function boot(win, doc) {
   const search = (win.location && win.location.search) || "";
   const flags = resolveFlags(search, win.ATLAS_FLAGS);
@@ -576,6 +811,27 @@ function boot(win, doc) {
 
     const data = win.ATLAS_DATA;
     const places = (data && data.places) || [];
+
+    /* The native names go FIRST, and in one grouped pass. setLocale() clears
+       pretext's shared measurement caches, so anything prepared before this
+       would have its cache thrown away; the handles below are built once the
+       library is back on the default locale and are never disturbed again. */
+    if (flags.nativeNames !== false) {
+      for (const p of places) {
+        if (!p.nativeName) continue;
+        const options = {
+          locale: flags.localeText === false ? "" : (p.nativeLang || ""),
+          // CSS `word-break: keep-all` is what the native-name rules declare
+          // for these tags, so the measurement has to be asked for the same.
+          wordBreak: keepAllFor(p.nativeLang) ? "keep-all" : "normal"
+        };
+        for (const role of NATIVE_ROLES) {
+          metrics.prepareLocalized(role, p.id, p.nativeName, options);
+        }
+      }
+      win.ATLAS_LOCALE_PREP = metrics.flushLocalized();
+    }
+
     for (const p of places) {
       // Roles that display these strings today. `story` only ever needs a
       // height, so it takes the cheap prepare() path.

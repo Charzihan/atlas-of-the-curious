@@ -63,6 +63,28 @@
         story (and the field note its whole text), every generated line span is
         aria-hidden, and the dialog's accessible name is still its title.
 
+   Phase 4 ("names in their own script") adds three more:
+
+     1. Every place whose native name is not Latin script has its hover card
+        opened, and every line break the browser made in that name must land on
+        an `Intl.Segmenter` word boundary (grapheme boundaries for CJK, which
+        is the contract pretext offers there). Because a short name does not
+        wrap in a real card, each one is then squeezed into a box exactly as
+        wide as its own widest word — wrapping forced, no word ever asked to
+        break — and judged again. A CJK name (prepared with `word-break:
+        keep-all`) that wraps in the card at all is a failure: that is the
+        overflow-wrap path pretext documents as approximate.
+     2. The map label's middle line and the dialog's second line: at least one
+        label carries a native line at 2.5x with the overlap count still zero,
+        and all 33 places whose native name differs render it under the dialog
+        title with the right text, `lang` and `dir`.
+     3. For five searches, every highlighted tagline is painted as exactly the
+        lines pretext's rich-inline flow predicted — one line box per block, no
+        horizontal overflow, a plain accessible copy alongside, and every
+        generated span aria-hidden — with ATLAS_GRID_DEBUG.agreement() still at
+        zero mismatches while the search runs, and nothing left behind when it
+        is cleared.
+
    Run: pnpm smoke  (or: node scripts/smoke.mjs) */
 import { startServer, launchChromium, INSTALL_HINT } from "./browser-harness.mjs";
 
@@ -115,6 +137,12 @@ const MAX_RIVER_RUN = 3;
 const BOX_EPS = 1;
 // One open() must stay cheap enough to feel instant.
 const MAX_OPEN_MS = 60;
+
+// Phase 4 thresholds.
+// The searches the highlighted taglines are checked under. "temple" matches
+// four stories but no tagline, which is the case worth keeping: a card can be
+// in the results with nothing in its tagline to pick out.
+const HIGHLIGHT_QUERIES = ["salt", "ice", "temple", "desert", "sea"];
 
 /* ---------------------------------------------------------------------- *
  * In-page instrumentation                                                *
@@ -252,6 +280,252 @@ async function labelsAt(page, zoom) {
   });
 }
 
+/* ---------------------------------------------------------------------- *
+ * Phase 4 probes: names in their own script, and highlighted search hits  *
+ * ---------------------------------------------------------------------- */
+
+// Open the hover card for every place whose native name is not Latin script
+// and check where the browser actually broke that line. A break has to land on
+// an Intl.Segmenter WORD boundary (for Arabic, Thai, Khmer, Sinhala, Tibetan…)
+// or, for the CJK scripts, on a grapheme boundary — which is the contract
+// pretext offers there.
+//
+// Runs entirely inside the page: one evaluate, no per-place round trip.
+function nativeHoverSweep() {
+  const D = window.ATLAS_MAP_DEBUG;
+  const T = window.ATLAS_TEXT;
+  const out = {
+    places: 0, nonLatin: 0, shown: 0, missing: [],
+    lines: 0, wrapped: 0, breaks: 0, badBreaks: [],
+    byScript: {}, dirs: {}, keepAll: 0, keepAllWrapped: [],
+    predictionMismatch: [],
+    narrow: {
+      minWidth: Infinity, maxWidth: 0, checked: 0, wrapped: 0,
+      unbreakable: [], lines: 0, breaks: 0, bad: []
+    }
+  };
+  if (!D || !T || typeof T.scriptOf !== "function") {
+    out.error = "ATLAS_MAP_DEBUG or ATLAS_TEXT (Phase 4 surface) missing";
+    return out;
+  }
+
+  const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+  const CJK = { Han: 1, Japanese: 1, Hangul: 1 };
+
+  // The lines the browser painted, read a grapheme at a time off the live
+  // element. A grapheme the browser collapsed at a soft wrap has no rect and
+  // is carried onto the line before it, where trimming drops it.
+  function paintedLines(el) {
+    const node = el.firstChild;
+    if (!node || node.nodeType !== 3) return [];
+    const text = node.nodeValue;
+    const range = document.createRange();
+    const lines = [];
+    let top = null, current = "";
+    for (const g of graphemes.segment(text)) {
+      range.setStart(node, g.index);
+      range.setEnd(node, g.index + g.segment.length);
+      const rects = range.getClientRects();
+      if (!rects.length) { current += g.segment; continue; }
+      const y = Math.round(rects[0].top * 4) / 4;
+      if (top === null) { top = y; current = g.segment; continue; }
+      if (Math.abs(y - top) > 1) { lines.push(current); current = g.segment; top = y; }
+      else current += g.segment;
+    }
+    if (current) lines.push(current);
+    return lines.map((l) => l.replace(/^\s+|\s+$/g, "")).filter((l) => l.length);
+  }
+
+  function boundaries(text, locale, script) {
+    const set = new Set([0, text.length]);
+    if (CJK[script]) {
+      for (const g of graphemes.segment(text)) set.add(g.index + g.segment.length);
+      return set;
+    }
+    const words = new Intl.Segmenter(locale || undefined, { granularity: "word" });
+    for (const s of words.segment(text)) set.add(s.index + s.segment.length);
+    return set;
+  }
+
+  // Where each painted line ended, as an offset into the source string.
+  function offsetsOf(text, lines) {
+    const offsets = [];
+    let at = 0;
+    for (let i = 0; i < lines.length - 1; i++) {
+      const found = text.indexOf(lines[i], at);
+      if (found === -1) return null;
+      at = found + lines[i].length;
+      offsets.push(at);
+    }
+    return offsets;
+  }
+
+  function judge(id, where, text, lines, locale, script, sink) {
+    const offsets = offsetsOf(text, lines);
+    if (offsets === null) {
+      sink.push({ id: id, where: where, why: "painted lines are not slices of the name" });
+      return 0;
+    }
+    const set = boundaries(text, locale, script);
+    for (const at of offsets) {
+      if (set.has(at)) continue;
+      if (/\s/.test(text.charAt(at)) && set.has(at + 1)) continue;
+      sink.push({
+        id: id, where: where, script: script, at: at,
+        around: text.slice(Math.max(0, at - 4), at) + "|" + text.slice(at, at + 4)
+      });
+    }
+    return offsets.length;
+  }
+
+  // The narrowest box that still fits this name's widest word. Squeezing to
+  // that forces the name to wrap without ever asking the browser to break a
+  // word — so a break that lands inside one is a real fault and not pretext's
+  // (documented, approximate) overflow-wrap fallback for an overlong run. A
+  // name that is a single word has nothing to wrap at and is reported as such.
+  function probeWidthFor(text, locale) {
+    const words = new Intl.Segmenter(locale || undefined, { granularity: "word" });
+    let widest = 0, pieces = 0;
+    for (const s of words.segment(text)) {
+      if (!s.segment.replace(/\s+/g, "")) continue;
+      pieces++;
+      widest = Math.max(widest, T.naturalWidthOfText("native-name", s.segment));
+    }
+    if (!pieces) { widest = T.naturalWidthOfText("native-name", text); pieces = 1; }
+    return { width: Math.ceil(widest) + 2, pieces: pieces };
+  }
+
+  // A narrow probe, so the wrapping is actually exercised: the same element
+  // class (so the same font) at a width no real card ever uses.
+  const host = document.createElement("div");
+  host.className = "map-card";
+  host.style.setProperty("position", "absolute");
+  host.style.setProperty("left", "-9999px");
+  host.style.setProperty("top", "0px");
+  const probe = document.createElement("span");
+  probe.className = "map-card-native";
+  host.appendChild(probe);
+  document.body.appendChild(host);
+
+  for (const p of (window.ATLAS_DATA.places || [])) {
+    out.places++;
+    const native = String(p.nativeName || "");
+    const script = T.scriptOf(native);
+    if (script === "Latin") continue;
+    out.nonLatin++;
+    out.byScript[script] = (out.byScript[script] || 0) + 1;
+
+    const shown = D.showCard(p.id);
+    if (!shown || !shown.native) { out.missing.push(p.id); continue; }
+    out.shown++;
+    out.dirs[shown.native.dir] = (out.dirs[shown.native.dir] || 0) + 1;
+    if (shown.native.wordBreak === "keep-all") out.keepAll++;
+
+    const el = document.querySelector(".map-card .map-card-native");
+    const lines = paintedLines(el);
+    out.lines += lines.length;
+    if (lines.length > 1) out.wrapped++;
+    // `word-break: keep-all` on an overlong CJK run falls back to
+    // overflow-wrap, which pretext documents as approximate — so a keep-all
+    // name that actually wraps in the card is worth failing on.
+    if (shown.native.wordBreak === "keep-all" && lines.length > 1) {
+      out.keepAllWrapped.push(p.id + " → " + lines.length + " line(s)");
+    }
+    if (lines.length !== shown.native.predictedLines) {
+      out.predictionMismatch.push({
+        id: p.id, predicted: shown.native.predictedLines, painted: lines.length
+      });
+    }
+    out.breaks += judge(p.id, "hover card", native, lines, p.nativeLang, script, out.badBreaks);
+
+    // …and again, deliberately squeezed to its own widest word.
+    const box = probeWidthFor(native, p.nativeLang);
+    probe.textContent = native;
+    if (shown.native.wordBreak === "keep-all") probe.setAttribute("data-wb", "keep-all");
+    else probe.removeAttribute("data-wb");
+    probe.setAttribute("dir", shown.native.dir);
+    probe.style.setProperty("width", box.width + "px");
+    probe.style.setProperty("max-width", box.width + "px");
+    const tight = paintedLines(probe);
+    out.narrow.checked++;
+    out.narrow.lines += tight.length;
+    out.narrow.minWidth = Math.min(out.narrow.minWidth, box.width);
+    out.narrow.maxWidth = Math.max(out.narrow.maxWidth, box.width);
+    if (tight.length > 1) out.narrow.wrapped++;
+    else if (box.pieces < 2) out.narrow.unbreakable.push(p.id);
+    out.narrow.breaks +=
+      judge(p.id, "narrow probe", native, tight, p.nativeLang, script, out.narrow.bad);
+  }
+
+  host.remove();
+  D.hideCard();
+  return out;
+}
+
+// The tagline flow while a search is running: every visible card's tagline is
+// laid out by pretext's rich-inline helper over two fonts, painted one block
+// per line, and the card's predicted height uses that line count. For each
+// query: the painted line boxes must be exactly the lines that were predicted
+// (one line box each, no re-wrap, no horizontal overflow), and the grid must
+// still agree with its own arithmetic.
+function highlightSweep(queries) {
+  const G = window.ATLAS_GRID_DEBUG;
+  const out = { queries: [], error: null };
+  if (!G || typeof G.setQuery !== "function") {
+    out.error = "ATLAS_GRID_DEBUG.setQuery is missing (Phase 4 surface)";
+    return out;
+  }
+  for (const q of queries) {
+    G.setQuery(q);
+    const flows = G.flows();
+    const agreement = G.agreement();
+    const row = {
+      query: q,
+      cards: document.querySelectorAll("#grid .card").length,
+      flowed: Object.keys(flows).length,
+      matches: 0, boldRuns: 0,
+      lineMismatches: [], overflow: [], tallLines: [],
+      agreementChecked: agreement.checked,
+      agreementWarnings: agreement.warnings,
+      highlighted: agreement.highlighted,
+      flowMismatches: agreement.taglineFlowMismatches,
+      plainCopies: 0, exposedLines: 0
+    };
+    for (const id of Object.keys(flows)) {
+      const flow = flows[id];
+      row.matches += flow.matches;
+      const card = document.querySelector('.card[data-place-id="' + id + '"]');
+      if (!card) { row.lineMismatches.push(id + ": no card"); continue; }
+      const tag = card.querySelector(".card-tag");
+      const painted = tag.querySelectorAll(".tag-line");
+      if (painted.length !== flow.lines) {
+        row.lineMismatches.push(
+          id + ": predicted " + flow.lines + ", painted " + painted.length);
+      }
+      row.boldRuns += tag.querySelectorAll(".hl").length;
+      if (tag.querySelector(".visually-hidden")) row.plainCopies++;
+      for (const line of painted) {
+        if (!line.getAttribute("aria-hidden")) row.exposedLines++;
+        // One block per line means one line box per block; a re-wrap would
+        // make the block two line-heights tall.
+        const n = Math.round(line.offsetHeight / flow.lineHeight);
+        if (n !== 1) row.tallLines.push(id + ": a line box is " + n + " lines tall");
+      }
+      if (tag.scrollWidth > tag.clientWidth + 1) {
+        row.overflow.push(id + ": " + tag.scrollWidth + " > " + tag.clientWidth);
+      }
+    }
+    out.queries.push(row);
+  }
+  G.setQuery("");
+  out.cleared = {
+    flowed: Object.keys(G.flows()).length,
+    lineSpans: document.querySelectorAll("#grid .card-tag .tag-line").length,
+    agreement: G.agreement()
+  };
+  return out;
+}
+
 // Every place's hover card, inspected for a one-word last line.
 function taglineWidows(page) {
   return page.evaluate(() => {
@@ -291,6 +565,7 @@ function dialogSweep(eps) {
     worstRiver: null, riverPlaces: 0, riverTotal: 0,
     lineCounts: [], chipCounts: { chips: 0, fields: 0, plain: 0 },
     hyphenated: 0, dropCaps: 0, pullQuotes: 0, fullBleed: 0,
+    native: { shown: 0, expected: 0, dirs: {}, wrong: [] },
     maxOpenMs: 0, a11y: { storyMismatch: [], factMismatch: [], exposedLines: 0,
                           nameMismatch: [], hiddenStory: 0 },
     trials: null, reveal: null
@@ -305,6 +580,22 @@ function dialogSweep(eps) {
     if (!d.ready) continue;
     out.opened++;
     out.twoCol = d.twoCol;
+
+    // Phase 4: the second name under the title, and what the DOM carries.
+    const wantNative = !!p.nativeName && p.nativeName !== p.name;
+    if (wantNative) out.native.expected++;
+    if (d.native && d.native.shown) {
+      out.native.shown++;
+      out.native.dirs[d.native.rendered.dir] =
+        (out.native.dirs[d.native.rendered.dir] || 0) + 1;
+      if (d.native.rendered.text !== p.nativeName ||
+          d.native.rendered.lang !== (p.nativeLang || null) ||
+          d.native.rendered.dir !== d.native.planned.dir) {
+        out.native.wrong.push(p.id);
+      }
+    } else if (wantNative) {
+      out.native.wrong.push(p.id + " (missing)");
+    }
     out.justified = d.justified;
     out.colWidth = d.colWidth;
     out.innerWidth = d.innerWidth;
@@ -595,6 +886,21 @@ async function visit(browser, origin, viewport, options) {
       await page.evaluate(() => window.ATLAS_MAP_DEBUG.setZoom(1));
       await settleFrames(page);
       map.taglines = await taglineWidows(page);
+      // Phase 4, done-when 2: the native name inside the hover card.
+      map.native = await page.evaluate(nativeHoverSweep);
+      map.nativeLabels = await page.evaluate(() => {
+        window.ATLAS_MAP_DEBUG.setZoom(2.5);
+        window.ATLAS_MAP_DEBUG.place();
+        const rows = window.ATLAS_MAP_DEBUG.nativeLabels();
+        window.ATLAS_MAP_DEBUG.setZoom(1);
+        return {
+          labels: rows.length,
+          lines: rows.reduce((n, r) => n + r.lines, 0),
+          rtl: rows.filter((r) => r.dir === "rtl").length,
+          sample: rows.slice(0, 3)
+        };
+      });
+      await settleFrames(page);
       map.perf = await page.evaluate(ZOOM_RUN);
     }
     // The zoom run leaves the map at 2.5×; hand the grid a page in its
@@ -786,8 +1092,17 @@ async function visit(browser, origin, viewport, options) {
       };
     }
 
+    /* ---- Phase 4: the search terms picked out of the taglines --------- *
+     * Last, because it leaves the grid filtered while it runs; the query is
+     * cleared again before the sweep returns.                             */
+    const highlight = await page.evaluate(highlightSweep, HIGHLIGHT_QUERIES);
+    await settleFrames(page, 2);
+
     await cdp.detach();
-    return { stats, map, grid, hero, filter, anchor, expand, errors, warnings, ignored, notes };
+    return {
+      stats, map, grid, hero, filter, anchor, expand, highlight,
+      errors, warnings, ignored, notes
+    };
   } finally {
     await context.close();
   }
@@ -798,7 +1113,7 @@ async function visit(browser, origin, viewport, options) {
  * ---------------------------------------------------------------------- */
 
 function reportViewport(label, res, viewport, fail) {
-  const { stats, map, base, grid, hero, filter, anchor, expand } = res;
+  const { stats, map, base, grid, hero, filter, anchor, expand, highlight } = res;
   console.log(
     `${label.padEnd(22)} cards ${stats.cards}, markers ${stats.markers}, ` +
     `roles ${stats.roles}, agreement ${stats.agreement.checked} card(s)/` +
@@ -866,6 +1181,65 @@ function reportViewport(label, res, viewport, fail) {
       fail(`${t.widows.length} tagline(s) end on a single word:`);
       for (const w of t.widows) console.error(`      ${w}`);
     }
+
+    /* ---- Phase 4, done-when 2: the native name in the hover card ------ */
+    const n = map.native;
+    if (n.error) {
+      fail(`${label} native-name sweep: ${n.error}`);
+    } else {
+      const scripts = Object.keys(n.byScript).sort()
+        .map((s) => `${s} ${n.byScript[s]}`).join(", ");
+      const dirs = Object.keys(n.dirs).sort()
+        .map((d) => `${n.dirs[d]} ${d}`).join(", ");
+      console.log(
+        `  native names: ${n.nonLatin} of ${n.places} places are non-Latin ` +
+        `(${scripts}); ${n.shown} hover card(s) showed one (${dirs}), ` +
+        `${n.lines} painted line(s), ${n.wrapped} wrapped, ${n.breaks} break(s), ` +
+        `${n.badBreaks.length} not on a word/grapheme boundary`
+      );
+      console.log(
+        `  native names, squeezed to their own widest word ` +
+        `(${n.narrow.minWidth}–${n.narrow.maxWidth}px): ${n.narrow.checked} name(s), ` +
+        `${n.narrow.wrapped} forced to wrap, ${n.narrow.unbreakable.length} single-word ` +
+        `(${n.narrow.unbreakable.join(", ") || "none"}), ${n.narrow.lines} line(s), ` +
+        `${n.narrow.breaks} break(s), ${n.narrow.bad.length} not on a word/grapheme boundary`
+      );
+      if (n.shown !== n.nonLatin) {
+        fail(`${label} showed ${n.shown} of ${n.nonLatin} non-Latin native names` +
+             (n.missing.length ? `: ${n.missing.join(", ")}` : ""));
+      }
+      for (const bad of n.badBreaks.concat(n.narrow.bad)) {
+        console.error(`      ${bad.where} "${bad.id}": ${bad.around || bad.why}`);
+      }
+      if (n.badBreaks.length || n.narrow.bad.length) {
+        fail(`${label} broke ${n.badBreaks.length + n.narrow.bad.length} native ` +
+             "name(s) inside a word");
+      }
+      if (n.predictionMismatch.length) {
+        fail(`${label} painted a different number of native-name lines than ` +
+             `predicted: ${JSON.stringify(n.predictionMismatch)}`);
+      }
+      // keep-all + an overlong CJK run is pretext's approximate path; the
+      // dataset must never reach it in the card the reader sees.
+      if (n.keepAllWrapped.length) {
+        fail(`${label} a keep-all (CJK) native name wrapped in the hover card: ` +
+             n.keepAllWrapped.join(", "));
+      }
+      // The squeeze has to actually squeeze: every name with more than one
+      // word must have been forced onto more than one line.
+      const breakable = n.narrow.checked - n.narrow.unbreakable.length;
+      if (n.narrow.wrapped < breakable) {
+        fail(`${label} only ${n.narrow.wrapped} of ${breakable} multi-word native ` +
+             "name(s) were forced to wrap — the check proves little");
+      }
+    }
+
+    const nl = map.nativeLabels;
+    console.log(
+      `  map labels at 2.50x: ${nl.labels} carry a native line ` +
+      `(${nl.lines} line(s), ${nl.rtl} right-to-left)`
+    );
+    if (!nl.labels) fail(`${label} no map label carried a native-name line at 2.5x`);
 
     // Frame timing, against the baseline run with the labels off.
     const p = map.perf, b = base && base.perf;
@@ -1033,6 +1407,63 @@ function reportViewport(label, res, viewport, fail) {
     }
   }
 
+  /* ---- Phase 4, done-when 4: highlighted taglines ------------------- */
+  if (!highlight) {
+    fail(`${label} ran no search-highlight sweep`);
+  } else if (highlight.error) {
+    fail(`${label} search highlight: ${highlight.error}`);
+  } else {
+    for (const row of highlight.queries) {
+      console.log(
+        `  search "${row.query}": ${row.cards} card(s), ${row.flowed} flowed ` +
+        `tagline(s), ${row.boldRuns} bold run(s) over ${row.matches} match(es); ` +
+        `line counts ${row.lineMismatches.length ? "DIFFER" : "match"}, ` +
+        `${row.tallLines.length} re-wrapped line box(es), ` +
+        `${row.overflow.length} overflow(s); agreement ${row.agreementChecked} ` +
+        `card(s)/${row.agreementWarnings} mismatch(es) ` +
+        `(${row.highlighted} highlighted, ${row.flowMismatches} flow mismatch(es))`
+      );
+      if (row.lineMismatches.length) {
+        fail(`${label} search "${row.query}": ${row.lineMismatches.join("; ")}`);
+      }
+      if (row.tallLines.length) {
+        fail(`${label} search "${row.query}": ${row.tallLines.join("; ")}`);
+      }
+      if (row.overflow.length) {
+        fail(`${label} search "${row.query}" overflowed a card: ${row.overflow.join("; ")}`);
+      }
+      if (row.agreementWarnings || row.flowMismatches) {
+        fail(`${label} search "${row.query}" left the grid with ` +
+             `${row.agreementWarnings} mismatch(es)`);
+      }
+      if (row.plainCopies !== row.flowed) {
+        fail(`${label} search "${row.query}": ${row.flowed - row.plainCopies} ` +
+             "flowed tagline(s) carry no plain accessible copy");
+      }
+      if (row.exposedLines) {
+        fail(`${label} search "${row.query}": ${row.exposedLines} generated line ` +
+             "span(s) are not aria-hidden");
+      }
+    }
+    const flowedTotal = highlight.queries.reduce((n, r) => n + r.flowed, 0);
+    if (!flowedTotal) {
+      fail(`${label} not one of the ${HIGHLIGHT_QUERIES.length} searches ` +
+           "highlighted a single tagline");
+    }
+    const c = highlight.cleared;
+    console.log(
+      `  search cleared: ${c.flowed} flow(s) left, ${c.lineSpans} line span(s) left, ` +
+      `agreement ${c.agreement.checked} card(s)/${c.agreement.warnings} mismatch(es)`
+    );
+    if (c.flowed || c.lineSpans) {
+      fail(`${label} clearing the search left ${c.flowed} flow(s) and ` +
+           `${c.lineSpans} generated line span(s) behind`);
+    }
+    if (c.agreement.warnings) {
+      fail(`${label} the grid disagreed after the search was cleared`);
+    }
+  }
+
   for (const e of res.errors) console.error(`  error: ${e}`);
   if (res.errors.length) fail(`${label} logged ${res.errors.length} console/page error(s)`);
 }
@@ -1109,6 +1540,21 @@ function reportDialog(label, res, viewport, fail, expectedPlaces) {
   } else {
     console.log(`  rivers: n/a (ragged right below the ${900}px two-column breakpoint)`);
     if (sweep.justified) fail(`${label} justified a single ragged column`);
+  }
+
+  // ---- Phase 4: the second name under the title -----------------------
+  const nat = sweep.native;
+  console.log(
+    `  native names: ${nat.shown} of ${nat.expected} shown under the title (` +
+    Object.keys(nat.dirs).sort().map((d) => `${nat.dirs[d]} ${d}`).join(", ") +
+    `), ${nat.wrong.length} with the wrong text/lang/dir`
+  );
+  if (nat.shown !== nat.expected) {
+    fail(`${label} showed ${nat.shown} of ${nat.expected} native names in the dialog`);
+  }
+  if (nat.wrong.length) {
+    fail(`${label} native name text/lang/dir is wrong for: ` +
+         nat.wrong.slice(0, 3).join(", "));
   }
 
   // ---- Done-when 4: accessibility -------------------------------------

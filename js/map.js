@@ -16,7 +16,7 @@ import {
   measureLineStats,
   measureNaturalWidth
 } from "../vendor/pretext/layout.js";
-import { readFontRoles } from "./text.js";
+import { readFontRoles, directionFromLevels, dirForLang } from "./text.js";
 import { routeText } from "./text-route.js";
 
 (function () {
@@ -218,16 +218,21 @@ import { routeText } from "./text-route.js";
   FLAGS.labels = FLAGS.labels !== false;
   FLAGS.oceanLabels = FLAGS.oceanLabels !== false;
   FLAGS.hoverFit = FLAGS.hoverFit !== false;
+  FLAGS.nativeNames = FLAGS.nativeNames !== false;
 
   // Font roles, resolved straight out of the CSS registry so the canvas font
   // pretext measures with is the font the browser paints (see js/text.js).
   const ROLES = (function () {
-    try { return readFontRoles(document, ["map-label", "ocean-label", "hover-card"]); }
-    catch (e) { return {}; }
+    try {
+      return readFontRoles(document, [
+        "map-label", "ocean-label", "hover-card", "map-label-native", "native-name"
+      ]);
+    } catch (e) { return {}; }
   })();
   const ROLE_LABEL = ROLES["map-label"] || null;
   const ROLE_OCEAN = ROLES["ocean-label"] || null;
   const ROLE_TAG = ROLES["hover-card"] || null;
+  const ROLE_NATIVE = ROLES["map-label-native"] || null;
   function fontPxOf(role) {
     const m = role && /(\d*\.?\d+)px/.exec(role.font);
     return m ? parseFloat(m[1]) : 0;
@@ -244,6 +249,10 @@ import { routeText } from "./text-route.js";
   const TIER_TAG_Z = 2.4;
   const NAME_MAX_LINES = 3;
   const TAG_MAX_LINES = 3;
+  // The native name sits between the two. Two rows is plenty for every name in
+  // the dataset; a name that will not fit in them is simply left off this
+  // label rather than pushing the tagline out of the water.
+  const NATIVE_MAX_LINES = 2;
   // How far from the dot an anchor may sit, in cells. Nothing in the dataset
   // is further than 3 cells from water on the 150×39 grid (deserts and inland
   // forests are the far ones), so 4 covers every marker.
@@ -281,6 +290,7 @@ import { routeText } from "./text-route.js";
   // (resize) untouched — the label fonts are fixed px sizes, independent of
   // the map's cell size.
   const nameHandles = new Map();    // place id -> handle (name, uppercased)
+  const nativeHandles = new Map();  // place id -> handle (native name) or null
   const tagHandles = new Map();     // place id -> handle (tagline)
   const oceanHandles = new Map();   // name + "|" + step -> handle
   function makeHandle(text, role) {
@@ -301,6 +311,42 @@ import { routeText } from "./text-route.js";
     // text-transform, so the string is uppercased before it is measured.
     if (!h) { h = makeHandle(String(x.p.name).toUpperCase(), ROLE_LABEL); nameHandles.set(x.p.id, h); }
     return h;
+  }
+  // The name in its own script, for the label's middle line. Only a genuinely
+  // different name earns a line; the handle comes from js/text.js when it is
+  // there, because that is the one prepared under the place's own locale (and
+  // with word-break: keep-all for CJK). Never uppercased.
+  function nativeTextFor(p) {
+    if (!FLAGS.nativeNames) return "";
+    const s = String(p.nativeName || "");
+    return !s || s === p.name ? "" : s;
+  }
+  function nativeHandleFor(x) {
+    if (!ROLE_NATIVE) return null;
+    if (nativeHandles.has(x.p.id)) return nativeHandles.get(x.p.id);
+    const text = nativeTextFor(x.p);
+    let h = null;
+    if (text) {
+      const T = window.ATLAS_TEXT;
+      if (T && typeof T.handleFor === "function") {
+        try {
+          h = { text: text, ls: ROLE_NATIVE.letterSpacing || 0,
+                pre: T.handleFor("map-label-native", x.p.id) };
+        } catch (e) { h = null; }
+      }
+      if (!h) h = makeHandle(text, ROLE_NATIVE);
+    }
+    nativeHandles.set(x.p.id, h);
+    return h;
+  }
+  // Which way the native name runs. pretext's richer handle carries an
+  // approximate bidi level per segment; the first strong (text) segment
+  // decides, and the BCP 47 tag is only the fallback for a string with no
+  // strong RTL character at all.
+  function nativeDirFor(x) {
+    const h = nativeHandleFor(x);
+    const fallback = dirForLang(x.p.nativeLang);
+    return h ? directionFromLevels(h.pre, fallback) : fallback;
   }
   function tagHandleFor(x) {
     if (!ROLE_TAG) return null;
@@ -416,6 +462,7 @@ import { routeText } from "./text-route.js";
   // the sea anywhere near it at this zoom.
   function findAnchor(x, tier, cellW) {
     const nameH = nameHandleFor(x);
+    const nativeH = tier >= 2 ? nativeHandleFor(x) : null;
     const tagH = tier >= 2 ? tagHandleFor(x) : null;
     let best = null;
     for (let off = 1; off <= LABEL_MAX_OFFSET; off++) {
@@ -426,15 +473,31 @@ import { routeText } from "./text-route.js";
         if (kind[row * COLS + col] || occupancy[row * COLS + col]) continue;
         const name = routeAt(nameH, row, col, d.dir, cellW, NAME_MAX_LINES, row);
         if (!name.complete || !name.lines.length) continue;
+        let from = name.lines[name.lines.length - 1].row + 1;
+        // The native name takes the rows straight under the Latin one; if the
+        // water there is too narrow for it the label falls back to name +
+        // tagline rather than losing the anchor altogether.
+        let nativeLines = [];
+        if (nativeH) {
+          const nat = routeAt(nativeH, row, col, d.dir, cellW, NATIVE_MAX_LINES, from);
+          if (nat.complete && nat.lines.length) {
+            nativeLines = nat.lines;
+            from = nat.lines[nat.lines.length - 1].row + 1;
+          }
+        }
         let tagLines = [];
         if (tagH) {
-          const from = name.lines[name.lines.length - 1].row + 1;
           const tag = routeAt(tagH, row, col, d.dir, cellW, TAG_MAX_LINES, from);
           if (tag.complete) tagLines = tag.lines;
         }
-        const score = name.lines.length * 100 + off * 12 + d.pen + (tagH && !tagLines.length ? 40 : 0);
+        const score = name.lines.length * 100 + off * 12 + d.pen +
+          (tagH && !tagLines.length ? 40 : 0) +
+          (nativeH && !nativeLines.length ? 20 : 0);
         if (!best || score < best.score) {
-          best = { score: score, row: row, col: col, dir: d.dir, nameLines: name.lines, tagLines: tagLines };
+          best = {
+            score: score, row: row, col: col, dir: d.dir,
+            nameLines: name.lines, nativeLines: nativeLines, tagLines: tagLines
+          };
         }
       }
       if (best) break;   // nearest offset that works wins; distance matters
@@ -481,11 +544,26 @@ import { routeText } from "./text-route.js";
       entry.lines.push(span);
     }
     while (entry.lines.length > texts.length) entry.lines.pop().remove();
+    const nativeEnd = rec.nameCount + rec.nativeCount;
     for (let i = 0; i < texts.length; i++) {
       const span = entry.lines[i];
       if (span.textContent !== texts[i]) span.textContent = texts[i];
-      const isTag = i >= rec.nameCount;
+      const isNative = i >= rec.nameCount && i < nativeEnd;
+      const isTag = i >= nativeEnd;
+      if (span.classList.contains("map-label-native") !== isNative) {
+        span.classList.toggle("map-label-native", isNative);
+      }
       if (span.classList.contains("map-label-tag") !== isTag) span.classList.toggle("map-label-tag", isTag);
+      // The native lines carry their own language and direction; the Latin
+      // ones inherit the document's.
+      if (isNative) {
+        if (rec.nativeLang) span.setAttribute("lang", rec.nativeLang);
+        else span.removeAttribute("lang");
+        span.setAttribute("dir", rec.nativeDir || "ltr");
+      } else if (span.hasAttribute("dir")) {
+        span.removeAttribute("dir");
+        span.removeAttribute("lang");
+      }
     }
     el.style.setProperty("top", (rec.lines[0].row * LINEH) + "px");
     if (rec.dir > 0) {
@@ -606,7 +684,10 @@ import { routeText } from "./text-route.js";
       const rec = {
         id: x.p.id, row: best.row, col: best.col, dir: best.dir, cellW: cellW,
         nameCount: best.nameLines.length,
-        lines: best.nameLines.concat(best.tagLines)
+        nativeCount: best.nativeLines.length,
+        nativeLang: best.nativeLines.length ? (x.p.nativeLang || "") : "",
+        nativeDir: best.nativeLines.length ? nativeDirFor(x) : "ltr",
+        lines: best.nameLines.concat(best.nativeLines, best.tagLines)
       };
       rec.cells = cellsOf(rec);
       markCells(rec.cells);
@@ -725,10 +806,13 @@ import { routeText } from "./text-route.js";
   // Not a public API: scripts/smoke.mjs drives the map through this instead of
   // synthesising pointer events, and it is what makes the overlap assertion
   // and the zoom-frame timing reproducible.
-  let showCardRef = null, hideCardRef = null;
+  let showCardRef = null, hideCardRef = null, cardNativeLinesRef = null;
   window.ATLAS_MAP_DEBUG = {
     enabled: DEBUG_MAP,
-    flags: { labels: LABELS_ON, oceanLabels: OCEAN_ON, hoverFit: FLAGS.hoverFit },
+    flags: {
+      labels: LABELS_ON, oceanLabels: OCEAN_ON, hoverFit: FLAGS.hoverFit,
+      nativeNames: FLAGS.nativeNames && !!ROLE_NATIVE
+    },
     tiers: { name: TIER_NAME_Z, tagline: TIER_TAG_Z },
     getZoom: function () { return view ? view.zoom : 1; },
     // The same call the +/− buttons make: zoom about the viewport centre.
@@ -765,11 +849,32 @@ import { routeText } from "./text-route.js";
       const x = places.find(function (p) { return p.p.id === id; });
       if (!x || !showCardRef) return null;
       showCardRef(x);
+      const nativeEl = card ? card.querySelector(".map-card-native") : null;
       return {
         id: id,
         width: parseFloat(card && card.style.width) || 0,
-        lines: (card ? card.querySelector(".map-card-tag").textContent : "").split("\n")
+        lines: (card ? card.querySelector(".map-card-tag").textContent : "").split("\n"),
+        // The native-name line, as planned and as rendered. scripts/smoke.mjs
+        // reads the painted line boxes off this element.
+        native: nativeEl && !nativeEl.hidden ? {
+          text: nativeEl.textContent,
+          lang: nativeEl.getAttribute("lang"),
+          dir: nativeEl.getAttribute("dir"),
+          wordBreak: nativeEl.getAttribute("data-wb") || "normal",
+          predictedLines: cardNativeLinesRef ? cardNativeLinesRef(x) : 0
+        } : null
       };
+    },
+    // The label's own middle line, per placed label.
+    nativeLabels: function () {
+      return labelRecords.filter(function (r) { return r.nativeCount; })
+        .map(function (r) {
+          return {
+            id: r.id, lang: r.nativeLang, dir: r.nativeDir, lines: r.nativeCount,
+            text: r.lines.slice(r.nameCount, r.nameCount + r.nativeCount)
+              .map(function (l) { return l.text; })
+          };
+        });
     },
     hideCard: function () { if (hideCardRef) hideCardRef(); }
   };
@@ -1191,12 +1296,14 @@ import { routeText } from "./text-route.js";
     card.setAttribute("role", "tooltip");
     const cardCat = document.createElement("span"); cardCat.className = "map-card-cat";
     const cardName = document.createElement("span"); cardName.className = "map-card-name";
+    const cardNative = document.createElement("span"); cardNative.className = "map-card-native";
     const cardLoc = document.createElement("span"); cardLoc.className = "map-card-loc";
     const cardTag = document.createElement("pre"); cardTag.className = "map-card-tag";
     const cardCoords = document.createElement("span"); cardCoords.className = "map-card-coords";
     const cardCta = document.createElement("span"); cardCta.className = "map-card-cta";
     cardCta.textContent = "Open field note →";
-    card.appendChild(cardCat); card.appendChild(cardName); card.appendChild(cardLoc);
+    card.appendChild(cardCat); card.appendChild(cardName); card.appendChild(cardNative);
+    card.appendChild(cardLoc);
     card.appendChild(cardTag); card.appendChild(cardCoords); card.appendChild(cardCta);
     stage.appendChild(card);
 
@@ -1244,8 +1351,12 @@ import { routeText } from "./text-route.js";
     }
     const CARD_FONTS = {
       name: elFont(cardName), loc: elFont(cardLoc), coords: elFont(cardCoords),
-      cta: elFont(cardCta), cat: elFont(cardCat), tag: elFont(cardTag)
+      cta: elFont(cardCta), cat: elFont(cardCat), tag: elFont(cardTag),
+      native: elFont(cardNative)
     };
+    // Measured while it was still displayed; a place whose native name equals
+    // its Latin one never shows it.
+    cardNative.hidden = true;
     const CARD_CHROME_Y =
       (parseFloat(cardStyle.paddingTop) || 0) + (parseFloat(cardStyle.paddingBottom) || 0) +
       (parseFloat(cardStyle.borderTopWidth) || 0) + (parseFloat(cardStyle.borderBottomWidth) || 0);
@@ -1340,6 +1451,48 @@ import { routeText } from "./text-route.js";
       return fit;
     }
 
+    /* ---- The native name inside the hover card ------------------------
+       Measured through window.ATLAS_TEXT's "native-name" role — the same
+       registry entry css/style.css paints `.map-card-native` from, and the
+       one js/text.js prepared under the place's own locale. The line is left
+       to wrap on its own (no baked newlines): pretext says how many lines the
+       card must be tall for, and scripts/smoke.mjs checks that every break
+       the browser then makes falls on an Intl.Segmenter word boundary. */
+    const nativeFits = new Map();
+    function nativeFit(p) {
+      let fit = nativeFits.get(p.id);
+      if (fit) return fit;
+      const text = nativeTextFor(p);
+      const f = CARD_FONTS.native;
+      fit = {
+        text: text, width: 0, dir: dirForLang(p.nativeLang),
+        lang: p.nativeLang || "", wordBreak: "normal"
+      };
+      const T = window.ATLAS_TEXT;
+      if (text && T && typeof T.tightWidthOfText === "function") {
+        const room = Math.max(20, CARD_TEXT_W - f.chrome);
+        try {
+          fit.width = T.tightWidthOfText("native-name", text, room) + f.chrome;
+          fit.dir = T.directionOf("native-name", p.id, p.nativeLang);
+          const rec = T.localeFor("native-name", p.id);
+          if (rec) fit.wordBreak = rec.wordBreak;
+        } catch (e) { fit.width = 0; }
+      }
+      nativeFits.set(p.id, fit);
+      return fit;
+    }
+    // How many lines the native name needs once the card's width is settled.
+    function nativeLines(fit, textW) {
+      if (!fit.text) return 0;
+      const T = window.ATLAS_TEXT;
+      const room = Math.max(20, textW - CARD_FONTS.native.chrome);
+      if (T && typeof T.lineCountOfText === "function") {
+        try { return Math.max(1, T.lineCountOfText("native-name", fit.text, room)); }
+        catch (e) { return 1; }
+      }
+      return 1;
+    }
+
     // Final card width: the widest thing it has to hold, capped by the CSS.
     // The height comes out of the same line counts, so positionCard() can keep
     // a tall card on screen without ever reading the DOM back.
@@ -1349,6 +1502,7 @@ import { routeText } from "./text-route.js";
       if (fitted) return fitted;
       const p = x.p;
       const fit = tagFit(p);
+      const native = nativeFit(p);
       const cat = catById.get(p.category);
       const loc = p.country + " — " + p.region;
       const coords = "≈ " + p.coordinates;
@@ -1356,6 +1510,7 @@ import { routeText } from "./text-route.js";
       let textW = fit.width;
       if (FLAGS.hoverFit) {
         textW = Math.max(textW, runWidth("name", p.name));
+        textW = Math.max(textW, native.width);
         textW = Math.max(textW, runWidth("loc", loc));
         textW = Math.max(textW, runWidth("coords", coords));
         textW = Math.max(textW, runWidth("cta", cta));
@@ -1365,9 +1520,11 @@ import { routeText } from "./text-route.js";
         textW = CARD_TEXT_W;
       }
       const F = CARD_FONTS;
+      const nativeCount = nativeLines(native, textW);
       const height = CARD_CHROME_Y +
         (cat ? F.cat.lh + F.cat.chromeY + F.cat.mb : 0) +
         runLines("name", p.name, textW) * F.name.lh + F.name.mb +
+        (nativeCount ? nativeCount * F.native.lh + F.native.mb : 0) +
         runLines("loc", loc, textW) * F.loc.lh + F.loc.mb +
         fit.lines.length * F.tag.lh + F.tag.mb +
         runLines("coords", coords, textW) * F.coords.lh + F.coords.mb +
@@ -1375,7 +1532,9 @@ import { routeText } from "./text-route.js";
       fitted = {
         width: Math.ceil(textW + CARD_CHROME),
         height: Math.ceil(height),
-        lines: fit.lines
+        lines: fit.lines,
+        native: native,
+        nativeLines: nativeCount
       };
       cardFits.set(x.p.id, fitted);
       return fitted;
@@ -1406,6 +1565,19 @@ import { routeText } from "./text-route.js";
       cardCat.style.color = x.accent;
       cardCat.style.borderColor = x.accent;
       cardName.textContent = x.p.name;
+      const native = fit.native;
+      if (native && native.text) {
+        cardNative.hidden = false;
+        cardNative.textContent = native.text;
+        if (native.lang) cardNative.setAttribute("lang", native.lang);
+        else cardNative.removeAttribute("lang");
+        cardNative.setAttribute("dir", native.dir);
+        if (native.wordBreak === "keep-all") cardNative.setAttribute("data-wb", "keep-all");
+        else cardNative.removeAttribute("data-wb");
+      } else {
+        cardNative.hidden = true;
+        cardNative.textContent = "";
+      }
       cardLoc.textContent = x.p.country + " — " + x.p.region;
       cardTag.textContent = fit.lines.join("\n");
       cardCoords.textContent = "≈ " + x.p.coordinates;
@@ -1545,6 +1717,10 @@ import { routeText } from "./text-route.js";
     }
     showCardRef = showCard;
     hideCardRef = hideCard;
+    cardNativeLinesRef = function (x) {
+      const fit = cardFit(x);
+      return fit.nativeLines || 0;
+    };
     applyView();
     requestPlacement();   // ocean names at tier 0, place names from 1.4×
 
