@@ -58,8 +58,18 @@ It also drives the map through `window.ATLAS_MAP_DEBUG` and checks that at
 name (verified twice: from the placement records and from the painted DOM
 boxes mapped back onto the grid), that none of the 40 hover-card taglines ends
 on a one-word last line, that a scripted zoom from 1x to 2.5x stays cheap, and
-that the phone viewport renders no labels at all. Run it after any change to
-the layout, the fonts or the map.
+that the phone viewport renders no labels at all.
+
+It then measures the grid: it asserts that all 40 predicted card tops and
+heights match the rendered ones, that a filter change and a card expansion cost
+no forced synchronous layout (every layout-forcing getter is wrapped in the
+page and attributed to its caller, and Chrome DevTools Protocol `LayoutCount` /
+`RecalcStyleCount` are sampled either side of a synchronously dispatched
+click), that the hovered card keeps its on-screen position across a filter
+change, that an expansion repositions each card at most once, and that the
+fitted hero headline lands on exactly two lines. The map checks run first: the
+grid checks scroll the grid to the top of the viewport, which pauses the map's
+animation loop. Run it after any change to the layout, the fonts or the map.
 
 ## Features
 
@@ -96,6 +106,29 @@ the layout, the fonts or the map.
   width is what decides which side of the marker the card opens on.
 - **Locate me**: drop a "you are here" marker from your GPS position and label
   the nearest wonder with its distance, then sort the list by distance.
+- **A predictive masonry grid**: every card's height is arithmetic before a
+  single pixel is laid out — fixed chrome measured once at boot from one probe
+  card, plus pretext's height for the name, location, tagline and link. The
+  layout pass does writes only (no `offsetHeight`, no `getBoundingClientRect`),
+  so filtering the grid costs zero forced synchronous layouts.
+- **Cards that glide**: because the new slots are known before the DOM changes,
+  each card animates from its old position to its new one (FLIP, via the Web
+  Animations API). Cards leaving the filter fade where they stand; cards
+  entering rise into their slot. `prefers-reduced-motion` gets a plain swap.
+- **The card under your cursor stays put**: when a filter, search or sort
+  reflows the grid, the hovered (or keyboard-focused) card keeps its on-screen
+  position — the page is scrolled by the card's predicted displacement in the
+  same frame as the layout write, before paint.
+- **Balanced, fitted text**: taglines, names and location lines are
+  shrink-wrapped to the narrowest box that keeps their line count, so the last
+  line carries its share of the words; long names step down a size (1.15 →
+  1.05 → 0.95rem) until they fit on one line; and the hero headline is fitted
+  at every viewport width so it always lands on exactly two whole-word lines
+  (three on a phone).
+- **Expand a card in place**: on wide screens, clicking a card's body (or
+  Enter/Space on a focused one) opens the story and field note inside the grid
+  — the card's height animates and its neighbours slide in the same frame,
+  from a predicted height. Deep links and phones still use the modal.
 - **Live search** across names, countries, regions, full story text, and the
   new best-time / nearest-city fields.
 - **Category filter chips** with per-category counts, plus sorting
@@ -162,6 +195,11 @@ browser without a rebuild:
 | `labels` | `js/map.js` | no place-name labels on the map |
 | `oceanLabels` | `js/map.js` | no ocean or sea names |
 | `hoverFit` | `js/map.js` | the hover card stays at its maximum width instead of shrink-wrapping |
+| `predictiveGrid` | `js/app.js` | arithmetic card heights off; the grid falls back to the original measured layout |
+| `flip` | `js/app.js` | no glide — cards jump straight to their new slot |
+| `scrollAnchor` | `js/app.js` | the card under the cursor no longer keeps its place across a reflow |
+| `fitText` | `js/app.js` | no balanced taglines, no fitted names, no fitted headline |
+| `expandInPlace` | `js/app.js` | clicking a card opens the modal instead of expanding it in the grid |
 
 For example `?noflags=labels,oceanLabels` gives the pre-Phase-1 map, which is
 also what `pnpm smoke` loads to get a frame-timing baseline.
@@ -180,6 +218,11 @@ cells against the land mask and warns in the console on any overlap. The same
 entry points are on `window.ATLAS_MAP_DEBUG`: `setZoom(z)`, `place()`,
 `checkLabels()`, `checkPainted()`, `labels()`, `oceanLabels()`, `stats()` and
 `showCard(id)`.
+
+**Grid debugging.** `window.ATLAS_GRID_DEBUG` exposes the layout's own
+bookkeeping for the same reason: `agreement()` re-checks every card's predicted
+top/height against the DOM, `writes()` counts position writes per card,
+`slots()`, `hero()` and `lastLayout()` report what the last pass decided.
 
 ## Security
 
@@ -239,8 +282,9 @@ js/data.js        — the dataset (40 places, 7 categories)
 js/landmap.js     — generated ASCII land grid (120×40, from Natural Earth)
 js/text.js       — text metrics on top of pretext: the font role registry,
                     window.ATLAS_TEXT, feature flags, dev agreement check
-js/app.js        — search, filters, URL state, dialog, routing, daily pick,
-                    geolocation, distance sort, service-worker registration
+js/app.js        — predictive masonry (FLIP, scroll anchor, fitted text,
+                    expand in place), search, filters, URL state, dialog,
+                    routing, daily pick, geolocation, distance sort, sw reg
 js/text-route.js — pure variable-width text routing (worker-ready): pretext
                     handle + per-row widths -> the lines that fit
 js/map.js        — the Text Atlas (character-grid map, uses pretext), pan/zoom,
