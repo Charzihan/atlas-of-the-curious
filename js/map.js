@@ -31,7 +31,20 @@ import { prepareWithSegments, layoutWithLines } from "../vendor/pretext/layout.j
   const COLS = MAP.cols;
   const ROWS = MAP.rows;
 
-  const MONO = "ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace";
+  // The map's monospace stack lives in css/style.css as --font-mono, so the
+  // CSS the browser paints and the canvas font string pretext measures with
+  // cannot drift. Named faces only: a generic keyword such as `ui-monospace`
+  // can resolve to a different face in a canvas 2D context than in CSS, which
+  // would put the character grid and its measurements out of step.
+  const MONO_FALLBACK =
+    'SFMono-Regular, Menlo, Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace';
+  const MONO = (function () {
+    try {
+      const v = getComputedStyle(document.documentElement)
+        .getPropertyValue("--font-mono").trim();
+      return v || MONO_FALLBACK;
+    } catch (e) { return MONO_FALLBACK; }
+  })();
   const DPR = Math.min(2, (typeof devicePixelRatio === "number" ? devicePixelRatio : 1) || 1);
   const ROW_FACTOR = 1.18;
   const PX_MAX = 18;
@@ -540,9 +553,16 @@ import { prepareWithSegments, layoutWithLines } from "../vendor/pretext/layout.j
     // ---- Hover card --------------------------------------------------------
     const CARD_F = Math.max(11, Math.round(PX * 0.95));
     const cardFont = CARD_F + "px " + MONO;
-    const cardProbe = document.createElement("canvas").getContext("2d");
-    cardProbe.font = cardFont;
-    const CARD_CHAR = cardProbe.measureText("MMMMMMMMMM").width / 10;
+    // Only the fallback path needs a probe canvas, so measure lazily.
+    let cardChar = 0;
+    function cardCharW() {
+      if (!cardChar) {
+        const probe2 = document.createElement("canvas").getContext("2d");
+        probe2.font = cardFont;
+        cardChar = probe2.measureText("MMMMMMMMMM").width / 10;
+      }
+      return cardChar;
+    }
 
     card = document.createElement("div");
     card.className = "map-card";
@@ -558,6 +578,34 @@ import { prepareWithSegments, layoutWithLines } from "../vendor/pretext/layout.j
     card.appendChild(cardTag); card.appendChild(cardCoords); card.appendChild(cardCta);
     stage.appendChild(card);
     const CARD_W = isMobile ? Math.min(230, Math.round(mapW * 0.62)) : 252;
+    // The width the tagline actually gets. CARD_W above is the *positioning*
+    // width (it decides which side of the marker the card flips to); the card
+    // element itself is sized by .map-card in css/style.css. Read the content
+    // box of the tagline element once, here, rather than guessing — one DOM
+    // read at build time, none afterwards.
+    const CARD_PAD_X = 14; // .map-card { padding: 12px 14px } — fallback only
+    const CARD_TEXT_W = Math.max(40, cardTag.clientWidth || CARD_W - CARD_PAD_X * 2);
+
+    // Wrap the tagline through the shared text-metrics module so the hover
+    // card measures with the same font-role registry as the rest of the site
+    // (role "hover-card" == the .map-card-tag rule). If js/text.js is absent
+    // or its `metrics` flag is off, fall back to the local pretext call.
+    function tagLines(text) {
+      const T = window.ATLAS_TEXT;
+      if (T && typeof T.linesOfText === "function") {
+        try {
+          const viaModule = T.linesOfText("hover-card", text, CARD_TEXT_W);
+          if (viaModule && viaModule.length) return trimEnds(viaModule);
+        } catch (e) { /* fall through to the local path */ }
+      }
+      return trimEnds(wrapLines(text, cardFont, cardCharW(), 30, CARD_F * 1.3));
+    }
+    // .map-card-tag is `white-space: pre-wrap`, so a hanging trailing space
+    // could push a full line over the edge and wrap it a second time.
+    function trimEnds(lines) {
+      return lines.map(function (l) { return l.replace(/\s+$/, ""); })
+        .filter(function (l) { return l.length; });
+    }
 
     function positionCard(x) {
       // The card is a child of the (untransformed) stage, so position it in
@@ -580,7 +628,7 @@ import { prepareWithSegments, layoutWithLines } from "../vendor/pretext/layout.j
       cardCat.style.borderColor = x.accent;
       cardName.textContent = x.p.name;
       cardLoc.textContent = x.p.country + " — " + x.p.region;
-      cardTag.textContent = wrapLines(x.p.tagline, cardFont, CARD_CHAR, 30, CARD_F * 1.3).join("\n");
+      cardTag.textContent = tagLines(x.p.tagline).join("\n");
       cardCoords.textContent = "≈ " + x.p.coordinates;
       card.style.setProperty("--accent", x.accent);
       positionCard(x);

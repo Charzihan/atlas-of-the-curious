@@ -12,6 +12,68 @@
   --line: rgba(154, 164, 200, 0.18);
   --radius: 14px;
   --shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+
+  /* ---------- Font role registry ----------
+     The single source of truth for every piece of text js/text.js measures.
+     Each role is a CSS font shorthand (`--font-<role>`) plus its line height
+     (`--lh-<role>`) and letter spacing (`--ls-<role>`). js/text.js reads these
+     three once at boot, resolves rem/em into px and turns `--font-<role>` into
+     a canvas font string; the rules below are written in terms of the very
+     same variables, so what the browser paints and what pretext measures
+     cannot drift apart.
+
+     Only NAMED faces appear in the stacks. A generic keyword such as
+     `ui-monospace` may resolve to a different face in a canvas 2D context
+     than in CSS, which would silently poison every measurement. */
+  --font-serif: Georgia, "Times New Roman", serif;
+  --font-sans: Verdana, Geneva, sans-serif;
+  --font-mono: SFMono-Regular, Menlo, Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace;
+
+  /* Grid card title — .card h3 */
+  --font-card-name: normal 1.15rem var(--font-serif);
+  --lh-card-name: 1.55;
+  --ls-card-name: 0px;
+
+  /* Grid card tagline — .card-tag */
+  --font-card-tagline: normal 0.92rem var(--font-serif);
+  --lh-card-tagline: 1.55;
+  --ls-card-tagline: 0px;
+
+  /* Long-form body copy — .dialog-story */
+  --font-story: normal 1rem var(--font-serif);
+  --lh-story: 1.55;
+  --ls-story: 0px;
+
+  /* Pulled-out italic line — .dialog-tagline */
+  --font-quote: italic 1.08rem var(--font-serif);
+  --lh-quote: 1.55;
+  --ls-quote: 0px;
+
+  /* Filter chip label — .chip */
+  --font-chip: normal 0.82rem var(--font-sans);
+  --lh-chip: 1.55;
+  --ls-chip: 0px;
+
+  /* Name label pinned to the map grid — .map-label.
+     Rendered uppercase: measure the uppercased string, not the raw name. */
+  --font-map-label: normal 11px var(--font-mono);
+  --lh-map-label: 1.35;
+  --ls-map-label: 0.05em;
+
+  /* Sea name drawn into the water (no element uses it yet) */
+  --font-ocean-label: normal 0.62rem var(--font-mono);
+  --lh-ocean-label: 1.4;
+  --ls-ocean-label: 0.18em;
+
+  /* Marker hover card tagline — .map-card-tag */
+  --font-hover-card: normal 0.72rem var(--font-mono);
+  --lh-hover-card: 1.5;
+  --ls-hover-card: 0px;
+
+  /* Field-notebook body copy (no element uses it yet) */
+  --font-notebook: normal 0.95rem var(--font-serif);
+  --lh-notebook: 1.6;
+  --ls-notebook: 0px;
   color-scheme: dark;
 }
 
@@ -21,7 +83,7 @@ html { scroll-behavior: smooth; }
 
 body {
   margin: 0;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: var(--font-serif);
   background:
     radial-gradient(1100px 500px at 85% -10%, rgba(79, 195, 247, 0.08), transparent 60%),
     radial-gradient(900px 480px at -10% 15%, rgba(232, 180, 90, 0.07), transparent 55%),
@@ -154,8 +216,9 @@ body {
 
 .chip {
   --chip-accent: var(--gold);
-  font: inherit; font-size: 0.82rem;
-  font-family: Verdana, Geneva, sans-serif;
+  font: var(--font-chip);
+  line-height: var(--lh-chip);
+  letter-spacing: var(--ls-chip);
   color: var(--ink-dim);
   background: var(--bg-soft);
   border: 1px solid var(--line);
@@ -248,7 +311,12 @@ body {
   .map-user-ring { animation: none; opacity: 0; }
 }
 
-.card h3 { margin: 10px 0 2px; font-size: 1.15rem; font-weight: normal; }
+.card h3 {
+  margin: 10px 0 2px;
+  font: var(--font-card-name);
+  line-height: var(--lh-card-name);
+  letter-spacing: var(--ls-card-name);
+}
 
 .card-loc {
   font-family: Verdana, Geneva, sans-serif;
@@ -257,7 +325,14 @@ body {
   margin: 0 0 10px;
 }
 
-.card-tag { color: var(--ink-dim); font-size: 0.92rem; margin: 0; flex: 1 1 auto; }
+.card-tag {
+  color: var(--ink-dim);
+  font: var(--font-card-tagline);
+  line-height: var(--lh-card-tagline);
+  letter-spacing: var(--ls-card-tagline);
+  margin: 0;
+  flex: 1 1 auto;
+}
 
 .card-more {
   display: inline-block; margin-top: 14px;
@@ -332,8 +407,19 @@ dialog::backdrop {
   overflow-y: auto;
 }
 
-.dialog-tagline { font-size: 1.08rem; font-style: italic; margin: 0 0 12px; }
-.dialog-story { margin: 0 0 16px; color: var(--ink); }
+.dialog-tagline {
+  font: var(--font-quote);
+  line-height: var(--lh-quote);
+  letter-spacing: var(--ls-quote);
+  margin: 0 0 12px;
+}
+.dialog-story {
+  margin: 0 0 16px;
+  color: var(--ink);
+  font: var(--font-story);
+  line-height: var(--lh-story);
+  letter-spacing: var(--ls-story);
+}
 
 .fact {
   background: rgba(255, 255, 255, 0.035);
@@ -805,9 +891,9 @@ dialog::backdrop {
 
 .map-label {
   position: absolute;
-  font-size: 11px;
-  line-height: 1.35;
-  letter-spacing: 0.05em;
+  font: var(--font-map-label);
+  line-height: var(--lh-map-label);
+  letter-spacing: var(--ls-map-label);
   text-transform: uppercase;
   color: var(--ink);
   background: rgba(10, 15, 32, 0.85);
@@ -881,9 +967,9 @@ dialog::backdrop {
 
 .map-card-tag {
   margin: 0 0 8px;
-  font-family: "DejaVu Sans Mono", "Courier New", monospace;
-  font-size: 0.72rem;
-  line-height: 1.5;
+  font: var(--font-hover-card);
+  line-height: var(--lh-hover-card);
+  letter-spacing: var(--ls-hover-card);
   white-space: pre-wrap;
   color: var(--ink-dim);
 }

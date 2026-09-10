@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Atlas of the Curious — text overflow checks</title>
+  <!-- Development-only page. It is opened by scripts/check-text.mjs in headless
+       Chromium; it is not part of the site and sw.js does not precache it.
+       css/style.css is loaded because it *is* the font-role registry: without
+       it js/text.js would have no roles to resolve. -->
+  <link rel="stylesheet" href="../css/style.css">
+  <script src="../js/data.js" defer></script>
+  <script src="../js/text.js" type="module" defer></script>
+  <script src="./text-check.js" type="module" defer></script>
+</head>
+<body>
+  <h1>Text overflow checks</h1>
+  <p id="status">running…</p>
+  <pre id="report"></pre>
+</body>
+</html>

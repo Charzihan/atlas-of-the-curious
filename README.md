@@ -33,14 +33,27 @@ Small build steps run with Node (no bundler):
 ```sh
 pnpm vendor      # copy @chenglou/pretext modules into vendor/pretext/
 pnpm build-map   # rasterize world coastlines into js/landmap.js (ASCII grid)
-pnpm validate    # check the dataset (unique ids, valid coords, required fields)
+pnpm validate    # dataset checks + headless text-overflow checks
 pnpm build-pages # generate per-place share pages into places/<id>/
-pnpm build       # validate + build-pages (run before deploying)
+pnpm build       # dataset checks + build-pages (run before deploying)
+pnpm smoke       # open the real page in headless Chromium at two viewports
 ```
 
 `vendor` and `build-map` are already committed; re-run them only after upgrading
 the dependency or changing the map grid settings. Run `pnpm build` after editing
 `js/data.js` so the per-place share pages and the dataset stay in sync.
+
+`pnpm validate` runs two stages: `scripts/validate-data.mjs` (pure Node — ids,
+coordinates, required fields) and then `scripts/check-text.mjs`, which needs a
+real font engine and so starts the dev server and opens `test/text-check.html`
+in headless Chromium. If the browser is missing it prints the install command
+and exits 0, so the dataset check still gates a commit; pass `--strict` to turn
+that skip into a failure. `pnpm build` deliberately runs only the pure-Node
+dataset check, so deploying never requires a browser.
+
+`pnpm smoke` loads `index.html` at 1280x800 and 390x844, waits for the text
+metrics and the map, and fails on any console error or uncaught page error.
+Run it after any change to the layout, the fonts or the map.
 
 ## Features
 
@@ -76,6 +89,45 @@ the dependency or changing the map grid settings. Run `pnpm build` after editing
 - **Performance**: the map animation and ambient ripples pause when the map
   scrolls out of view and resume seamlessly.
 - Fully responsive, dark "atlas" theme, no external fonts or images.
+
+## Text metrics and the font role registry
+
+Every piece of text the site needs to reason about (rather than merely paint)
+belongs to a **font role**. The roles live in `css/style.css` as three custom
+properties each — `--font-<role>` (a CSS `font` shorthand), `--lh-<role>` and
+`--ls-<role>` — and the rules that render them are written in terms of those
+same variables, so the painted font and the measured font cannot drift apart:
+
+```css
+--font-card-name: normal 1.15rem var(--font-serif);
+--lh-card-name: 1.55;
+
+.card h3 { font: var(--font-card-name); line-height: var(--lh-card-name); }
+```
+
+`js/text.js` reads the registry once at boot, resolves `rem`/`em` into `px`,
+turns each shorthand into a canvas font string and hands the result to
+`createMetrics()` — a pure factory that touches neither `document` nor `window`
+(so a later phase can move it into a Web Worker). It answers `heightOf`,
+`linesOf` and `tightWidth` for text registered by place id, the same three for
+arbitrary strings (`heightOfText`, `linesOfText`, `tightWidthOfText`), and
+`fontFor`. The instance is published as `window.ATLAS_TEXT` together with an
+`atlas:text-ready` event, because `js/app.js` is a classic script and cannot
+import a module.
+
+Two rules make the numbers trustworthy: the canvas font string must match the
+CSS exactly, and a font stack may only name real faces — a generic keyword such
+as `ui-monospace` can resolve to a different face in a canvas 2D context than in
+CSS, which would silently poison every measurement.
+
+Served from `localhost` (or with `?debug=metrics` in the URL), the module
+re-measures the first five cards after the first render and warns in the console
+if pretext and the browser disagree by more than one line height.
+
+**Feature flags.** `window.ATLAS_FLAGS` carries the defaults from `js/text.js`;
+`?flags=a,b` turns features on and `?noflags=a,b` turns them off. `metrics` is
+the flag for the text-metrics module itself — with `?noflags=metrics` the page
+still works and the map falls back to its own wrapping.
 
 ## Security
 
@@ -120,7 +172,9 @@ Two notes before you ship:
   site (it contains no build timestamps, so diffs stay clean).
 - **Skip the large source files.** `data/*.geojson` (≈ 970 KB) are only inputs
   to `pnpm build-map` and are ignored by `.gitignore`; don't upload them to a
-  static host. `node_modules/` is ignored too. The service worker is
+  static host. `node_modules/` is ignored too. `scripts/` and `test/` are
+  development-only (nothing at runtime loads them, and the service worker does
+  not precache them), so they can be left out of a deploy. The service worker is
   same-origin only and never fetches external resources.
 
 ## Project layout
@@ -131,6 +185,8 @@ css/style.css     — all styling (no external assets)
 css/place.css     — styling for the generated per-place share pages
 js/data.js        — the dataset (40 places, 7 categories)
 js/landmap.js     — generated ASCII land grid (120×40, from Natural Earth)
+js/text.js       — text metrics on top of pretext: the font role registry,
+                    window.ATLAS_TEXT, feature flags, dev agreement check
 js/app.js        — search, filters, URL state, dialog, routing, daily pick,
                     geolocation, distance sort, service-worker registration
 js/map.js        — the Text Atlas (character-grid map, uses pretext), pan/zoom,
@@ -144,10 +200,15 @@ vendor/pretext/  — vendored @chenglou/pretext (generated by scripts/vendor.mjs
 scripts/vendor.mjs        — vendors pretext into vendor/
 scripts/build-map.mjs     — rasterizes data/world-110m-land.geojson into js/landmap.js
 scripts/validate-data.mjs — dataset validation (ids, coords, required fields)
+scripts/check-text.mjs    — headless text-overflow checks (pnpm validate)
+scripts/smoke.mjs         — headless smoke test of index.html (pnpm smoke)
+scripts/browser-harness.mjs — dev server + Chromium plumbing for those two
 scripts/build-place-pages.mjs — generates the places/<id>/ share pages
+test/text-check.html      — dev-only page the overflow checks run in
+test/text-check.js        — the overflow rules themselves (not shipped)
 data/world-110m-*.geojson — source coastlines (Natural Earth 110m; not deployed)
 server.mjs       — zero-dependency dev server (pnpm start)
-package.json     — scripts + devDependency (@chenglou/pretext)
+package.json     — scripts + devDependencies (@chenglou/pretext, playwright)
 .node-version    — pinned Node version for fnm
 .gitignore       — ignores node_modules, places/, data/*.geojson, logs
 ```
