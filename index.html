@@ -28,6 +28,7 @@
        js/text.js publishes window.ATLAS_TEXT before js/app.js executes. -->
   <script src="js/text.js" type="module" defer></script>
   <script src="js/dialog.js" type="module" defer></script>
+  <script src="js/reader.js" type="module" defer></script>
   <script src="js/app.js" defer></script>
   <script src="js/map.js" type="module" defer></script>
 </head>
@@ -88,7 +89,10 @@
         <div class="daily" id="daily-pick" tabindex="-1">
           <span class="daily-label">Today’s discovery</span>
           <button class="daily-card" id="daily-card" type="button"></button>
-          <button class="surprise-btn" id="surprise-btn" type="button" title="Open a random place from the current filter">✦ Surprise me</button>
+          <div class="daily-actions">
+            <button class="surprise-btn" id="surprise-btn" type="button" title="Open a random place from the current filter">✦ Surprise me</button>
+            <button class="surprise-btn" id="read-book-btn" type="button" title="Read every place in the current filter as a paginated field guide">▤ Read as a book</button>
+          </div>
         </div>
       </section>
     </div>
@@ -123,6 +127,21 @@
       <p class="footer-note">Coordinates approximate. Pack water, sunscreen, and humility.</p>
     </div>
   </footer>
+
+  <!-- The field guide (js/reader.js). Empty until "Read as a book" opens it:
+       the pages are built from the layout, three at a time (all of them while
+       printing), and every line is written with el.style.setProperty. -->
+  <div id="reader" class="reader" role="dialog" aria-modal="true"
+       aria-labelledby="reader-title" tabindex="-1" hidden>
+    <div class="reader-bar" id="reader-bar">
+      <h2 class="reader-title" id="reader-title">The field guide</h2>
+      <span class="reader-count" id="reader-count" role="status" aria-live="polite"></span>
+      <button class="reader-btn" id="reader-prev" type="button" aria-label="Previous page" title="Previous page (←)">←</button>
+      <button class="reader-btn" id="reader-next" type="button" aria-label="Next page" title="Next page (→)">→</button>
+      <button class="icon-btn" id="reader-close" type="button" aria-label="Close the field guide">✕</button>
+    </div>
+    <div class="reader-stage" id="reader-stage"></div>
+  </div>
 
   <dialog id="place-dialog" aria-labelledby="dialog-title">
     <div class="dialog-head" id="dialog-head">

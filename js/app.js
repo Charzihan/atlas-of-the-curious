@@ -48,6 +48,7 @@
 
   // --- Utilities -------------------------------------------------------
   function hashForPlace(id) { return "#/place/" + encodeURIComponent(id); }
+  function hashForRead(id) { return "#/read/" + encodeURIComponent(id); }
 
   // FNV-1a hash — deterministic, cheap, no dependencies.
   function fnv1a(str) {
@@ -1184,6 +1185,16 @@
   var DLG = window.ATLAS_DIALOG || null;
   if (DLG) DLG.setVisibleProvider(visiblePlaces);
 
+  // --- The field guide ---------------------------------------------------
+  // Phase 6's js/reader.js is another ES module that runs before this file.
+  // It paginates whatever the current filter shows, so it reads the visible
+  // list through the same provider the dialog uses.
+  var RDR = window.ATLAS_READER || null;
+  if (RDR) RDR.setVisibleProvider(visiblePlaces);
+
+  function openReader(id) { if (RDR) RDR.open(id); }
+  function closeReader() { if (RDR && RDR.isOpen()) RDR.close(); }
+
   var dialogIndex = 0; // position within the current visible list
   var currentPlaceId = null; // id of the place the dialog is showing (for sharing)
 
@@ -1246,8 +1257,22 @@
     }
   }
 
-  // --- Hash routing: #/place/<id> ----------------------------------------
+  // --- Hash routing: #/place/<id> and #/read/<id> -------------------------
+  // The two are exclusive: opening the field guide closes the dialog, and
+  // leaving either route closes what it opened. The reader rewrites the hash
+  // with history.replaceState as pages turn, which fires no hashchange, so
+  // turning a page never re-enters this function.
   function route() {
+    var r = /^#\/read\/(.+)$/.exec(location.hash);
+    if (r && RDR) {
+      var rid = decodeURIComponent(r[1]);
+      if (placesById.has(rid)) {
+        closeDialog();
+        openReader(rid);
+        return;
+      }
+    }
+    closeReader();
     var m = /^#\/place\/(.+)$/.exec(location.hash);
     if (m) {
       var id = decodeURIComponent(m[1]);
@@ -1330,6 +1355,22 @@
   if (locateBtn) locateBtn.addEventListener("click", locateMe);
   var surpriseBtn = $("surprise-btn");
   if (surpriseBtn) surpriseBtn.addEventListener("click", surpriseMe);
+
+  // "Read as a book": the field guide, opened at the first place of the
+  // current filter and deep-linkable from there. Without js/reader.js (no
+  // metrics module, or ?noflags=bookMode) the control is not offered at all.
+  var readBookBtn = $("read-book-btn");
+  if (readBookBtn && !RDR) readBookBtn.hidden = true;
+  if (readBookBtn && RDR) {
+    readBookBtn.addEventListener("click", function () {
+      var list = visiblePlaces();
+      if (!list.length) return;
+      var target = hashForRead(list[0].id);
+      // Assigning the same hash fires no hashchange, so open it directly.
+      if (location.hash === target) openReader(list[0].id);
+      else location.hash = target;
+    });
+  }
 
   // Delegated click on the grid: card links are <a href="#/place/...">,
   // so no per-card listeners are needed at all.

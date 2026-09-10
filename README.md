@@ -36,7 +36,7 @@ pnpm build-map   # rasterize world coastlines into js/landmap.js (ASCII grid)
 pnpm validate    # dataset checks + headless text-overflow checks
 pnpm build-pages # generate per-place share pages into places/<id>/
 pnpm build       # dataset checks + build-pages (run before deploying)
-pnpm smoke       # open the real page in headless Chromium at two viewports
+pnpm smoke       # open the real page in headless Chromium at every viewport
 ```
 
 `vendor` and `build-map` are already committed; re-run them only after upgrading
@@ -102,6 +102,39 @@ end heights; it checks that Escape still closes and `#/place/<id>` still opens;
 and it checks the accessibility contract — the visually hidden paragraph still
 carries the whole story, the field note its whole text, every generated line
 span is `aria-hidden`, and the dialog is still labelled by its title.
+
+Finally it reads. `scripts/checks/reader.mjs` opens the field guide in six page
+visits of its own — 1280x600, 800, 1000 and 1200, 390x844, and one deliberately
+cramped 1280x380 where a story *has* to run over a page boundary — and walks
+**every** page with `goTo()`. For each page: it may not overflow its box
+(`scrollHeight <= clientHeight`) and every line box in it must sit inside it.
+For each place: the lines of its story, concatenated back across its pages, must
+be that story (compared with whitespace stripped from both sides, because a line
+broken after a real hyphen — "flash-" / "melt" — carries no space to rejoin on),
+and the body-line indices its pages carry must be `0, 1, 2, …` exactly, which is
+what makes "nothing lost, nothing duplicated" countable rather than plausible.
+No paragraph that spans a page boundary may leave fewer than two of its lines on
+either side of it. Two places are given saved notes first, so the pre-wrap path
+(hard breaks and tabs) is exercised too.
+
+It then prints: `emulateMedia({ media: "print" })` must put the reader into
+print mode by itself, render *all* the pages instead of three, give each one
+`break-after: page`, keep the same page height, and assign exactly the same
+lines to exactly the same pages as the screen did — `debug().perPage` compared
+field by field. Clearing the media query must put it back to three.
+
+Then the notebook: it types 141 characters into it and asserts that the
+textarea's painted height is the predicted height to within half a pixel, that
+the text does not overflow the box, that **no** layout-forcing read comes from
+`js/dialog.js` or `js/reader.js` during the typing (the read-counter pattern,
+attributed to those two files) and reports what the typing cost in CDP
+`LayoutCount`. The note must not reach `location.href`, the share link, any
+request the page makes, or the generated `places/<id>/index.html` (read back off
+disk). A reload must restore it, the reader must set it, "Clear" must empty it,
+and "Copy as postcard" must put exactly the expected text on the real clipboard,
+read back with `navigator.clipboard.readText()`. Last, the daily card at 390px:
+its name on at most two lines — for the name today picked, and for all 40 names
+it could have picked, measured in the very same box.
 
 Run it after any change to the layout, the fonts or the map.
 
@@ -225,8 +258,43 @@ Run it after any change to the layout, the fonts or the map.
   midpoint. Lines then arrive one at a time, about 28ms apart, capped so even
   the longest story has finished inside 1.2s. `prefers-reduced-motion` gets
   both at once, with no animation.
+- **Read as a book**: a button in the hero turns the *whole current filter*
+  into a paginated field guide. Every place starts a new page with its name,
+  its native name, its country and region and its tagline, and its story and
+  field note are flowed at a comfortable measure through pretext's own cursor
+  (`layoutNextLineRange` / `materializeLineRange`) — so the page count is exact
+  the moment the mode opens, before a pixel is painted. The page box is the
+  reader's content height rounded *down* to a whole number of body lines, read
+  once on open and once on resize, so a line can never be cut in half by the
+  page edge. A running footer carries the place and "page 12 of 37"; ← → and
+  PageUp/PageDown turn pages, Home/End jump, and clicking the outer third of a
+  page turns it (the middle third is left alone, so the text there can still be
+  selected). Only the current page and its two neighbours are ever in the DOM.
+  A place's first page is a real URL: `#/read/<id>`, rewritten with
+  `history.replaceState` as you turn.
+- **No widows, no orphans**: the pagination knows every line of a paragraph
+  before it closes a page, so the rule is a lookahead rather than a guess — a
+  paragraph that runs over a page boundary leaves at least two of its lines on
+  each side of it, and a "Field note" label is never stranded at the foot of a
+  page with its text overleaf.
+- **Print what you see**: printing (or a print preview) makes the reader render
+  every page instead of three, each with `break-after: page` and *the same*
+  pixel geometry it has on screen — the same page height, the same lines on the
+  same pages. `pnpm smoke` compares the two page-by-page.
+- **A visitor's notebook**: under the metadata in the detail dialog, a box for
+  your own notes. Its height is a *prediction*, not a measurement: every
+  keystroke lays the text out in pretext's `pre-wrap` mode at the box's known
+  measure and the line count becomes the height, so the box grows and shrinks
+  with the text without a single `scrollHeight` read. Notes are saved to
+  `localStorage` (debounced, keyed by place id), restored on open, shown
+  read-only at the end of that place's pages in the field guide, and never
+  touch the URL, the share link, the generated share pages or any request.
+  "Copy as postcard" puts the place, its native name, its country, its
+  coordinates and your note — line breaks and tabs intact — on the clipboard.
 - **Daily pick**: a deterministic-of-the-day place (UTC), the same for every
-  visitor on the same calendar day — no server state needed.
+  visitor on the same calendar day — no server state needed. On a phone the
+  card stacks (symbol and name on one row, tagline below, "Open →" last)
+  instead of squeezing the name into a column two words wide.
 - **Shareable URLs, two ways**: `index.html#/place/<id>` deep-links open
   straight into a place's detail view, and `pnpm build-pages` generates a real
   `places/<id>/` page per place (its own title, meta, and Open Graph tags) that
@@ -262,7 +330,25 @@ line), `card-native` (the grid card's), `map-label-native` (the map label's
 middle line — the `map-label` font, never uppercased) and
 `card-tagline-strong` (the bold half of a highlighted search match: the same
 family and size as `card-tagline`, one weight up, so the rich-inline flow can
-measure the two runs against each other). Nineteen roles in all.
+measure the two runs against each other).
+
+Phase 6 added the four the field guide sets — `book-body` (whose line height is
+the quantum the whole book is measured in: a page is a whole number of these),
+`book-title`, `book-meta` (the "COUNTRY · REGION" line, uppercased in JS before
+it is measured rather than by `text-transform`, because the two are not the
+same string) and `book-tagline` — and finally gave the long-declared `notebook`
+role an element to paint: the `<textarea>` and the reader's copy of a saved
+note. Twenty-three roles in all.
+
+**Text a visitor typed.** A note is textarea text: ordinary spaces, `\t` tabs
+and `\n` hard breaks all have to survive, which is pretext's
+`{ whiteSpace: "pre-wrap" }`. The same (role, text) pair means something
+different in the two modes, so `heightOfPreWrap`, `lineCountOfPreWrap`,
+`linesOfPreWrap` and `handleForPreWrap` keep their handles in a bucket of their
+own and never disturb the normal-flow handle for the same string. The CSS has
+to ask for the same thing the measurement did — `white-space: pre-wrap` and
+`tab-size: 8`, the default pretext models — and the box must never grow a
+scrollbar, which would silently steal width from the measure.
 
 **Text in another language.** pretext segments through `Intl.Segmenter`, which
 is locale-sensitive — Thai has no spaces at all and is broken by dictionary —
@@ -339,6 +425,8 @@ browser without a rebuild:
 | `nativeNames` | `js/text.js` | no second name anywhere — no card line, no hover-card line, no dialog line, and the map label goes back to name + tagline |
 | `searchHighlight` | `js/app.js` | a search leaves the taglines as plain, balanced text instead of flowing them with the matches bold |
 | `localeText` | `js/text.js` | native names are prepared at the page's own locale instead of each place's (the `word-break` option is still applied) |
+| `bookMode` | `js/reader.js` | no `window.ATLAS_READER`, no `#/read/<id>` route, and the "Read as a book" control is not offered at all |
+| `notebook` | `js/dialog.js` | no notes box in the dialog and no saved note in the field guide (anything already in `localStorage` is left untouched) |
 
 For example `?noflags=labels,oceanLabels` gives the pre-Phase-1 map, which is
 also what `pnpm smoke` loads to get a frame-timing baseline.
@@ -379,6 +467,31 @@ the height bookkeeping the step animation uses, the last reveal's timing, and
 the accessible copies of the story, field note and title. `pnpm smoke` drives
 the whole Phase 3 check-list through it.
 
+**Reader debugging.** `window.ATLAS_READER` is both the field guide's public
+surface — `open(id)`, `close()`, `goTo(page)`, `pageFor(id)`, `placeAt(page)`,
+`currentPage()`, `isOpen()`, `setVisibleProvider(fn)` — and its inspection
+surface. `debug()` returns the pagination as data and reads no geometry:
+`pages`, `pageHeight`, `contentHeight`, `measure`, `rows`, `lineHeight`,
+`currentPage`, `printMode`, which page numbers are attached (`rendered`), and
+`perPage` — one entry per page with `{ placeId, firstLine, lastLine, lineCount,
+overflow, used, kinds, lines }`, where `firstLine`/`lastLine` index that place's
+own run of flowed body lines. `linesFor(id)` hands back that whole run.
+`pnpm smoke` walks every page of every viewport through exactly these.
+
+**Notebook debugging.** `ATLAS_DIALOG.debug().notebook` carries what the box's
+height was predicted from and what it became — `width` (the measure, derived
+from the dialog's inner width, never read back), `lineHeight`, `lines`, `rows`,
+`chrome`, `predictedHeight`, `appliedHeight` — plus the current `value`, what is
+in `localStorage` (`stored`), whether the last save landed (`saved`), and the
+exact `postcard` "Copy as postcard" would put on the clipboard.
+
+**Keyboard.** In the grid, Enter or Space on a focused card expands it in place.
+In the detail dialog: Escape closes, ← and → step to the previous/next place in
+the current filter. In the field guide: ← / PageUp and → / PageDown turn pages,
+Home and End jump to the first and last, Tab cycles within the reader (focus is
+trapped) and Escape closes it and leaves the `#/read/<id>` route. The map takes
+`+`, `−` and the pointer.
+
 **Laying the spread out.** `js/justify.js` is the pure half: given a pretext
 `prepareWithSegments()` handle it builds a break-candidate table once
 (`prepareParagraph`), then `breakLines(para, width, { from, maxLines, justify,
@@ -404,12 +517,20 @@ The site is built to be safe even when served from the public web:
   `textContent` / DOM APIs, so malformed data (even user-controllable hash
   fragments) can never inject markup.
 - **Hash fragments are validated** against the known place-id set before use.
+- **Notes stay in the browser.** The visitor's notebook writes to
+  `localStorage` and nowhere else, keyed by place id, every access wrapped
+  (a browser in private mode throws on the property itself, not just the call).
+  A note never enters the URL — the reader's route carries a place id and
+  nothing else — never enters the generated `places/<id>/` pages, which are
+  built in Node from `js/data.js` long before a browser has a note to give
+  them, and never enters a request. `pnpm smoke` asserts all four.
 - **No cookies, no trackers, no analytics, no third-party requests.** The
   only third-party code is `@chenglou/pretext` (MIT), which is **vendored**
   into `vendor/pretext/` and loaded from the same origin — never from a CDN.
 - `form-action 'self'` and a `preventDefault()` on the search form mean the
   page never navigates unexpectedly.
-- No secrets or user input are ever stored.
+- No secrets are ever stored, and the one piece of visitor input the site keeps
+  — the notebook — is stored only in that visitor's own browser.
 
 ## Publishing it to the public web
 
@@ -462,7 +583,13 @@ js/justify.js    — pure Knuth-Plass line breaking + river detection
                     (worker-ready): prepared handle + width -> positioned words
 js/dialog.js     — the detail dialog as an editorial spread: drop cap, pull
                     quote, justified columns, staggered reveal, soft hyphens,
-                    rich-inline metadata chips; window.ATLAS_DIALOG
+                    rich-inline metadata chips, the visitor's notebook;
+                    window.ATLAS_DIALOG
+js/reader.js     — the field guide: every place in the current filter
+                    paginated into fixed-height pages, three in the DOM at a
+                    time (all of them while printing); window.ATLAS_READER
+js/notebook.js   — the notebook's storage and its postcard (pure; shared by
+                    js/dialog.js and js/reader.js)
 js/map.js        — the Text Atlas (character-grid map, uses pretext), pan/zoom,
                     coastline-routed labels, ocean names, hover card,
                     locate-me marker, off-screen pause
@@ -477,6 +604,8 @@ scripts/build-map.mjs     — rasterizes data/world-110m-land.geojson into js/la
 scripts/validate-data.mjs — dataset validation (ids, coords, required fields)
 scripts/check-text.mjs    — headless text-overflow checks (pnpm validate)
 scripts/smoke.mjs         — headless smoke test of index.html (pnpm smoke)
+scripts/checks/reader.mjs — the Phase 6 half of it: pagination at six window
+                            sizes, printing, the notebook, the daily card
 scripts/browser-harness.mjs — dev server + Chromium plumbing for those two
 scripts/build-place-pages.mjs — generates the places/<id>/ share pages
 test/text-check.html      — dev-only page the overflow checks run in

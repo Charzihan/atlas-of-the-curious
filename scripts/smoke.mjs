@@ -85,8 +85,14 @@
         zero mismatches while the search runs, and nothing left behind when it
         is cleared.
 
+   Phase 6 ("ways to read") adds the paginated field guide, printing and the
+   visitor's notebook. Those checks live in scripts/checks/reader.mjs — six
+   page visits of their own — and are driven from main() through
+   `runReaderChecks`; see the header of that file for what they prove.
+
    Run: pnpm smoke  (or: node scripts/smoke.mjs) */
 import { startServer, launchChromium, INSTALL_HINT } from "./browser-harness.mjs";
+import { runReaderChecks } from "./checks/reader.mjs";
 
 const VIEWPORTS = [
   { name: "desktop", width: 1280, height: 800, heroLines: 2, expand: true },
@@ -1666,6 +1672,9 @@ async function main() {
       const res = await visitDialog(browser, server.origin, viewport);
       reportDialog(`dialog ${viewport.width}x${viewport.height}`, res, viewport, fail, 40);
     }
+
+    /* ---- Phase 6: ways to read --------------------------------------- */
+    await runReaderChecks(browser, server.origin, fail);
   } catch (err) {
     console.error(`\nerror: ${err.stack || err.message}`);
     failed = true;

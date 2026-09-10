@@ -42,6 +42,7 @@ import {
   materializeRichInlineLineRange
 } from "../vendor/pretext/rich-inline.js";
 import { prepareParagraph, breakLines, riverReport } from "./justify.js";
+import { readNote, writeNote, clearNote, postcardText } from "./notebook.js";
 
 /* ------------------------------------------------------------------ *
  * Tuning                                                              *
@@ -71,6 +72,17 @@ const REVEAL_TOTAL_MS = 1200;      // …capped so a long story still finishes f
 const REVEAL_DUR_MS = 260;
 const STEP_MS = 340;               // the prev/next height animation
 const EASE = "cubic-bezier(0.22, 0.7, 0.3, 1)";
+
+/* The notebook's box, in the three numbers the height prediction needs. They
+   are the .notebook-input rule's own padding and border: the textarea is
+   `box-sizing: border-box` and `width: 100%`, so its measure is the dialog
+   body's inner width less this chrome — derived, not read back. */
+const NOTE_PAD_X = 12;
+const NOTE_PAD_Y = 10;
+const NOTE_BORDER = 1;
+const NOTE_MIN_LINES = 3;          // the box never shrinks below three lines
+const NOTE_SAVE_MS = 300;          // debounce before the note reaches storage
+const NOTE_SAVED_MS = 1600;        // how long "Saved" stays up
 
 const SHY = "\u00AD";  // U+00AD SOFT HYPHEN
 const CHIP_PAD_X = 6;              // .chip-inline horizontal padding …
@@ -290,9 +302,190 @@ function boot(win, doc) {
     f.flow.setAttribute("aria-hidden", "true");
   }
 
+  /* ---- The visitor's notebook -------------------------------------
+     A <textarea> under the metadata fields whose height is a prediction, not
+     a measurement: on every input event js/text.js lays the value out in
+     pretext's `pre-wrap` mode at the box's known measure and the resulting
+     line count becomes the height. `scrollHeight` is never read — which is
+     the whole point, because reading it on every keystroke is a forced
+     synchronous layout per character.
+
+     The note itself is localStorage and nothing else. See js/notebook.js. */
+  const note = {
+    box: null, input: null, state: null, clearBtn: null, postBtn: null,
+    saveTimer: null, savedTimer: null, lines: 0, height: 0, saved: false
+  };
+
+  if (flag("notebook")) buildNotebook();
+
+  function buildNotebook() {
+    const fieldGrid = dialog.querySelector(".field-grid");
+    if (!fieldGrid || !fieldGrid.parentNode) return;
+
+    const box = doc.createElement("section");
+    box.className = "notebook";
+
+    const head = doc.createElement("div");
+    head.className = "notebook-head";
+    const label = doc.createElement("label");
+    label.className = "notebook-label";
+    label.setAttribute("for", "notebook-input");
+    label.textContent = "Your notes";
+    const state = doc.createElement("span");
+    state.className = "notebook-state";
+    state.setAttribute("role", "status");
+    state.setAttribute("aria-live", "polite");
+    head.appendChild(label);
+    head.appendChild(state);
+
+    const input = doc.createElement("textarea");
+    input.className = "notebook-input";
+    input.id = "notebook-input";
+    input.setAttribute("rows", String(NOTE_MIN_LINES));
+    input.setAttribute("spellcheck", "false");
+    input.setAttribute("placeholder", "What would you write in the margin?");
+
+    const actions = doc.createElement("div");
+    actions.className = "notebook-actions";
+    const clearBtn = doc.createElement("button");
+    clearBtn.type = "button";
+    clearBtn.id = "notebook-clear";
+    clearBtn.className = "notebook-btn";
+    clearBtn.textContent = "Clear";
+    const postBtn = doc.createElement("button");
+    postBtn.type = "button";
+    postBtn.id = "notebook-postcard";
+    postBtn.className = "notebook-btn";
+    postBtn.textContent = "Copy as postcard";
+    actions.appendChild(clearBtn);
+    actions.appendChild(postBtn);
+
+    box.appendChild(head);
+    box.appendChild(input);
+    box.appendChild(actions);
+    fieldGrid.parentNode.insertBefore(box, fieldGrid.nextSibling);
+
+    note.box = box;
+    note.input = input;
+    note.state = state;
+    note.clearBtn = clearBtn;
+    note.postBtn = postBtn;
+
+    input.addEventListener("input", onNoteInput);
+    clearBtn.addEventListener("click", onNoteClear);
+    postBtn.addEventListener("click", onNotePostcard);
+    // A note in flight when the dialog goes away is still the visitor's.
+    dialog.addEventListener("close", flushNote);
+    win.addEventListener("pagehide", flushNote);
+  }
+
+  // Everything the box's height depends on, from numbers alone.
+  function predictNote(text) {
+    const f = T.fontFor("notebook");
+    const lines = geom.noteWidth > 0
+      ? T.lineCountOfPreWrap("notebook", text || "", geom.noteWidth) : 0;
+    const rows = Math.max(NOTE_MIN_LINES, lines);
+    return {
+      lines: lines,
+      rows: rows,
+      lineHeight: f.lineHeight,
+      width: geom.noteWidth,
+      chrome: NOTE_PAD_Y * 2 + NOTE_BORDER * 2,
+      height: rows * f.lineHeight + NOTE_PAD_Y * 2 + NOTE_BORDER * 2
+    };
+  }
+
+  function sizeNote(text) {
+    const p = predictNote(text);
+    note.lines = p.lines;
+    note.height = p.height;
+    if (note.input) note.input.style.setProperty("height", px(p.height));
+    return p;
+  }
+
+  function showSaved(ok) {
+    if (!note.state) return;
+    note.saved = !!ok;
+    note.state.textContent = ok ? "Saved" : "";
+    note.state.classList.toggle("is-on", !!ok);
+    if (note.savedTimer) win.clearTimeout(note.savedTimer);
+    if (!ok) return;
+    note.savedTimer = win.setTimeout(() => {
+      note.state.classList.remove("is-on");
+    }, NOTE_SAVED_MS);
+  }
+
+  function onNoteInput() {
+    // No DOM read at all: the measure was worked out once, at readGeometry().
+    sizeNote(note.input.value);
+    syncNoteButtons();
+    if (note.saveTimer) win.clearTimeout(note.saveTimer);
+    const id = currentId;
+    note.saveTimer = win.setTimeout(() => {
+      note.saveTimer = null;
+      showSaved(writeNote(win, id, note.input.value));
+    }, NOTE_SAVE_MS);
+  }
+
+  function flushNote() {
+    if (!note.saveTimer) return;
+    win.clearTimeout(note.saveTimer);
+    note.saveTimer = null;
+    if (currentId && note.input) writeNote(win, currentId, note.input.value);
+  }
+
+  function onNoteClear() {
+    if (!note.input) return;
+    if (note.saveTimer) { win.clearTimeout(note.saveTimer); note.saveTimer = null; }
+    note.input.value = "";
+    sizeNote("");
+    syncNoteButtons();
+    clearNote(win, currentId);
+    showSaved(false);
+    note.input.focus();
+  }
+
+  function onNotePostcard() {
+    const place = placesById.get(currentId);
+    if (!place || !note.input) return;
+    const text = postcardText(place, note.input.value);
+    const label = note.postBtn.textContent;
+    note.postBtn.textContent = "Postcard copied ✓";
+    win.setTimeout(() => { note.postBtn.textContent = label; }, 1500);
+    if (win.navigator && win.navigator.clipboard && win.navigator.clipboard.writeText) {
+      win.navigator.clipboard.writeText(text).catch(() => {
+        win.prompt("Copy this postcard:", text);
+      });
+    } else {
+      win.prompt("Copy this postcard:", text);
+    }
+  }
+
+  function syncNoteButtons() {
+    if (!note.input) return;
+    const empty = !note.input.value;
+    note.clearBtn.disabled = empty;
+    note.postBtn.disabled = empty;
+  }
+
+  // Called once per open / step, before the spread is painted.
+  function loadNote(id) {
+    if (!note.input) return;
+    if (note.saveTimer) {
+      win.clearTimeout(note.saveTimer);
+      note.saveTimer = null;
+      if (currentId && currentId !== id) writeNote(win, currentId, note.input.value);
+    }
+    note.input.value = readNote(win, id);
+    sizeNote(note.input.value);
+    syncNoteButtons();
+    showSaved(false);
+  }
+
   /* ---- Geometry (the one layout read) ------------------------------ */
   const geom = {
-    innerWidth: 0, viewportWidth: 0, twoCol: false, maxBodyHeight: 0, read: false
+    innerWidth: 0, viewportWidth: 0, twoCol: false, maxBodyHeight: 0,
+    noteWidth: 0, read: false
   };
 
   function readGeometry() {
@@ -310,6 +503,9 @@ function boot(win, doc) {
       80,
       Math.round((isFinite(dialogMax) ? dialogMax : (win.innerHeight || 800)) - chrome)
     );
+    // The notebook's measure is derived from the same number, not read back:
+    // the textarea is width:100% and box-sizing:border-box inside this box.
+    geom.noteWidth = Math.max(60, geom.innerWidth - (NOTE_PAD_X + NOTE_BORDER) * 2);
     geom.read = true;
     dialog.classList.toggle("dlg-wide", geom.twoCol);
   }
@@ -683,13 +879,18 @@ function boot(win, doc) {
       fieldsH = fw.cols > 1 ? Math.max(fieldsH, h) : fieldsH + h;
     }
 
+    // The notebook's own box. Its label, buttons and margins are constant and
+    // cancel out of the difference below; only the textarea's height moves
+    // from place to place, because only the note does.
+    const noteBox = note.input ? predictNote(readNote(win, place.id)) : null;
+
     return {
       id: place.id, place: place, res: res, spread: best, trials: trials,
       taglineHeight: taglineH, fields: fields, fieldWidth: fw,
-      fieldsHeight: fieldsH,
+      fieldsHeight: fieldsH, note: noteBox,
       // What the dialog body's height depends on. Constant chrome cancels out
       // of the difference, so the step animation needs no calibration pass.
-      variable: taglineH + best.height + fieldsH
+      variable: taglineH + best.height + fieldsH + (noteBox ? noteBox.height : 0)
     };
   }
 
@@ -886,6 +1087,9 @@ function boot(win, doc) {
 
   function paint(layout) {
     fillChrome(layout.place);
+    // Before currentId moves on: loadNote() flushes the outgoing place's
+    // pending save against the id that is still current.
+    if (note.input) loadNote(layout.id);
     const nodes = renderSpread(layout);
     renderFields(layout);
     current = layout;
@@ -991,7 +1195,17 @@ function boot(win, doc) {
     // that plus the difference between the two layouts' variable parts, so no
     // chrome has to be measured.
     const from = body.getBoundingClientRect().height;
-    const to = clamp(from + (layout.variable - current.variable), 60, geom.maxBodyHeight);
+    const target = from + (layout.variable - current.variable);
+    /* `maxBodyHeight` is the room inside the dialog's own max-height, and it
+       only binds while the body still fits there. Once the content is taller
+       the dialog scrolls (a <dialog> carries `overflow: auto` from the UA
+       stylesheet) and the body keeps its natural height — so clamping to that
+       ceiling would animate the body down to a height it snaps straight back
+       out of when the animation lets go. Phase 6's notebook is what first
+       pushed a body past it, and the smoke test's "a sample strictly between
+       the two ends" assertion is what caught the snap. */
+    const ceiling = Math.max(geom.maxBodyHeight, from, target);
+    const to = clamp(target, 60, ceiling);
     stopStepAnimation();
     body.style.setProperty("overflow-y", "hidden");
     body.style.setProperty("height", px(to));
@@ -1099,12 +1313,33 @@ function boot(win, doc) {
           lastStep: lastStep
         },
         reveal: lastReveal,
+        // The notebook: what the height was predicted from, what the box is
+        // now, and the exact postcard "Copy as postcard" would put on the
+        // clipboard. Reads no DOM geometry.
+        notebook: (function () {
+          if (!note.input) return { present: false };
+          const p = predictNote(note.input.value);
+          return {
+            present: true,
+            width: p.width,
+            lineHeight: p.lineHeight,
+            lines: p.lines,
+            rows: p.rows,
+            chrome: p.chrome,
+            predictedHeight: p.height,
+            appliedHeight: note.height,
+            value: note.input.value,
+            stored: readNote(win, current.id),
+            saved: note.saved,
+            postcard: postcardText(current.place, note.input.value)
+          };
+        })(),
         animating: !!stepAnimation,
         flags: {
           editorial: flag("editorial"), justify: flag("justify"),
           reveal: flag("reveal"), hyphens: flag("hyphens"),
           chips: flag("chips"), dialogAnimate: flag("dialogAnimate"),
-          nativeNames: flag("nativeNames")
+          nativeNames: flag("nativeNames"), notebook: flag("notebook")
         },
         // The second name, and what the DOM ended up carrying for it.
         native: (function () {

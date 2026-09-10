@@ -108,10 +108,40 @@
   --lh-hover-card: 1.5;
   --ls-hover-card: 0px;
 
-  /* Field-notebook body copy (no element uses it yet) */
+  /* Field-notebook body copy — .notebook-input (the visitor's own note) and
+     the read-only copy the reader sets at the end of a place's pages. Both are
+     laid out in pretext's `pre-wrap` mode, so the visitor's own line breaks
+     and tabs survive; the textarea's rules below must therefore declare
+     `white-space: pre-wrap` and `tab-size: 8` to match what pretext models. */
   --font-notebook: normal 0.95rem var(--font-serif);
   --lh-notebook: 1.6;
   --ls-notebook: 0px;
+
+  /* ---------- Phase 6: the field guide (js/reader.js) ----------
+     The four roles the paginated reader sets. Every page's height is counted
+     in whole `book-body` lines, so --lh-book-body is the quantum the whole
+     book is measured in. */
+
+  /* The reader's body copy — .book-line */
+  --font-book-body: normal 1.02rem var(--font-serif);
+  --lh-book-body: 1.62;
+  --ls-book-body: 0px;
+
+  /* A place's name at the head of its first page — .book-title */
+  --font-book-title: normal 1.62rem var(--font-serif);
+  --lh-book-title: 1.24;
+  --ls-book-title: 0px;
+
+  /* "COUNTRY · REGION" under it — .book-meta. Rendered as-is: js/reader.js
+     uppercases the string before measuring it, so no `text-transform` here. */
+  --font-book-meta: normal 0.7rem var(--font-sans);
+  --lh-book-meta: 1.5;
+  --ls-book-meta: 0.12em;
+
+  /* The tagline that closes the heading block — .book-tagline */
+  --font-book-tagline: italic 1.02rem var(--font-serif);
+  --lh-book-tagline: 1.5;
+  --ls-book-tagline: 0px;
 
   /* ---------- Phase 4: the name in its own script ----------
      There are no web fonts here, so a script the serif/mono stacks do not
@@ -1477,4 +1507,337 @@ dialog::backdrop {
      and the hover card already carries it. js/map.js skips the placement
      entirely below 640px; this is the belt to that pair of braces. */
   .map-label, .map-ocean-label { display: none !important; }
+}
+
+/* ---------- Phase 6: the hero's two buttons, and the phone daily card ----------
+   "Surprise me" and "Read as a book" sit on one row under the daily pick and
+   wrap onto two on a narrow screen. */
+.daily-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+@media (max-width: 640px) {
+  /* The daily card is a single flex row on the desktop, which on a phone
+     squeezes the name into a column two or three words wide and wraps it one
+     word per line. Below 640px it becomes a small grid instead: the symbol and
+     the name share the first row, the tagline gets the second, and "Open →"
+     closes the card. Desktop is untouched. */
+  .daily-card {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas:
+      "symbol name"
+      "tag    tag"
+      "go     go";
+    align-items: center;
+    column-gap: 12px;
+    row-gap: 6px;
+  }
+  .daily-card .daily-symbol { grid-area: symbol; }
+  .daily-name { grid-area: name; font-size: 1rem; }
+  .daily-tag { grid-area: tag; }
+  .daily-go { grid-area: go; margin-left: 0; }
+}
+
+/* ---------- Phase 6: the visitor's notebook (js/dialog.js) ----------
+   The textarea's height is written by js/dialog.js from pretext's `pre-wrap`
+   prediction on every input event — never from `scrollHeight`. Which means
+   this rule and that prediction have to describe the same text box: the
+   notebook role's font, `white-space: pre-wrap`, the default `tab-size: 8`
+   pretext models, and no scrollbar to steal width from the measure. */
+.notebook { margin: 16px 0 0; }
+
+.notebook-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+
+.notebook-label {
+  font-family: Verdana, Geneva, sans-serif;
+  font-size: 0.62rem; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.notebook-state {
+  margin-left: auto;
+  font-family: Verdana, Geneva, sans-serif;
+  font-size: 0.62rem; letter-spacing: 0.08em;
+  color: var(--gold);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.notebook-state.is-on { opacity: 1; }
+
+.notebook-input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  font: var(--font-notebook);
+  line-height: var(--lh-notebook);
+  letter-spacing: var(--ls-notebook);
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  tab-size: 8;
+  resize: none;          /* the height is predicted, not dragged */
+  overflow-y: hidden;    /* …and never a scrollbar, which would eat the measure */
+}
+.notebook-input:focus-visible { outline: none; border-color: var(--gold); }
+
+.notebook-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+
+.notebook-btn {
+  font: inherit;
+  font-family: Verdana, Geneva, sans-serif;
+  font-size: 0.72rem;
+  color: var(--ink-dim);
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.notebook-btn:hover:not([disabled]), .notebook-btn:focus-visible {
+  color: var(--gold); border-color: var(--gold); outline: none;
+}
+.notebook-btn[disabled] { opacity: 0.45; cursor: default; }
+
+/* ---------- Phase 6: the field guide (js/reader.js) ----------
+   Geometry contract with js/reader.js, which is what keeps the paginated model
+   and the painted page on the same pixels:
+     - `.reader-page` gets its width and height written as inline pixel values;
+       the height is PAD_TOP + a whole number of body lines + the footer,
+     - `.reader-page-body` is positioned at (PAD_X, PAD_TOP) and is exactly the
+       content box the lines were laid out in,
+     - every line is one absolutely positioned span at its computed `top`,
+     - `.reader-page-foot` is exactly FOOT_H tall and sits on the bottom edge.
+   Nothing here may set a width, a height or a position for those: they are
+   layout output, written with el.style.setProperty. */
+.reader {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  background:
+    radial-gradient(900px 480px at 80% -10%, rgba(232, 180, 90, 0.07), transparent 60%),
+    var(--bg);
+}
+.reader[hidden] { display: none; }
+.reader:focus { outline: none; }
+
+.reader-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(9, 13, 28, 0.7);
+}
+
+.reader-title {
+  margin: 0;
+  font-size: 0.98rem;
+  font-weight: normal;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reader-count {
+  margin-left: auto;
+  font-family: Verdana, Geneva, sans-serif;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+
+.reader-btn {
+  flex: 0 0 auto;
+  font: inherit;
+  font-size: 0.85rem;
+  line-height: 1;
+  color: var(--ink-dim);
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  width: 34px; height: 34px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.reader-btn:hover, .reader-btn:focus-visible {
+  color: var(--gold); border-color: var(--gold); outline: none;
+}
+.reader-bar .icon-btn { margin-left: 0; }
+
+.reader-stage {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 8px 0;      /* STAGE_PAD_Y in js/reader.js */
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+.reader-page {
+  position: relative;
+  display: none;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.015));
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.reader-page.is-current { display: block; }
+
+.reader-page-body { position: absolute; }
+
+.book-title, .book-native, .book-meta, .book-tagline,
+.book-label, .book-line, .book-note-line {
+  position: absolute;
+  left: 0;
+  display: block;
+  white-space: pre;
+}
+
+.book-title {
+  font: var(--font-book-title);
+  line-height: var(--lh-book-title);
+  letter-spacing: var(--ls-book-title);
+  color: var(--ink);
+}
+
+.book-native {
+  font: var(--font-native-name);
+  line-height: var(--lh-native-name);
+  letter-spacing: var(--ls-native-name);
+  color: var(--ink-dim);
+}
+.book-native[data-wb="keep-all"] { word-break: keep-all; }
+
+.book-meta {
+  font: var(--font-book-meta);
+  line-height: var(--lh-book-meta);
+  letter-spacing: var(--ls-book-meta);
+  color: var(--gold);
+}
+
+.book-tagline {
+  font: var(--font-book-tagline);
+  line-height: var(--lh-book-tagline);
+  letter-spacing: var(--ls-book-tagline);
+  color: var(--ink-dim);
+}
+
+.book-label {
+  font-family: Verdana, Geneva, sans-serif;
+  font-size: 0.62rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+
+.book-line {
+  font: var(--font-book-body);
+  line-height: var(--lh-book-body);
+  letter-spacing: var(--ls-book-body);
+  color: var(--ink);
+}
+.book-fact { color: var(--ink-dim); }
+
+.book-note-line {
+  font: var(--font-notebook);
+  line-height: var(--lh-notebook);
+  letter-spacing: var(--ls-notebook);
+  tab-size: 8;
+  color: var(--ink-dim);
+}
+
+.reader-page-foot {
+  position: absolute;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--line);
+  font-family: Verdana, Geneva, sans-serif;
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+.reader-foot-place { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reader-foot-page { flex: 0 0 auto; }
+
+/* The outer thirds of a page turn it; the middle third is left alone so the
+   text there can still be selected. */
+.reader-turn {
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 33.34%;
+  z-index: 3;
+  cursor: pointer;
+}
+.reader-turn-prev { left: 0; }
+.reader-turn-next { right: 0; }
+
+@media (max-width: 640px) {
+  .reader-title { font-size: 0.85rem; }
+  .reader-count { font-size: 0.6rem; }
+}
+
+/* ---------- Phase 6: printing the field guide ----------
+   The same pages, on paper. js/reader.js renders every page (not three) while
+   `beforeprint` is in flight or `matchMedia("print")` matches, and each page
+   keeps the very same inline width and height it has on screen — so the page
+   breaks fall exactly where the reader put them and the paper matches the
+   screen page for page. */
+@page { margin: 12mm; }
+
+@media print {
+  body.is-reading { background: #fff; }
+  body.is-reading > *:not(#reader) { display: none !important; }
+
+  body.is-reading .reader {
+    position: static;
+    display: block;
+    background: none;
+  }
+  body.is-reading .reader-bar { display: none !important; }
+  body.is-reading .reader-turn { display: none !important; }
+
+  body.is-reading .reader-stage {
+    display: block;
+    overflow: visible;
+    padding: 0;
+  }
+
+  body.is-reading .reader-page {
+    display: block;
+    break-after: page;
+    page-break-after: always;   /* the pre-Level-3 spelling, for older engines */
+    break-inside: avoid;
+    margin: 0 auto;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    background: none;
+    overflow: visible;
+  }
+
+  body.is-reading .book-title,
+  body.is-reading .book-line { color: #000; }
+  body.is-reading .book-native,
+  body.is-reading .book-tagline,
+  body.is-reading .book-fact,
+  body.is-reading .book-note-line,
+  body.is-reading .reader-page-foot { color: #333; }
+  body.is-reading .book-meta,
+  body.is-reading .book-label { color: #6b4d13; }
 }

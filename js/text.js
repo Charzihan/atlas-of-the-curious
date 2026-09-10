@@ -277,6 +277,48 @@ export function createMetrics(fontRoles) {
     return entry;
   }
 
+  /* --- The same roles, in pre-wrap mode --------------------------------
+     A visitor's note is textarea text: ordinary spaces, `\t` tabs and `\n`
+     hard breaks all have to survive, which is exactly pretext's
+     `{ whiteSpace: "pre-wrap" }`. The same (role, text) pair means something
+     different in the two modes, so pre-wrap handles live in their own bucket
+     — keyed by the role name with a suffix no role can spell — and never
+     disturb the normal-flow handle for the same string.
+
+     Still pure: no DOM, no window, same eviction discipline. */
+  const PRE_SUFFIX = "\u0000pre";
+  const evictablePre = [];       // [bucketName, text], oldest first
+
+  function entryPre(role, text, needLines) {
+    const bucketName = role.name + PRE_SUFFIX;
+    let bucket = prepared.get(bucketName);
+    if (!bucket) { bucket = new Map(); prepared.set(bucketName, bucket); }
+    let entry = bucket.get(text);
+    if (!entry) {
+      const options = { whiteSpace: "pre-wrap" };
+      if (role.letterSpacing) options.letterSpacing = role.letterSpacing;
+      entry = {
+        text: text, segments: !!needLines, pinned: false,
+        pre: needLines
+          ? prepareWithSegments(text, role.font, options)
+          : prepare(text, role.font, options)
+      };
+      bucket.set(text, entry);
+      evictablePre.push([bucketName, text]);
+      while (evictablePre.length > TEXT_CACHE_MAX) {
+        const gone = evictablePre.shift();
+        const old = prepared.get(gone[0]);
+        if (old) old.delete(gone[1]);
+      }
+    } else if (needLines && !entry.segments) {
+      const options = { whiteSpace: "pre-wrap" };
+      if (role.letterSpacing) options.letterSpacing = role.letterSpacing;
+      entry.pre = prepareWithSegments(text, role.font, options);
+      entry.segments = true;
+    }
+    return entry;
+  }
+
   function textForId(role, id) {
     const m = ids.get(role.name);
     const text = m && m.get(id);
@@ -523,6 +565,30 @@ export function createMetrics(fontRoles) {
       return shrink(e.pre, maxWidth, measureLineStats(e.pre, maxWidth).lineCount);
     },
 
+    // --- the same roles, in pre-wrap mode (a visitor's own text) ---------
+    // Ordinary spaces, tabs and hard breaks are all preserved, which is what
+    // a <textarea> does. heightOfPreWrap() is the one the notebook's height
+    // comes from on every keystroke: pure arithmetic, never `scrollHeight`.
+    heightOfPreWrap: function (role, text, width) {
+      const r = roleOf(role);
+      const e = entryPre(r, text == null ? "" : String(text), false);
+      return layout(e.pre, width, r.lineHeight).height;
+    },
+    lineCountOfPreWrap: function (role, text, width) {
+      const r = roleOf(role);
+      const e = entryPre(r, text == null ? "" : String(text), false);
+      return layout(e.pre, width, r.lineHeight).lineCount;
+    },
+    linesOfPreWrap: function (role, text, width) {
+      const r = roleOf(role);
+      const e = entryPre(r, text == null ? "" : String(text), true);
+      return layoutWithLines(e.pre, width, r.lineHeight).lines.map(lineText);
+    },
+    handleForPreWrap: function (role, text) {
+      const r = roleOf(role);
+      return entryPre(r, text == null ? "" : String(text), true).pre;
+    },
+
     // --- the same roles, measured at an alternate font size --------------
     // `fontPx` is a CSS px size. The role's stack, weight/style and letter
     // spacing are unchanged; the line height scales with the size.
@@ -607,7 +673,12 @@ export const ROLE_NAMES = [
   "native-name",        // .map-card-native and .dialog-native
   "card-native",        // .card-native, the small line under a card's name
   "map-label-native",   // .map-label-native, the label's middle line
-  "card-tagline-strong" // the bold run inside a highlighted card tagline
+  "card-tagline-strong", // the bold run inside a highlighted card tagline
+  // Phase 6 — the paginated field guide (js/reader.js).
+  "book-body",          // .book-line, the reader's body copy
+  "book-title",         // .book-title, a place's name on its first page
+  "book-meta",          // .book-meta, "COUNTRY \u00B7 REGION"
+  "book-tagline"        // .book-tagline, the line that closes the head block
 ];
 
 // The font-size token inside a CSS `font` shorthand: the first length that
@@ -699,7 +770,11 @@ export const DEFAULT_FLAGS = {
   nativeNames: true,    // the native name under the Latin one (card, hover
                         // card, dialog) and as the map label's middle line
   searchHighlight: true,// matched tokens in a card tagline are set bold
-  localeText: true      // native strings are prepared under their own locale
+  localeText: true,     // native strings are prepared under their own locale
+  // Phase 5 — the map in a worker (js/map.js).
+  // Phase 6 — ways to read.
+  bookMode: true,       // "Read as a book": the paginated field guide
+  notebook: true        // the visitor's notebook in the dialog and the reader
 };
 
 export function resolveFlags(search, preset) {
