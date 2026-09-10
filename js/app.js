@@ -955,10 +955,42 @@
   }
 
   // --- Dialog -------------------------------------------------------------
+  // Phase 3 moved the dialog's rendering into js/dialog.js (an ES module that
+  // runs before this file and publishes window.ATLAS_DIALOG). Everything below
+  // delegates to it when it is there and keeps the original plain rendering as
+  // the fallback for when it is not — a missing metrics module, ?noflags=
+  // editorial, or an old browser.
+  var DLG = window.ATLAS_DIALOG || null;
+  if (DLG) DLG.setVisibleProvider(visiblePlaces);
+
   var dialogIndex = 0; // position within the current visible list
   var currentPlaceId = null; // id of the place the dialog is showing (for sharing)
 
+  function dialogPlaceId() { return DLG ? DLG.currentId() : currentPlaceId; }
+
   function openDialog(id) {
+    if (DLG) { DLG.open(id); return; }
+    openDialogPlain(id);
+  }
+
+  function closeDialog() {
+    if (DLG) { DLG.close(); return; }
+    currentPlaceId = null;
+    if (typeof dialog.close === "function") dialog.close();
+    else dialog.removeAttribute("open");
+  }
+
+  function stepDialog(dir) {
+    if (DLG) { DLG.step(dir); return; }
+    var list = visiblePlaces();
+    if (!list.length) return;
+    dialogIndex = (dialogIndex + dir + list.length) % list.length;
+    openDialogPlain(list[dialogIndex].id);
+  }
+
+  // The pre-Phase-3 rendering: one paragraph, no spread. Kept verbatim so the
+  // dialog still works with the editorial module absent.
+  function openDialogPlain(id) {
     var p = placesById.get(id);
     if (!p) return;
     var cat = categoryById.get(p.category);
@@ -991,19 +1023,6 @@
     } else {
       dialog.setAttribute("open", ""); // very old browser fallback
     }
-  }
-
-  function closeDialog() {
-    currentPlaceId = null;
-    if (typeof dialog.close === "function") dialog.close();
-    else dialog.removeAttribute("open");
-  }
-
-  function stepDialog(dir) {
-    var list = visiblePlaces();
-    if (!list.length) return;
-    dialogIndex = (dialogIndex + dir + list.length) % list.length;
-    openDialog(list[dialogIndex].id);
   }
 
   // --- Hash routing: #/place/<id> ----------------------------------------
@@ -1097,7 +1116,8 @@
   $("dialog-prev").addEventListener("click", function () { stepDialog(-1); });
   $("dialog-next").addEventListener("click", function () { stepDialog(1); });
   $("dialog-share").addEventListener("click", function () {
-    if (currentPlaceId) sharePlace(currentPlaceId);
+    var id = dialogPlaceId();
+    if (id) sharePlace(id);
   });
 
   // Clicking the dialog backdrop (the <dialog> itself, not its contents) closes it.

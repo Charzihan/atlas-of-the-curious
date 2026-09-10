@@ -42,6 +42,27 @@
    its animation loop when it scrolls out of view. The zoom is put back to 1×
    before the grid work starts.
 
+   Phase 3 ("the editorial field note") then opens the detail dialog itself, in
+   its own page visits at three widths (360, 768 and 1280), and adds four
+   claims about the hand-laid-out spread:
+
+     1. All 40 stories fit. Every place is opened through
+        window.ATLAS_DIALOG.open(id) at each of the three viewports; every
+        laid-out line box must lie inside its column box (checked against the
+        layout model AND against the painted DOM boxes) and the dialog, its
+        body and the spread must have no horizontal scroll.
+     2. At 1280 the two columns are justified, and no river — a chain of
+        vertically aligned word gaps — may run longer than three lines. The
+        report comes from ATLAS_DIALOG.debug().rivers, which chains the gaps
+        the layout actually painted.
+     3. Keyboard prev/next animates the dialog body's height: the height is
+        sampled every frame across an ArrowRight, and a mid-flight sample must
+        lie strictly between the start and end heights. Escape still closes,
+        and #/place/<id> still opens.
+     4. Accessibility: the visually hidden paragraph still carries the whole
+        story (and the field note its whole text), every generated line span is
+        aria-hidden, and the dialog's accessible name is still its title.
+
    Run: pnpm smoke  (or: node scripts/smoke.mjs) */
 import { startServer, launchChromium, INSTALL_HINT } from "./browser-harness.mjs";
 
@@ -80,6 +101,20 @@ const MIN_LABELS = 21;
 const MAX_FRAME_MS = 20;          // absolute ceiling on the average frame
 const MAX_FRAME_OVERHEAD_MS = 4;  // what the labels may add to that average
 const MAX_PLACEMENT_MS = 8;       // average cost of one placement pass
+
+// Phase 3 thresholds.
+// The three widths done-when 1 names, each in its own page visit.
+const DIALOG_VIEWPORTS = [
+  { name: "phone", width: 360, height: 780, twoCol: false },
+  { name: "tablet", width: 768, height: 900, twoCol: false },
+  { name: "desktop", width: 1280, height: 800, twoCol: true }
+];
+// A river may span three lines; a fourth is a channel the eye follows.
+const MAX_RIVER_RUN = 3;
+// Sub-pixel slack between what pretext computed and what Chromium painted.
+const BOX_EPS = 1;
+// One open() must stay cheap enough to feel instant.
+const MAX_OPEN_MS = 60;
 
 /* ---------------------------------------------------------------------- *
  * In-page instrumentation                                                *
@@ -236,6 +271,253 @@ function taglineWidows(page) {
     D.hideCard();
     return { checked: checked, widows: widows, narrowest: narrowest, widest: widest };
   });
+}
+
+/* ---------------------------------------------------------------------- *
+ * Phase 3 probes: the editorial dialog                                   *
+ * ---------------------------------------------------------------------- */
+
+// Open all 40 places and check each spread against both the layout model and
+// the boxes Chromium actually painted. Runs entirely inside the page: one
+// evaluate, no per-place round trip.
+function dialogSweep(eps) {
+  const D = window.ATLAS_DIALOG;
+  const dlg = document.getElementById("place-dialog");
+  const body = dlg.querySelector(".dialog-body");
+  const spread = dlg.querySelector(".story-spread");
+  const out = {
+    opened: 0, twoCol: null, justified: null, colWidth: null, innerWidth: null,
+    modelOutside: [], paintedOutside: [], overflowLines: [], scroll: [],
+    worstRiver: null, riverPlaces: 0, riverTotal: 0,
+    lineCounts: [], chipCounts: { chips: 0, fields: 0, plain: 0 },
+    hyphenated: 0, dropCaps: 0, pullQuotes: 0, fullBleed: 0,
+    maxOpenMs: 0, a11y: { storyMismatch: [], factMismatch: [], exposedLines: 0,
+                          nameMismatch: [], hiddenStory: 0 },
+    trials: null, reveal: null
+  };
+
+  for (const p of (window.ATLAS_DATA.places || [])) {
+    const t0 = performance.now();
+    D.open(p.id);
+    const took = performance.now() - t0;
+    if (took > out.maxOpenMs) out.maxOpenMs = took;
+    const d = D.debug();
+    if (!d.ready) continue;
+    out.opened++;
+    out.twoCol = d.twoCol;
+    out.justified = d.justified;
+    out.colWidth = d.colWidth;
+    out.innerWidth = d.innerWidth;
+    out.trials = d.trials;
+    out.reveal = d.reveal;
+    out.lineCounts.push(d.lines.length);
+    if (d.dropCap.lines) out.dropCaps++;
+    if (d.pullQuote.lines) out.pullQuotes++;
+    if (d.pullQuote.fullBleed) out.fullBleed++;
+
+    // --- done-when 1: the model ---------------------------------------
+    for (const line of d.lines) {
+      const col = d.columns[line.col];
+      if (line.x < col.x - 0.01 || line.x + line.width > col.x + col.width + 0.01) {
+        out.modelOutside.push(
+          p.id + " col" + line.col + " row" + line.row + ": " +
+          Math.round(line.x) + "+" + Math.round(line.width) + " in " +
+          Math.round(col.x) + "+" + Math.round(col.width));
+      }
+      if (line.overflow) out.overflowLines.push(p.id + " row" + line.row);
+      if (line.hyphenated) out.hyphenated++;
+    }
+
+    // --- done-when 1: the painted boxes -------------------------------
+    const spreadRect = spread.getBoundingClientRect();
+    const lineEls = spread.querySelectorAll(".story-line");
+    for (let i = 0; i < lineEls.length; i++) {
+      const el = lineEls[i];
+      const model = d.lines[i];
+      if (!model) continue;
+      const col = d.columns[model.col];
+      const r = el.getBoundingClientRect();
+      const left = r.left - spreadRect.left;
+      const right = r.right - spreadRect.left;
+      if (left < col.x - eps || right > col.x + col.width + eps) {
+        out.paintedOutside.push(
+          p.id + " row" + model.row + ": painted " + Math.round(left) + ".." +
+          Math.round(right) + " outside " + Math.round(col.x) + ".." +
+          Math.round(col.x + col.width));
+      }
+    }
+    for (const [what, el] of [["dialog", dlg], ["body", body], ["spread", spread]]) {
+      if (el.scrollWidth > el.clientWidth) {
+        out.scroll.push(p.id + " " + what + " " + el.scrollWidth + " > " + el.clientWidth);
+      }
+    }
+
+    // --- done-when 2: rivers ------------------------------------------
+    if (d.rivers.riverCount) out.riverPlaces++;
+    out.riverTotal += d.rivers.riverCount;
+    if (!out.worstRiver || d.rivers.maxRun > out.worstRiver.run) {
+      out.worstRiver = {
+        id: p.id, run: d.rivers.maxRun,
+        col: d.rivers.worst ? d.rivers.worst.col : null,
+        startRow: d.rivers.worst ? d.rivers.worst.startRow : null,
+        endRow: d.rivers.worst ? d.rivers.worst.endRow : null,
+        gapRatio: d.rivers.worst ? d.rivers.worst.gapRatio : null,
+        colWidth: d.colWidth
+      };
+    }
+
+    // --- F: the metadata chips ----------------------------------------
+    for (const f of d.fields) {
+      out.chipCounts.fields++;
+      out.chipCounts.chips += f.chips;
+      if (!f.chips) out.chipCounts.plain++;
+      if (f.maxLineWidth > f.width + 0.5) {
+        out.scroll.push(p.id + " field " + f.key + " " +
+                        Math.round(f.maxLineWidth) + " > " + f.width);
+      }
+    }
+
+    // --- done-when 4: accessibility ------------------------------------
+    if (d.accessible.story !== p.story) out.a11y.storyMismatch.push(p.id);
+    if (d.accessible.fact !== p.fact) out.a11y.factMismatch.push(p.id);
+    if (d.accessible.titlePlain !== p.name) out.a11y.nameMismatch.push(p.id);
+    const storyEl = document.getElementById("dialog-story");
+    const cs = getComputedStyle(storyEl);
+    if (cs.display !== "none" && cs.visibility !== "hidden" &&
+        storyEl.offsetWidth <= 2) out.a11y.hiddenStory++;
+    for (const el of spread.querySelectorAll(".story-line, .pull-quote-line")) {
+      if (el.getAttribute("aria-hidden") !== "true") out.a11y.exposedLines++;
+    }
+  }
+
+  // The accessible name still comes from the title element.
+  const labelledBy = dlg.getAttribute("aria-labelledby");
+  const titleEl = labelledBy ? document.getElementById(labelledBy) : null;
+  out.accessibleName = {
+    labelledBy: labelledBy,
+    text: titleEl ? titleEl.textContent.replace(/\u00AD/g, "") : null
+  };
+  D.close();
+  out.closedAfterSweep = !dlg.open;
+  return out;
+}
+
+// Sample the dialog body's height every frame so a real key press can be
+// timed against it.
+function armHeightSampler(ms) {
+  const body = document.querySelector("#place-dialog .dialog-body");
+  const samples = [];
+  const t0 = performance.now();
+  window.__ATLAS_DIALOG_HEIGHTS = samples;
+  const tick = () => {
+    samples.push({
+      t: Math.round((performance.now() - t0) * 10) / 10,
+      h: Math.round(body.getBoundingClientRect().height * 100) / 100
+    });
+    if (performance.now() - t0 < ms) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
+async function dialogInteraction(page) {
+  // Pick a neighbouring pair whose bodies are different heights, so "the
+  // height animated" is a claim the measurement can actually falsify.
+  const pair = await page.evaluate(() => {
+    const D = window.ATLAS_DIALOG;
+    const places = window.ATLAS_DATA.places;
+    const heights = places.map((p) => {
+      D.open(p.id);
+      return D.debug().heights.variable;
+    });
+    D.close();
+    for (let i = 0; i < places.length - 1; i++) {
+      if (Math.abs(heights[i] - heights[i + 1]) > 12) {
+        return { from: places[i].id, to: places[i + 1].id,
+                 fromH: heights[i], toH: heights[i + 1] };
+      }
+    }
+    return null;
+  });
+  if (!pair) return { pair: null };
+
+  await page.evaluate((id) => window.ATLAS_DIALOG.open(id), pair.from);
+  await settleFrames(page, 3);
+  await page.evaluate(armHeightSampler, 900);
+  await page.keyboard.press("ArrowRight");
+  await page.waitForTimeout(950);
+
+  const step = await page.evaluate((expected) => {
+    const samples = window.__ATLAS_DIALOG_HEIGHTS || [];
+    const D = window.ATLAS_DIALOG;
+    const heights = samples.map((s) => s.h);
+    const from = heights.length ? heights[0] : 0;
+    const to = heights.length ? heights[heights.length - 1] : 0;
+    const lo = Math.min(from, to);
+    const hi = Math.max(from, to);
+    // A sample strictly between the two ends is proof the body was animated
+    // rather than snapped.
+    let between = null;
+    let distinct = new Set();
+    for (const h of heights) {
+      distinct.add(h);
+      if (h > lo + 0.5 && h < hi - 0.5) {
+        if (between === null || Math.abs(h - (lo + hi) / 2) < Math.abs(between - (lo + hi) / 2)) {
+          between = h;
+        }
+      }
+    }
+    return {
+      landedOn: D.currentId(), expected: expected,
+      from: from, to: to, mid: between,
+      distinct: distinct.size, samples: heights.length
+    };
+  }, pair.to);
+
+  // Escape still closes, and the hash route still opens.
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(120);
+  const closed = await page.evaluate(() => !document.getElementById("place-dialog").open);
+
+  const routeId = await page.evaluate(() => window.ATLAS_DATA.places[22].id);
+  await page.evaluate((id) => { location.hash = "#/place/" + encodeURIComponent(id); }, routeId);
+  await page.waitForTimeout(250);
+  const routed = await page.evaluate(() => ({
+    open: !!document.getElementById("place-dialog").open,
+    id: window.ATLAS_DIALOG.currentId(),
+    highlighted: document.querySelectorAll(".map-marker.is-pulsing, .map-marker.pulse").length
+  }));
+  await page.evaluate(() => { location.hash = "#/"; });
+  await page.waitForTimeout(200);
+  const closedByRoute = await page.evaluate(
+    () => !document.getElementById("place-dialog").open);
+
+  return { pair, step, closed, routeId, routed, closedByRoute };
+}
+
+// One page visit dedicated to the dialog, at one width.
+async function visitDialog(browser, origin, viewport) {
+  const errors = [];
+  const context = await browser.newContext({
+    viewport: { width: viewport.width, height: viewport.height }
+  });
+  const page = await context.newPage();
+  page.on("console", (m) => {
+    const text = m.text();
+    if (!isBenign(text) && m.type() === "error") errors.push(text);
+  });
+  page.on("pageerror", (e) => errors.push(`uncaught: ${e && e.message ? e.message : e}`));
+  try {
+    await page.goto(`${origin}/index.html`, { waitUntil: "load" });
+    await page.waitForFunction(() => window.ATLAS_DIALOG_READY === true, null, { timeout: 15000 });
+    await page.waitForFunction(() => !!window.ATLAS_GRID_DEBUG, null, { timeout: 15000 });
+    await settleFrames(page, 2);
+    const sweep = await page.evaluate(dialogSweep, BOX_EPS);
+    const flags = await page.evaluate(() => window.ATLAS_DIALOG.debug().flags);
+    const interaction = viewport.twoCol ? await dialogInteraction(page) : null;
+    return { sweep, flags, interaction, errors };
+  } finally {
+    await context.close();
+  }
 }
 
 /* ---------------------------------------------------------------------- *
@@ -755,6 +1037,160 @@ function reportViewport(label, res, viewport, fail) {
   if (res.errors.length) fail(`${label} logged ${res.errors.length} console/page error(s)`);
 }
 
+function reportDialog(label, res, viewport, fail, expectedPlaces) {
+  const { sweep, flags, interaction } = res;
+  const lines = sweep.lineCounts;
+  const minLines = lines.length ? Math.min(...lines) : 0;
+  const maxLines = lines.length ? Math.max(...lines) : 0;
+
+  console.log(
+    `${label.padEnd(22)} ${sweep.opened} place(s) opened, ` +
+    `${sweep.twoCol ? 2 : 1} column(s) of ${Math.round(sweep.colWidth)}px in ` +
+    `${sweep.innerWidth}px, ${sweep.justified ? "justified" : "ragged"}, ` +
+    `${minLines}-${maxLines} line(s)/story, ${sweep.dropCaps} drop cap(s), ` +
+    `${sweep.pullQuotes} pull quote(s) (${sweep.fullBleed} full-bleed), ` +
+    `${sweep.hyphenated} soft-hyphen break(s), ` +
+    `open() max ${fmt(sweep.maxOpenMs)}ms`
+  );
+
+  if (sweep.opened !== expectedPlaces) {
+    fail(`${label} opened ${sweep.opened} place(s), expected ${expectedPlaces}`);
+  }
+  if (!flags.editorial) fail(`${label} did not run the editorial renderer`);
+  if (sweep.dropCaps !== sweep.opened) {
+    fail(`${label} rendered a drop cap for only ${sweep.dropCaps} of ${sweep.opened}`);
+  }
+  if (sweep.pullQuotes !== sweep.opened) {
+    fail(`${label} rendered a pull quote for only ${sweep.pullQuotes} of ${sweep.opened}`);
+  }
+  if (sweep.maxOpenMs > MAX_OPEN_MS) {
+    fail(`${label} one open() took ${fmt(sweep.maxOpenMs)}ms (budget ${MAX_OPEN_MS}ms)`);
+  }
+
+  // ---- Done-when 1: nothing overflows ---------------------------------
+  console.log(
+    `  spread fit: ${sweep.modelOutside.length} line(s) outside a column in the ` +
+    `model, ${sweep.paintedOutside.length} painted outside, ` +
+    `${sweep.overflowLines.length} over-set line(s), ` +
+    `${sweep.scroll.length} horizontal scroll(s)`
+  );
+  for (const bad of sweep.modelOutside.slice(0, 4)) console.error(`      model: ${bad}`);
+  for (const bad of sweep.paintedOutside.slice(0, 4)) console.error(`      painted: ${bad}`);
+  for (const bad of sweep.scroll.slice(0, 4)) console.error(`      scroll: ${bad}`);
+  if (sweep.modelOutside.length) {
+    fail(`${label} laid ${sweep.modelOutside.length} line(s) outside their column`);
+  }
+  if (sweep.paintedOutside.length) {
+    fail(`${label} painted ${sweep.paintedOutside.length} line(s) outside their column`);
+  }
+  if (sweep.overflowLines.length) {
+    fail(`${label} produced ${sweep.overflowLines.length} over-set line(s)`);
+  }
+  if (sweep.scroll.length) {
+    fail(`${label} scrolls horizontally in ${sweep.scroll.length} case(s)`);
+  }
+
+  // ---- Done-when 2: rivers --------------------------------------------
+  const w = sweep.worstRiver;
+  if (viewport.twoCol) {
+    console.log(
+      `  rivers: worst run ${w ? w.run : 0} line(s)` +
+      (w && w.startRow != null
+        ? ` ("${w.id}", column ${w.col}, rows ${w.startRow}-${w.endRow}, ` +
+          `gap ${w.gapRatio}x normal, column ${Math.round(w.colWidth)}px)` : "") +
+      `; ${sweep.riverTotal} river(s) over ${sweep.riverPlaces} story(ies); ` +
+      `width trials ${JSON.stringify(sweep.trials.map((t) => [t.width, t.maxRun]))}`
+    );
+    if (!sweep.justified) fail(`${label} did not justify the columns`);
+    if (w && w.run > MAX_RIVER_RUN) {
+      fail(`${label} has a river ${w.run} lines long in "${w.id}" ` +
+           `(budget ${MAX_RIVER_RUN})`);
+    }
+  } else {
+    console.log(`  rivers: n/a (ragged right below the ${900}px two-column breakpoint)`);
+    if (sweep.justified) fail(`${label} justified a single ragged column`);
+  }
+
+  // ---- Done-when 4: accessibility -------------------------------------
+  const a = sweep.a11y;
+  console.log(
+    `  a11y: ${sweep.opened - a.storyMismatch.length}/${sweep.opened} hidden story ` +
+    `paragraph(s) carry the full text, ${a.hiddenStory} of them visually hidden ` +
+    `(not display:none), ${sweep.opened - a.factMismatch.length}/${sweep.opened} ` +
+    `field note(s) intact, ${a.exposedLines} laid-out line(s) not aria-hidden, ` +
+    `accessible name via #${sweep.accessibleName.labelledBy} = ` +
+    `"${sweep.accessibleName.text}"`
+  );
+  if (a.storyMismatch.length) {
+    fail(`${label} lost the story text for: ${a.storyMismatch.slice(0, 3).join(", ")}`);
+  }
+  if (a.factMismatch.length) {
+    fail(`${label} lost the field-note text for: ${a.factMismatch.slice(0, 3).join(", ")}`);
+  }
+  if (a.nameMismatch.length) {
+    fail(`${label} title text differs from the place name for: ` +
+         a.nameMismatch.slice(0, 3).join(", "));
+  }
+  if (a.exposedLines) {
+    fail(`${label} left ${a.exposedLines} laid-out line span(s) exposed to ` +
+         `assistive technology`);
+  }
+  if (a.hiddenStory !== sweep.opened) {
+    fail(`${label} only ${a.hiddenStory} of ${sweep.opened} story paragraph(s) were ` +
+         `visually hidden without display:none`);
+  }
+  if (sweep.accessibleName.labelledBy !== "dialog-title") {
+    fail(`${label} dialog is no longer labelled by #dialog-title`);
+  }
+  if (!sweep.closedAfterSweep) fail(`${label} dialog stayed open after close()`);
+
+  // ---- F: the chips ----------------------------------------------------
+  console.log(
+    `  metadata: ${sweep.chipCounts.chips} chip(s) across ` +
+    `${sweep.chipCounts.fields} field flow(s) (${sweep.chipCounts.plain} with no chip)`
+  );
+  if (!sweep.chipCounts.chips) fail(`${label} produced no metadata chips`);
+
+  // ---- Done-when 3: the animated step ----------------------------------
+  if (interaction) {
+    if (!interaction.pair) {
+      fail(`${label} found no neighbouring places with different body heights`);
+    } else {
+      const st = interaction.step;
+      console.log(
+        `  step (ArrowRight ${interaction.pair.from} -> ${interaction.pair.to}): ` +
+        `body height ${fmt(st.from)}px -> ${st.mid == null ? "—" : fmt(st.mid)}px ` +
+        `mid-flight -> ${fmt(st.to)}px, ${st.distinct} distinct height(s) over ` +
+        `${st.samples} frame(s); Escape closed it: ${interaction.closed}; ` +
+        `#/place/${interaction.routeId} opened "${interaction.routed.id}"`
+      );
+      if (st.landedOn !== st.expected) {
+        fail(`${label} ArrowRight landed on "${st.landedOn}", expected "${st.expected}"`);
+      }
+      if (Math.abs(st.from - st.to) < 1) {
+        fail(`${label} the dialog body did not change height across a step`);
+      }
+      if (st.mid == null) {
+        fail(`${label} the dialog body snapped from ${fmt(st.from)}px to ` +
+             `${fmt(st.to)}px without an intermediate height`);
+      }
+      if (st.distinct < 3) {
+        fail(`${label} the step animation only produced ${st.distinct} height(s)`);
+      }
+      if (!interaction.closed) fail(`${label} Escape no longer closes the dialog`);
+      if (!interaction.routed.open || interaction.routed.id !== interaction.routeId) {
+        fail(`${label} #/place/${interaction.routeId} did not open that place`);
+      }
+      if (!interaction.closedByRoute) {
+        fail(`${label} leaving the place route did not close the dialog`);
+      }
+    }
+  }
+
+  for (const e of res.errors) console.error(`  error: ${e}`);
+  if (res.errors.length) fail(`${label} logged ${res.errors.length} console/page error(s)`);
+}
+
 async function main() {
   const { browser, reason } = await launchChromium();
   if (!browser) {
@@ -777,6 +1213,12 @@ async function main() {
         });
       }
       reportViewport(`${viewport.name} ${viewport.width}x${viewport.height}`, res, viewport, fail);
+    }
+
+    /* ---- Phase 3: the editorial dialog ------------------------------- */
+    for (const viewport of DIALOG_VIEWPORTS) {
+      const res = await visitDialog(browser, server.origin, viewport);
+      reportDialog(`dialog ${viewport.width}x${viewport.height}`, res, viewport, fail, 40);
     }
   } catch (err) {
     console.error(`\nerror: ${err.stack || err.message}`);

@@ -69,7 +69,22 @@ click), that the hovered card keeps its on-screen position across a filter
 change, that an expansion repositions each card at most once, and that the
 fitted hero headline lands on exactly two lines. The map checks run first: the
 grid checks scroll the grid to the top of the viewport, which pauses the map's
-animation loop. Run it after any change to the layout, the fonts or the map.
+animation loop.
+
+Finally it opens the detail dialog in three page visits of its own (360, 768
+and 1280 px wide) and, for all 40 places at each width, asserts that every
+hand-laid-out line box sits inside its column — checked twice, once against the
+layout model and once against the painted DOM boxes — and that neither the
+dialog, its body, nor the spread scrolls horizontally. At 1280 it asserts that
+no river (a chain of vertically aligned word gaps) runs longer than three lines
+and prints the worst case; it presses ArrowRight and samples the dialog body's
+height every frame, requiring a mid-flight value strictly between the start and
+end heights; it checks that Escape still closes and `#/place/<id>` still opens;
+and it checks the accessibility contract — the visually hidden paragraph still
+carries the whole story, the field note its whole text, every generated line
+span is `aria-hidden`, and the dialog is still labelled by its title.
+
+Run it after any change to the layout, the fonts or the map.
 
 ## Features
 
@@ -137,7 +152,40 @@ animation loop. Run it after any change to the layout, the fonts or the map.
   (`?cat=desert&q=salt&sort=name`), so a reload restores the view and links
   carry the filter.
 - **Surprise me**: open a random place from the current filter.
+- **The story as a spread**: the detail dialog does not render the story as a
+  paragraph — it typesets it. A drop cap three lines tall that the opening
+  lines route around; the field note lifted into a pull-quote box that the body
+  text flows past; two columns from a 900px viewport, the right one resuming
+  from the left one's cursor with the split chosen so each column carries its
+  share of the paragraph. Lines are absolutely positioned spans at coordinates
+  pretext computed; the container's height is known before anything is painted.
+- **Justified columns, with the rivers counted**: on wide screens the columns
+  are set by a Knuth-Plass line breaker (ported from pretext's
+  justification-comparison demo into `js/justify.js`) whose badness function
+  costs the cube of the space-stretch ratio plus explicit penalties for rivers,
+  over-tight lines and hyphenated breaks. Each word is positioned individually,
+  so the gaps are exact — which is what lets the same code chain them into
+  rivers and pick, from three candidate column widths (the natural one and
+  ±6%), the one whose longest river is shortest. `pnpm smoke` asserts no river
+  runs longer than three lines, for all 40 stories.
+- **Soft hyphens for the long names**: a small hand-written dictionary
+  (Białowieża, Zhangjiajie, Jökulsárlón, Vatnajökull, Kilimanjaro, …) is
+  applied to the title and the story at render time. Pretext treats U+00AD as
+  an optional break — invisible unless taken, and painted as a trailing `-`
+  when it is. The dataset never sees a soft hyphen, and neither do the
+  accessible copies, so find-in-page keeps matching.
+- **Metadata as inline chips**: "best time to visit" and "nearest major city"
+  are flowed with pretext's `prepareRichInline` helper. Month ranges (`Dec–Mar`,
+  `April–June`) and distances (`≈ 260–400 km`) become atomic pills — `break:
+  "never"` plus the pill's padding as `extraWidth` — and every fragment is
+  painted at its computed offset, so the wrap is exact and the field's height
+  is part of the dialog's predicted height.
 - **Detail dialog** with keyboard support (Esc, ←/→ to move between places).
+  Stepping animates the dialog body from its current height to the incoming
+  one — computed before anything is rendered — and swaps the content at the
+  midpoint. Lines then arrive one at a time, about 28ms apart, capped so even
+  the longest story has finished inside 1.2s. `prefers-reduced-motion` gets
+  both at once, with no animation.
 - **Daily pick**: a deterministic-of-the-day place (UTC), the same for every
   visitor on the same calendar day — no server state needed.
 - **Shareable URLs, two ways**: `index.html#/place/<id>` deep-links open
@@ -165,6 +213,11 @@ same variables, so the painted font and the measured font cannot drift apart:
 .card h3 { font: var(--font-card-name); line-height: var(--lh-card-name); }
 ```
 
+Phase 3 added three more of them — `dropcap` (measured at whatever size makes
+the cap exactly three body lines tall), `field` and `field-chip` (the plain
+runs and the pills of the metadata flows) — and every one is still declared in
+the CSS and consumed by the rule that paints it.
+
 `js/text.js` reads the registry once at boot, resolves `rem`/`em` into `px`,
 turns each shorthand into a canvas font string and hands the result to
 `createMetrics()` — a pure factory that touches neither `document` nor `window`
@@ -174,6 +227,13 @@ arbitrary strings (`heightOfText`, `linesOfText`, `tightWidthOfText`), and
 `fontFor`. The instance is published as `window.ATLAS_TEXT` together with an
 `atlas:text-ready` event, because `js/app.js` is a classic script and cannot
 import a module.
+
+When a caller has to lay the lines out itself rather than ask how tall they
+are — the dialog's justified columns need each segment's width, each break's
+kind and the discretionary hyphen's width — `handleFor(role, id)` and
+`handleForText(role, text)` hand back the underlying
+`prepareWithSegments()` handle, upgrading a height-only entry in place so
+nothing is ever prepared twice.
 
 Two rules make the numbers trustworthy: the canvas font string must match the
 CSS exactly, and a font stack may only name real faces — a generic keyword such
@@ -200,6 +260,12 @@ browser without a rebuild:
 | `scrollAnchor` | `js/app.js` | the card under the cursor no longer keeps its place across a reflow |
 | `fitText` | `js/app.js` | no balanced taglines, no fitted names, no fitted headline |
 | `expandInPlace` | `js/app.js` | clicking a card opens the modal instead of expanding it in the grid |
+| `editorial` | `js/dialog.js` | no `window.ATLAS_DIALOG`; the dialog falls back to `js/app.js`'s plain paragraph rendering |
+| `justify` | `js/dialog.js` | the wide-screen columns stay ragged-right instead of being justified |
+| `reveal` | `js/dialog.js` | the laid-out lines appear all at once instead of one at a time |
+| `hyphens` | `js/dialog.js` | no soft hyphens are injected into long names |
+| `chips` | `js/dialog.js` | the two metadata fields stay plain text instead of a rich inline flow |
+| `dialogAnimate` | `js/dialog.js` | prev/next swaps the content without animating the body's height |
 
 For example `?noflags=labels,oceanLabels` gives the pre-Phase-1 map, which is
 also what `pnpm smoke` loads to get a frame-timing baseline.
@@ -223,6 +289,29 @@ entry points are on `window.ATLAS_MAP_DEBUG`: `setZoom(z)`, `place()`,
 bookkeeping for the same reason: `agreement()` re-checks every card's predicted
 top/height against the DOM, `writes()` counts position writes per card,
 `slots()`, `hero()` and `lastLayout()` report what the last pass decided.
+
+**Dialog debugging.** `window.ATLAS_DIALOG` is both the dialog's public surface
+— `open(id)`, `close()`, `step(dir)`, `currentId()`, `relayout()` — and its
+inspection surface. `debug()` returns the whole spread as data and touches no
+DOM: the column boxes, every line's `{col, row, x, y, width, justified,
+hyphenated}`, the drop cap's size, the pull quote's box, the three column-width
+trials with the river run each produced, the chosen `rivers` report
+(`maxRun`, `riverCount`, `worst`), the two field flows with their chip counts,
+the height bookkeeping the step animation uses, the last reveal's timing, and
+the accessible copies of the story, field note and title. `pnpm smoke` drives
+the whole Phase 3 check-list through it.
+
+**Laying the spread out.** `js/justify.js` is the pure half: given a pretext
+`prepareWithSegments()` handle it builds a break-candidate table once
+(`prepareParagraph`), then `breakLines(para, width, { from, maxLines, justify,
+x })` returns lines with per-word x offsets, the gaps between them, and where
+to resume — first-fit when ragged, Knuth-Plass when justified, with the greedy
+pass as the fallback if no feasible path exists. `riverReport(lines,
+spaceWidth)` chains those gaps down the column. It imports nothing at all — no
+pretext, no `document`, no `window` — so it can move into a Web Worker
+unchanged. `js/dialog.js` is the half that owns the DOM: it reads the dialog's
+inner width exactly once per open (and once per resize), plans the geometry,
+flows the columns and writes the spans.
 
 ## Security
 
@@ -283,10 +372,16 @@ js/landmap.js     — generated ASCII land grid (120×40, from Natural Earth)
 js/text.js       — text metrics on top of pretext: the font role registry,
                     window.ATLAS_TEXT, feature flags, dev agreement check
 js/app.js        — predictive masonry (FLIP, scroll anchor, fitted text,
-                    expand in place), search, filters, URL state, dialog,
-                    routing, daily pick, geolocation, distance sort, sw reg
+                    expand in place), search, filters, URL state, routing,
+                    daily pick, geolocation, distance sort, sw reg; delegates
+                    the dialog to js/dialog.js (with a plain fallback)
 js/text-route.js — pure variable-width text routing (worker-ready): pretext
                     handle + per-row widths -> the lines that fit
+js/justify.js    — pure Knuth-Plass line breaking + river detection
+                    (worker-ready): prepared handle + width -> positioned words
+js/dialog.js     — the detail dialog as an editorial spread: drop cap, pull
+                    quote, justified columns, staggered reveal, soft hyphens,
+                    rich-inline metadata chips; window.ATLAS_DIALOG
 js/map.js        — the Text Atlas (character-grid map, uses pretext), pan/zoom,
                     coastline-routed labels, ocean names, hover card,
                     locate-me marker, off-screen pause

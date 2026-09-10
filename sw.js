@@ -18,6 +18,8 @@ const CORE = [
   "/js/landmap.js",
   "/js/text.js",
   "/js/text-route.js",
+  "/js/justify.js",
+  "/js/dialog.js",
   "/js/app.js",
   "/js/map.js",
   "/js/place.js",

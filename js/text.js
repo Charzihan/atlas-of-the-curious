@@ -239,6 +239,26 @@ export function createMetrics(fontRoles) {
     },
     roleNames: function () { return Array.from(roles.keys()); },
 
+    // --- the raw prepared handle --------------------------------------
+    // Manual line layout (the dialog's justified columns) needs the
+    // per-segment widths, break kinds and hyphen width that only
+    // prepareWithSegments() carries. These hand the very same cached handle
+    // every other answer above is computed from — a height-only entry is
+    // upgraded in place — so nothing is ever prepared twice.
+    handleFor: function (role, id) {
+      const r = roleOf(role);
+      return entryFor(r, textForId(r, id), true).pre;
+    },
+    handleForText: function (role, text) {
+      const r = roleOf(role);
+      return adHoc(r, text == null ? "" : String(text), true).pre;
+    },
+    handleForTextAt: function (role, text, fontPx) {
+      const r = roleOf(role);
+      const px = fontPx == null ? r.fontPx : fontPx;
+      return entryAt(r, px, text == null ? "" : String(text), true).pre;
+    },
+
     // --- the role's own metrics ---------------------------------------
     fontFor: function (role) {
       const r = roleOf(role);
@@ -363,6 +383,9 @@ export const ROLE_NAMES = [
   "hero-title",
   "story",
   "quote",
+  "dropcap",
+  "field",
+  "field-chip",
   "chip",
   "map-label",
   "ocean-label",
@@ -447,7 +470,14 @@ export const DEFAULT_FLAGS = {
   flip: true,           // cards glide from their old slot to the new one
   scrollAnchor: true,   // the card under the pointer / focus keeps its place
   fitText: true,        // balanced taglines, fitted names, fitted headline
-  expandInPlace: true   // click a card to open its story inside the grid
+  expandInPlace: true,  // click a card to open its story inside the grid
+  // Phase 3 — the editorial field note (js/dialog.js).
+  editorial: true,      // the dialog story is set as a spread, not a paragraph
+  justify: true,        // the wide-screen columns are justified (Knuth-Plass)
+  reveal: true,         // the laid-out lines fade in one at a time
+  hyphens: true,        // soft hyphens are injected into long place names
+  chips: true,          // best-time / nearest-city set as rich inline chips
+  dialogAnimate: true   // prev/next animates the dialog body's height
 };
 
 export function resolveFlags(search, preset) {

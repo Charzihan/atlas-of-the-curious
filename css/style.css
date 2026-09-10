@@ -68,6 +68,25 @@
   --lh-quote: 1.55;
   --ls-quote: 0px;
 
+  /* The story's drop cap — .drop-cap. The declared size is only a fallback:
+     js/dialog.js sizes the cap to exactly DROP_CAP_LINES body lines and writes
+     the result into --dropcap-size, measuring at the same px size. */
+  --font-dropcap: normal 3rem var(--font-serif);
+  --lh-dropcap: 1;
+  --ls-dropcap: 0px;
+
+  /* Detail dialog metadata value — .field em, and the plain runs of the
+     rich inline flow that replaces it. */
+  --font-field: normal 0.9rem var(--font-serif);
+  --lh-field: 1.5;
+  --ls-field: 0px;
+
+  /* A month range or a distance lifted out of that metadata into a pill —
+     .chip-inline. The pill's own padding is caller-owned `extraWidth`. */
+  --font-field-chip: normal 0.72rem var(--font-sans);
+  --lh-field-chip: 1.5;
+  --ls-field-chip: 0.04em;
+
   /* Filter chip label — .chip */
   --font-chip: normal 0.82rem var(--font-sans);
   --lh-chip: 1.55;
@@ -448,6 +467,12 @@ dialog {
   box-shadow: var(--shadow);
 }
 
+/* From the two-column breakpoint the dialog opens wide enough for a real
+   spread; below it the story stays a single column. */
+@media (min-width: 900px) {
+  #place-dialog.is-editorial { max-width: 960px; }
+}
+
 dialog::backdrop {
   background: rgba(5, 8, 20, 0.72);
   backdrop-filter: blur(4px);
@@ -508,6 +533,102 @@ dialog::backdrop {
   font: var(--font-story);
   line-height: var(--lh-story);
   letter-spacing: var(--ls-story);
+}
+
+/* ---------- The editorial spread (js/dialog.js) ----------
+   The story is laid out by hand: `.story-spread` is the positioned stage whose
+   height comes from the layout, `.story-line` is one line at its computed
+   (x, y) and `.story-word` is one word at its computed offset inside that line
+   — which is what makes a justified line's gaps exact rather than delegated to
+   the browser. Every one of them is aria-hidden; the real paragraph is the
+   visually-hidden `#dialog-story` right above.
+
+   Nothing here may set a width or a position in the stylesheet: js/dialog.js
+   writes those with el.style.setProperty (the CSP forbids style attributes in
+   markup, and these numbers are layout output, not design). */
+#place-dialog.is-editorial .dialog-story { margin: 0; }
+
+.story-spread {
+  position: relative;
+  margin: 0 0 18px;
+  color: var(--ink);
+  font: var(--font-story);
+  line-height: var(--lh-story);
+  letter-spacing: var(--ls-story);
+}
+
+.story-line {
+  position: absolute;
+  display: block;
+  white-space: nowrap;
+}
+
+.story-word { position: absolute; top: 0; white-space: pre; }
+
+.drop-cap {
+  position: absolute;
+  top: 0;
+  font: var(--font-dropcap);
+  letter-spacing: var(--ls-dropcap);
+  font-size: var(--dropcap-size, 3rem);
+  line-height: var(--dropcap-line, 1);
+  color: var(--gold);
+  text-align: left;
+}
+
+.pull-quote {
+  position: absolute;
+  box-sizing: border-box;
+  border-left: 3px solid var(--gold);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.pull-quote-label {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  font-family: Verdana, Geneva, sans-serif;
+  font-size: 0.62rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  line-height: 20px;
+  color: var(--gold);
+}
+
+.pull-quote-line {
+  position: absolute;
+  white-space: nowrap;
+  font: var(--font-quote);
+  letter-spacing: var(--ls-quote);
+  color: var(--ink-dim);
+}
+
+/* The metadata values, flowed by pretext's rich-inline helper: month ranges
+   and distances become pills, everything else stays plain text. */
+.field em.is-flowed { position: relative; display: block; }
+
+.chip-flow { position: absolute; inset: 0; display: block; }
+
+.chip-text {
+  position: absolute;
+  white-space: pre;
+  font: var(--font-field);
+  letter-spacing: var(--ls-field);
+  color: var(--ink);
+}
+
+.chip-inline {
+  position: absolute;
+  box-sizing: border-box;
+  white-space: pre;
+  font: var(--font-field-chip);
+  letter-spacing: var(--ls-field-chip);
+  color: var(--gold);
+  background: var(--gold-soft);
+  border: 1px solid rgba(232, 180, 90, 0.45);
+  border-radius: 999px;
+  padding: 0 6px;
 }
 
 .fact {
@@ -938,13 +1059,19 @@ dialog::backdrop {
   gap: 10px;
   margin: 0 0 4px;
 }
+/* js/dialog.js predicts each field's wrap, so the column count has to be
+   arithmetic rather than auto-fit: one column, two once the dialog is wide. */
+#place-dialog.is-editorial .field-grid { grid-template-columns: 1fr; }
+#place-dialog.is-editorial.dlg-wide .field-grid { grid-template-columns: 1fr 1fr; }
 .field {
   border: 1px solid var(--line);
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.03);
   padding: 10px 12px;
 }
-.field span {
+/* The label only — a child combinator, so the rich-inline fragments js/dialog.js
+   builds inside the <em> keep their own font. */
+.field > span {
   display: block;
   font-family: Verdana, Geneva, sans-serif;
   font-size: 0.62rem;
