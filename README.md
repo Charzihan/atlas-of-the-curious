@@ -183,6 +183,25 @@ Run it after any change to the layout, the fonts or the map.
 - **Ocean names in spaced capitals**: oceans and seas set in tracked uppercase,
   with the tracking opening from 0.18em to 0.3em as you zoom in. They claim
   their cells before the place names are routed, so the names flow around them.
+- **A sky drawn in the same alphabet**: the clouds are ASCII drawings on the
+  character grid, not blurred blobs — a closed outline of `.` `-` `_` `(` `)`
+  `~` with the soft white cloud poured into the blank interior:
+
+  ```
+        .--.
+     .-(    ).
+    (__________)
+  ```
+
+  `js/clouds.js` generates every one of them (three to six overlapping lobes on
+  a small cell raster, or one of four hand-drawn templates stretched, mirrored
+  and jittered), then traces the silhouette's boundary into those glyphs; no two
+  clouds in the sky are the same drawing, and every few seconds one of them
+  regenerates from its own seed and cross-fades into the new outline, so the sky
+  is never the same twice. The drawing is snapped to whole cells, columns and
+  rows, so it lines up with the land beside it; only the soft mass inside keeps
+  the sub-cell drift. Over Antarctica, where white on white ice would be
+  nothing, the ink turns slate blue.
 - **Pan & zoom** the map (buttons, wheel, or drag); markers and labels stay a
   constant on-screen size so you can zoom into the glyph detail — which is
   what buys the higher zoom tiers the room to show more text.
@@ -429,6 +448,7 @@ browser without a rebuild:
 | `seaStories` | `js/map.js` | no tagline spills into the water on hover, and no field note follows when the place is opened |
 | `idleSea` | `js/map.js` | no sentences drift after twelve idle seconds |
 | `seaClick` | `js/map.js` | a drifting word no longer brightens under the pointer or opens its place when clicked |
+| `asciiClouds` | `js/text.js` | the sky goes back to the blurred radial-gradient blobs (and back to fading out over Antarctica) instead of ASCII drawings |
 | `bookMode` | `js/reader.js` | no `window.ATLAS_READER`, no `#/read/<id>` route, and the "Read as a book" control is not offered at all |
 | `notebook` | `js/dialog.js` | no notes box in the dialog and no saved note in the field guide (anything already in `localStorage` is left untouched) |
 
@@ -590,6 +610,8 @@ js/labels.js     — the map's label placement engine as pure data in / data out
                     (no DOM): coastline routing, the occupancy mask, ocean names
 js/sea.js        — the living sea, pure: hover spills and the corridors the
                     idle sentences drift along
+js/clouds.js     — the sky, pure: ASCII cloud silhouettes from templates or
+                    lobes, traced into `.-_()~` on the character grid
 js/text-worker.js— the same-origin module worker both engines run inside
 js/justify.js    — pure Knuth-Plass line breaking + river detection
                     (worker-ready): prepared handle + width -> positioned words
@@ -618,6 +640,9 @@ scripts/check-text.mjs    — headless text-overflow checks (pnpm validate)
 scripts/smoke.mjs         — headless smoke test of index.html (pnpm smoke)
 scripts/checks/reader.mjs — the Phase 6 half of it: pagination at six window
                             sizes, printing, the notebook, the daily card
+scripts/checks/clouds.mjs — the cloud generator's geometry (no browser needed:
+                            `node scripts/checks/clouds.mjs`) plus the sky on
+                            the page; `run-clouds.mjs` runs both on their own
 scripts/browser-harness.mjs — dev server + Chromium plumbing for those two
 scripts/build-place-pages.mjs — generates the places/<id>/ share pages
 test/text-check.html      — dev-only page the overflow checks run in
