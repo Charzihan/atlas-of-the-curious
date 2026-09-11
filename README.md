@@ -568,7 +568,8 @@ css/style.css     — all styling (no external assets)
 css/place.css     — styling for the generated per-place share pages
 js/data.js        — the dataset (40 places, 7 categories; every place also
                     carries nativeName + nativeLang)
-js/landmap.js     — generated ASCII land grid (120×40, from Natural Earth),
+js/landmap.js     — generated ASCII land grids (150×39 desktop, 96×25 mobile,
+                    from Natural Earth),
                     plus simplified outlines for the 31 countries the dataset
                     names, for the country reading view (+11 KB)
 js/text.js       — text metrics on top of pretext: the font role registry,
@@ -647,11 +648,25 @@ sliver at any scale that fits the map. A story too long even for the inset
 stays in a full caption below the map. **Locate me** also draws a great-circle
 journey to the nearest place. Route text avoids map labels; notes too long for
 a route remain readable in a caption. **Clear story** removes the reading view.
-**Serif map** switches land and fluid glyphs to measured Georgia ink while
-keeping marker positions fixed.
+**Serif map** re-sets the whole map in the site's Georgia face and is
+remembered between visits. Every candidate glyph — printable ASCII, the
+printable half of Latin-1, and the typographic marks a WGL4 face also carries —
+is rendered once at the map's own cell size and its ink is counted, so a
+glyph's tone is measured coverage rather than its position in a list; its
+advance comes from `prepareWithSegments`, and anything wider than the cell is
+rejected while narrower glyphs are centred in it. That gives a 24-rung ramp,
+strictly increasing in measured coverage. Land takes its tone from a
+distance-to-coast field over the land mask — dark coastlines fading to a
+lighter interior — which is what keeps a continent's shape readable once the
+glyphs are no longer all one width; the country colours are unchanged. The sea
+picks its ink out of the same ramp from the wave field's own density, per cell
+per frame, so crests and troughs read as continuous tone. Reduced motion gets
+the static tonal sea and no fluid. Marker positions, cell positions, the land
+mask and zoom are identical in both modes.
 
 New modules: `js/labels.js`, `js/sea.js`, `js/text-worker.js`, `js/map-art.js`.
-The service-worker cache is bumped to v2 and includes these modules.
+The service-worker cache is bumped to v3 and includes these modules and all
+their transitive JavaScript imports, including the vendored pretext modules.
 `pnpm smoke` includes the recovered sea checks and new map-art checks.
 For the additional serif performance, offline, geolocation, mobile and
 screenshot checks, run `node scripts/checks/run-map-art.mjs`.

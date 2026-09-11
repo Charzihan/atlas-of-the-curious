@@ -91,6 +91,10 @@ import { createMapArtEngine } from "./map-art.js";
     "rgba(214, 244, 255, 0.70)"
   ];
   const WAVE_GAMMA = 1.9;          // >1 → quiet floor, thin bright crests
+  // The same, for the serif sea's ink: the monospace sea has six glyphs and
+  // gets most of its contrast from colour, so mapping density straight onto a
+  // 24-rung measured ramp would make quiet water far heavier than it is now.
+  const SERIF_SEA_GAMMA = 1.6;
   // Clouds are withheld from Antarctica (it is already white ice): the fade
   // ramps 1 → 0 over the last few rows so a cloud dissolves into the ice.
   function cloudFade(row) {
@@ -1277,7 +1281,7 @@ import { createMapArtEngine } from "./map-art.js";
   const serifFamily = getComputedStyle(document.documentElement).getPropertyValue('--font-serif').trim() || 'Georgia, serif';
   let artPinned = false;
   let artSeq = 0, artResult = null, artRequest = null, artCanvas = null, artInset = null;
-  let serifMode = false, serifPalette = null, repaintBase = null;
+  let serifMode = false, serifPalette = null, repaintBase = null, baseInk = null;
   const artLatest = { country: 0, route: 0, palette: 0 };
   function artGeometry() {
     return { cols: COLS, rows: ROWS, charW: CHARW, lineH: LINEH, family: serifFamily };
@@ -1388,6 +1392,29 @@ import { createMapArtEngine } from "./map-art.js";
       }
     }
     ctx.restore();
+  }
+  // The palette carries the land mask with it: the distance-to-coast field that
+  // gives each land cell its tone is part of the same once-per-geometry answer.
+  function askPalette() {
+    askArt('palette', { ...artGeometry(), size: PX, land: kind, color: cellColor });
+  }
+  // Measured coverage 0..1 → the nearest rung of the measured ramp. A lookup and
+  // a rounding, which is all the sea can afford per cell per frame.
+  function inkFor(p, tone) {
+    const last = p.ramp.length - 1;
+    return p.ramp[Math.max(0, Math.min(last, Math.round(tone * last)))];
+  }
+  // The serif toggle outlives the visit. A browser in private mode throws on the
+  // `localStorage` property itself, so the property read is inside the try too.
+  const SERIF_KEY = 'atlas:serif-map';
+  function readSerifPref() {
+    try { return window.localStorage.getItem(SERIF_KEY) === '1'; } catch (e) { return false; }
+  }
+  function writeSerifPref(on) {
+    try {
+      if (on) window.localStorage.setItem(SERIF_KEY, '1');
+      else window.localStorage.removeItem(SERIF_KEY);
+    } catch (e) { /* the toggle still works, it just will not be remembered */ }
   }
   function askArt(action, request) {
     const seq = ++artSeq;
@@ -1503,13 +1530,30 @@ import { createMapArtEngine } from "./map-art.js";
   function setSerif(on) {
     serifMode = !!on && FLAGS.serifAtlas !== false;
     $('map-serif')?.setAttribute('aria-pressed', String(serifMode));
-    if (serifMode && !serifPalette) askArt('palette', { ...artGeometry(), size: PX });
+    if (FLAGS.serifAtlas !== false) writeSerifPref(serifMode);
+    if (serifMode && !serifPalette) askPalette();
     if (repaintBase) repaintBase();
     return serifMode;
   }
   window.ATLAS_MAP_ART = {
     country: showCountry, route: showRoute, clear: clearArt, setSerif,
-    debug: () => ({ result: artResult, request: artRequest, serif: serifMode, palette: serifPalette, geometry: artGeometry(), countries: MAP.countries })
+    debug: () => ({
+      result: artResult, request: artRequest, serif: serifMode,
+      // Without the per-cell tone array: a check wants the ramp and the numbers
+      // behind it, not another copy of the grid.
+      palette: serifPalette && {
+        font: serifPalette.font, family: serifPalette.family, size: serifPalette.size,
+        charW: serifPalette.charW, levels: serifPalette.levels, measured: serifPalette.measured,
+        candidates: serifPalette.candidates, usable: serifPalette.usable,
+        coast: serifPalette.coast, ramp: serifPalette.ramp,
+        cells: serifPalette.landLevel ? serifPalette.landLevel.length : 0
+      },
+      // What the base canvas last actually painted: its resolved font string and
+      // the multiset of land glyphs. Phase 8's own check reads this rather than
+      // diffing pixels.
+      base: baseInk,
+      geometry: artGeometry(), countries: MAP.countries
+    })
   };
   window.addEventListener('atlas:highlight', e => showCountry(e.detail, false));
   window.addEventListener('hashchange', () => { if (!artPinned && !location.hash.startsWith('#/place/')) clearArt(); });
@@ -1721,9 +1765,16 @@ import { createMapArtEngine } from "./map-art.js";
     repaintBase = function () {
     bctx.clearRect(0, 0, mapW, mapH);
     const palette = serifMode && serifPalette;
+    // The palette's tone field is sized for the geometry it was built for; a
+    // stale one paints nothing rather than the wrong cells.
+    const landLevel = palette && palette.landLevel && palette.landLevel.length === COLS * ROWS
+      ? palette.landLevel : null;
     bctx.font = palette ? palette.font : FONT;
     bctx.textBaseline = "middle";
     bctx.textAlign = "left";
+    // The multiset of land glyphs actually painted, for the phase 8 check.
+    const tally = {};
+    let landCells = 0;
     for (let r = 0; r < ROWS; r++) {
       const rowBase = r * COLS;
       const y = (r + 0.5) * LINEH;
@@ -1732,18 +1783,29 @@ import { createMapArtEngine } from "./map-art.js";
         const x = c * CHARW;
         if (kind[i]) {
           bctx.fillStyle = PALETTE[cellColor[i]];
-          const ink = palette && palette.ramp[3 + cellColor[i] % 5];
-          bctx.fillText(ink ? ink.glyph : String.fromCharCode(cellGlyph[i]), x + (ink ? (CHARW - ink.width) / 2 : 0), y);
+          // Coast dark, interior lighter: the shape of a continent, set in the
+          // serif face, as a tone rather than as one repeated texture glyph.
+          const ink = landLevel && palette.ramp[landLevel[i]];
+          const glyph = ink ? ink.glyph : String.fromCharCode(cellGlyph[i]);
+          tally[glyph] = (tally[glyph] || 0) + 1;
+          landCells++;
+          bctx.fillText(glyph, x + (ink ? (CHARW - ink.width) / 2 : 0), y);
         } else {
           bctx.fillStyle = "rgba(80, 130, 170, 0.10)";
-          bctx.fillText("·", x, y);
+          // The still sea floor is tonal too, from the same static regional
+          // bias the wave trains use. This is the whole sea under reduced
+          // motion, where the fluid layer never draws — so it stays at the
+          // bottom of the ramp, the way the monospace floor is a single dot.
+          const ink = palette && inkFor(palette, 0.02 + 0.10 * (waveBias[i] || 0));
+          bctx.fillText(ink ? ink.glyph : "·", x + (ink ? (CHARW - ink.width) / 2 : 0), y);
         }
       }
     }
+    baseInk = { font: bctx.font, serif: !!palette, land: tally, landCells: landCells };
 
     };
     repaintBase();
-    if (serifMode) askArt("palette", { ...artGeometry(), size: PX });
+    if (serifMode) askPalette();
 
     const sea = document.createElement("canvas");
     sea.width = Math.round(mapW * DPR);
@@ -2730,7 +2792,14 @@ import { createMapArtEngine } from "./map-art.js";
         if (densityRaw <= 0.08) continue;            // static floor shows through
         const lvl = Math.max(1, Math.min(5, (densityRaw * 6) | 0));
         sctx.fillStyle = OCEAN_COLORS[lvl];
-        const ink = inkPalette && inkPalette.ramp[Math.min(7, lvl + 1)];
+        // Monospace has six ocean glyphs and the colour ramp carries the rest.
+        // In serif mode the density itself picks the ink out of the measured
+        // ramp, unquantised, so a crest and its trough are two tones of the same
+        // continuous field rather than two entries in a fixed list. The gamma is
+        // the same idea the wave field already uses: quiet water sits at the
+        // bottom of the ramp and the crests get the range, so the sea reads as
+        // water with weather in it rather than as an even texture.
+        const ink = inkPalette && inkFor(inkPalette, Math.pow(Math.min(1, densityRaw / 1.15), SERIF_SEA_GAMMA));
         sctx.fillText(ink ? ink.glyph : OCEAN_GLYPHS[lvl], c * CHARW + (ink ? (CHARW - ink.width) / 2 : 0), REDUCED ? y0 : y);
         // Troughs dip below the baseline in a dimmer tone, so a splash has a
         // visible leading and trailing edge, not just a bright crest.
@@ -2850,6 +2919,9 @@ import { createMapArtEngine } from "./map-art.js";
     if ($("map-serif")) {
       $("map-serif").hidden = FLAGS.serifAtlas === false;
       $("map-serif").addEventListener("click", () => setSerif(!serifMode));
+      // A visitor who chose the serif atlas last time gets it back. build() has
+      // already run, so this only costs the palette and one repaint.
+      if (readSerifPref()) setSerif(true);
     }
     $("map-art-clear")?.addEventListener("click", clearArt);
     const zin = $("map-zoom-in");

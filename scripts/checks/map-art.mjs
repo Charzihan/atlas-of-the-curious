@@ -82,13 +82,40 @@ export async function runMapArtChecks(browser, origin) {
         assert(b.x1 < cell.c0 * g.charW || b.x0 >= (cell.c1 + 1) * g.charW || b.y1 < cell.row * g.lineH || b.y0 >= (cell.row + 1) * g.lineH, 'route crosses label');
       }
       const before = await page.locator('.map-marker').evaluateAll(els => els.map(el => ({ left: el.style.left, top: el.style.top })));
+      const mono = await page.evaluate(() => window.ATLAS_MAP_ART.debug().base);
+      assert.equal(mono.serif, false, 'the map started in serif mode');
       await page.click('#map-serif');
-      await page.waitForFunction(() => window.ATLAS_MAP_ART.debug().palette);
+      await page.waitForFunction(() => window.ATLAS_MAP_ART.debug().base?.serif);
       assert.equal(await page.getAttribute('#map-serif', 'aria-pressed'), 'true');
       const after = await page.locator('.map-marker').evaluateAll(els => els.map(el => ({ left: el.style.left, top: el.style.top })));
       assert.deepEqual(after, before, 'serif toggle moved markers');
       assert.deepEqual(await page.evaluate(() => window.ATLAS_MAP_ART.debug().countries), route.countries);
+      // Phase 8: the mode has to actually change the ink, not just the flag.
+      // Read what the base canvas painted rather than diffing pixels.
+      const serif = await page.evaluate(() => window.ATLAS_MAP_ART.debug());
+      assert.equal(serif.base.landCells, mono.landCells, 'serif mode changed the land mask');
+      assert(/Georgia/.test(serif.base.font), 'base canvas font is not the serif family: ' + serif.base.font);
+      assert(!/Georgia/.test(mono.font || ''), 'monospace base canvas claimed the serif family');
+      const multiset = ink => Object.keys(ink.land).sort().map(g => g + ink.land[g]).join(' ');
+      assert.notEqual(multiset(serif.base), multiset(mono), 'serif land glyphs are the monospace ones');
+      const monoGlyphs = new Set(Object.keys(mono.land)), serifGlyphs = Object.keys(serif.base.land);
+      assert(serifGlyphs.length >= 6, 'serif land uses only ' + serifGlyphs.length + ' glyphs');
+      assert(serifGlyphs.some(g => !monoGlyphs.has(g)), 'serif land introduced no new glyph');
+      assert(serifGlyphs.some(g => /[\p{L}\p{M}]/u.test(g)), 'serif land has no letters in it');
+      // The ramp is measured coverage, and it has to be monotone along the ramp.
+      const p = serif.palette;
+      assert.equal(p.ramp.length, p.levels, 'ramp length disagrees with the level count');
+      assert(p.levels >= 16, 'ramp has only ' + p.levels + ' levels');
+      assert(p.measured, 'palette coverage was not measured from rendered ink');
+      for (let i = 1; i < p.ramp.length; i++) {
+        assert(p.ramp[i].coverage > p.ramp[i - 1].coverage, `ramp coverage not increasing at ${i}: ${p.ramp[i - 1].coverage} → ${p.ramp[i].coverage}`);
+      }
+      assert(p.ramp[0].coverage >= 0 && p.ramp[p.ramp.length - 1].coverage <= 1, 'ramp coverage outside 0..1');
+      assert(p.ramp.every(g => g.width > 0 && g.width <= p.charW + 0.3), 'a ramp glyph is wider than the cell');
+      assert(new Set(p.ramp.map(g => g.glyph)).size >= p.levels - 1, 'ramp repeats glyphs');
+      console.log(`  serif palette: ${p.levels} levels from ${p.usable}/${p.candidates} candidates, coverage ${p.ramp[0].coverage.toFixed(3)}..${p.ramp[p.ramp.length - 1].coverage.toFixed(3)}, ramp "${p.ramp.map(g => g.glyph).join('')}", land in ${serifGlyphs.length} glyphs`);
       await page.click('#map-serif');
+      await page.waitForFunction(() => window.ATLAS_MAP_ART.debug().base?.serif === false);
       await page.click('#map-art-clear');
       assert.equal(await page.evaluate(() => window.ATLAS_MAP_ART.debug().result), null);
       // Rebuild while the worker has pending requests, then keep using controls.
