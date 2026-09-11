@@ -23,7 +23,7 @@ import {
 } from "../vendor/pretext/layout.js";
 import { readFontRoles, readMapStoryFamily, dirForLang } from "./text.js";
 import {
-  createLabelEngine, cellsOf, tierFor,
+  createLabelEngine, cellsOf, tierFor, scaleCells,
   TIER_NAME_Z, TIER_TAG_Z, TAG_MAX_LINES
 } from "./labels.js";
 import { createSeaEngine, IDLE_MAX_SENTENCES } from "./sea.js";
@@ -76,7 +76,14 @@ import {
   })();
   const DPR = Math.min(2, (typeof devicePixelRatio === "number" ? devicePixelRatio : 1) || 1);
   const ROW_FACTOR = 1.18;
-  const PX_MAX = 18;
+  /* The largest a grid cell may be. The world grid is scaled to fill the
+     viewport — `computePX()` takes whichever of width and height runs out
+     first — and this is only the far end of that: a ceiling so a cell cannot
+     grow without limit on a very large display. At 18px it was reached at
+     about 2560 x 1440, where the 240-column grid wants 17.8px and the atlas
+     stopped growing while the hero kept going; at 32 it clears a 4K hero, and
+     below it nothing about the scaling changes. */
+  const PX_MAX = 32;
   // Mobile floor is low so the whole grid fits the content width — at 8px a
   // 96-col grid would be ~770px and get clipped on a phone.
   const PX_MIN = isMobile ? 4 : 8;
@@ -113,10 +120,14 @@ import {
     "rgba(126, 188, 222, 0.28)",
     "rgba(150, 210, 238, 0.36)"
   ];
-  // How far the open ocean may reach past the world grid, in cells per side.
-  // A 4K viewport would otherwise ask for a grid six times the world's; past
-  // the cap the water is the still floor above, drawn once, and not simulated.
-  const MARGIN_CAP_X = 30, MARGIN_CAP_Y = 12;
+  /* How far the open ocean may reach past the world grid, in cells per side.
+     A 4K viewport would otherwise ask for a grid six times the world's; past
+     the cap the water is the still floor above, drawn once, and not simulated.
+     The cap is a distance on screen, not a cell count — thirty cells of the
+     150-column grid it was set on is about 290px of simulated water — so it is
+     scaled to the grid in hand; on the 240-column grid that is 48 x 19, and
+     the animated sea still reaches the edge of a 2000px-wide hero. */
+  const MARGIN_CAP_X = scaleCells(30, COLS), MARGIN_CAP_Y = scaleCells(12, COLS);
   // Below this the direction glyphs would be lost in the quiet floor, so the
   // serif ramp keeps its tone glyph and only the crests take a direction.
   const SERIF_DIR_LEVEL = 4;
@@ -748,7 +759,7 @@ import {
    * the positions it was given and does the hit testing. */
 
   const SEA_ON = !isMobile && FLAGS.seaStories;
-  // Phones never run the idle sea (the grid is a 96x25 band; there is no room),
+  // Phones never run the idle sea (the grid is a 120x31 band; there is no room),
   // and neither does a reader who asked for less motion.
   const IDLE_ON = !isMobile && !REDUCED && FLAGS.idleSea;
   const IDLE_DELAY_MS = 12000;      // silence before the sea starts telling stories
@@ -1467,12 +1478,21 @@ import {
           onLand: flow.onLand, gyres: flow.gyres, jets: flow.jets, bands: flow.bands
         } : null,
         floorInk: floorInk, serifDirections: serifDirFound,
+        batched: batchRuns, batchable: batchMeasured,
         glyphs: FLOW_ALPHABET.map(function (g) {
           return { glyph: g, width: probe.measureText(g).width };
         }),
         currents: currentsSummary(),
         reduced: REDUCED, mobile: isMobile, zoom: view ? view.zoom : 1
       };
+    },
+    /* Paint the sea one cell at a time again, for a measurement that wants to
+       price the row batching against the same map. Nothing in the site calls
+       this; it is here so the comparison can be made on one build rather than
+       across two revisions. */
+    setBatched: function (on) {
+      batchRuns = on === undefined ? batchRuns : (!!on && batchMeasured);
+      return batchRuns;
     },
     /* Does the worker's font resolve to the face the page's does? Both measure
        the grid's reference string — the page through a canvas, the worker
@@ -1534,6 +1554,15 @@ import {
   const serifFamily = readMapStoryFamily(document);
   let artPinned = false;
   let artSeq = 0, artResult = null, artRequest = null, artCanvas = null, artInset = null;
+  /* The art canvas covers the same rectangle the still floor does — the world
+     grid plus the *uncapped* open-ocean margin — and its context is translated
+     so (0, 0) is still the world grid's corner. Everything the reading view
+     paints goes on speaking in world pixels; only the two full-canvas
+     rectangles (the clear, and the dimming behind a country silhouette) need
+     to know that the canvas now starts above and to the left of the map.
+     Without this a country story dimmed the mapped ocean and left the open
+     ocean around it at full brightness. */
+  let artOX = 0, artOY = 0, artW = 0, artH = 0;
   let serifMode = false, serifRequested = false, serifPalette = null, repaintBase = null, baseInk = null;
   const artLatest = { country: 0, route: 0, palette: 0 };
   function artGeometry() {
@@ -1606,7 +1635,7 @@ import {
     const ink = artInk(out.id);
     ctx.save();
     ctx.fillStyle = 'rgba(6, 14, 26, 0.82)';
-    ctx.fillRect(0, 0, mapW, mapH);
+    ctx.fillRect(-artOX, -artOY, artW, artH);
     const path = new Path2D();
     for (const ring of out.shape.rings) {
       path.moveTo(ring[0], ring[1]);
@@ -1723,7 +1752,7 @@ import {
   function paintArt() {
     if (!artCanvas) return;
     const ctx = artCanvas.getContext('2d');
-    ctx.clearRect(0, 0, mapW, mapH);
+    ctx.clearRect(-artOX, -artOY, artW, artH);
     if (artInset) artInset.hidden = !artResult?.box;
     if (!artResult) return;
     const out = artResult;
@@ -1909,6 +1938,12 @@ import {
   // current field) and the animated one above it.
   let baseEl = null, seaEl = null;
   let serifDirFound = 0;
+  /* Whether the resolved monospace face lets a row of sea glyphs be painted as
+     one string (see "Row runs" in the animation loop). `batchMeasured` is what
+     the measurement said at build; `batchRuns` is what the painter is doing,
+     which development measurements can turn off to price the batching against
+     the same map painted one cell at a time. */
+  let batchRuns = false, batchMeasured = false;
   // World cell -> extended index, or -1 when the cell is off the extended grid.
   function exOf(row, col) {
     const er = row + MY, ec = col + MX;
@@ -1981,6 +2016,25 @@ import {
     mapW = COLS * CHARW;
     mapH = ROWS * LINEH;
     const FONT = PX + "px " + MONO;
+    /* Can a row of sea be drawn as one string? Only if every glyph the sea can
+       paint advances exactly one cell in the face the browser resolved, and a
+       string of them advances by the sum of those — a face that kerned "≈~"
+       would shear the character grid the whole map is built on. Measured here
+       rather than assumed; scripts/checks/ocean.mjs asserts the per-glyph half
+       of it independently, and a face that failed this simply keeps the
+       per-cell painting the sea has always done. The land's texture glyphs are
+       measured with the sea's, because the base canvas paints its rows the
+       same way. */
+    const glyphSet = new Set(FLOW_ALPHABET.concat(OCEAN_GLYPHS, ["·"]));
+    for (let i = 0; i < cellGlyph.length; i++) {
+      if (cellGlyph[i]) glyphSet.add(String.fromCharCode(cellGlyph[i]));
+    }
+    const SEA_ALPHABET = Array.from(glyphSet);
+    batchMeasured = SEA_ALPHABET.every(function (g) {
+      return Math.abs(probe.measureText(g).width - CHARW) < 0.01;
+    }) && Math.abs(probe.measureText(SEA_ALPHABET.join("")).width - SEA_ALPHABET.length * CHARW)
+      < 0.01 * SEA_ALPHABET.length;
+    batchRuns = batchMeasured;
     serifPalette = null;
     serifMode = false;
     view = { zoom: 1 };
@@ -1989,7 +2043,7 @@ import {
     vpH = viewport.clientHeight || mapH;
 
     /* ---- The open ocean ------------------------------------------------
-       The world grid is 150 × 39 cells of equirectangular Earth and it is
+       The world grid is 240 × 62 cells of equirectangular Earth and it is
        *centred* in the viewport, which leaves dark space above and below it on
        a tall screen and to both sides on a wide one. That space is ocean too:
        the same cell size, the same fluid, the same currents, wrapped round the
@@ -2191,24 +2245,46 @@ import {
     const tally = {};
     const landPositions = [];
     let landCells = 0;
+    /* The base canvas is painted in runs too (see "Row runs" in the animation
+       loop). It is painted once or twice in the life of a build rather than
+       sixty times a second, but it is the same thirty-odd thousand cells and
+       the same saving, and a continent is one long run of one colour and one
+       texture glyph — which is the best case there is for it. */
+    const batchBase = batchRuns && !palette;
+    let bChars = "", bX = 0, bY = 0, bFill = "", bNext = -1;
+    function bFlush() {
+      if (!bChars) return;
+      bctx.fillStyle = bFill;
+      bctx.fillText(bChars, bX, bY);
+      bChars = ""; bNext = -1;
+    }
     for (let r = 0; r < ROWS; r++) {
       const rowBase = r * COLS;
       const y = (r + 0.5) * LINEH;
+      bFlush();
       for (let c = 0; c < COLS; c++) {
         const i = rowBase + c;
         const x = c * CHARW;
         if (kind[i]) {
-          bctx.fillStyle = PALETTE[cellColor[i]];
           // Coast dark, interior lighter: the shape of a continent, set in the
           // serif face, as a tone rather than as one repeated texture glyph.
           const ink = landLevel && palette.ramp[landLevel[i]];
           const glyph = ink ? ink.glyph : String.fromCharCode(cellGlyph[i]);
+          const fill = PALETTE[cellColor[i]];
           tally[glyph] = (tally[glyph] || 0) + 1;
           landCells++;
           landPositions.push([x, y]);
-          bctx.fillText(glyph, x + (ink ? (CHARW - ink.width) / 2 : 0), y);
+          if (batchBase) {
+            if (bChars && (c !== bNext || fill !== bFill)) bFlush();
+            if (!bChars) { bX = x; bY = y; bFill = fill; }
+            bChars += glyph;
+            bNext = c + 1;
+          } else {
+            bctx.fillStyle = fill;
+            bctx.fillText(glyph, x + (ink ? (CHARW - ink.width) / 2 : 0), y);
+          }
         } else if (!FLOOR_ON) {
-          bctx.fillStyle = "rgba(80, 130, 170, 0.10)";
+          if (bChars) bFlush();
           // The still sea floor is tonal too, from the same static regional
           // bias the wave trains use. This is the whole sea under reduced
           // motion, where the fluid layer never draws — so it stays at the
@@ -2219,10 +2295,12 @@ import {
           // whole sea, mapped water and margin alike, rather than two floors
           // that meet at the edge of the world grid.
           const ink = palette && inkFor(palette, 0.02 + 0.10 * (waveBias[EXO + r * EXC + c] || 0));
+          bctx.fillStyle = "rgba(80, 130, 170, 0.10)";
           bctx.fillText(ink ? ink.glyph : "·", x + (ink ? (CHARW - ink.width) / 2 : 0), y);
-        }
+        } else if (bChars) bFlush();
       }
     }
+    bFlush();
     baseInk = { font: bctx.font, serif: !!palette, land: tally, landCells: landCells, landPositions: landPositions };
 
     /* The still floor of the open ocean: the current field, standing still,
@@ -2244,16 +2322,24 @@ import {
       for (let r = -FMY; r < ROWS + FMY; r++) {
         const inRows = r >= 0 && r < ROWS;
         const y = (r + 0.5) * LINEH;
+        bFlush();
         for (let c = -FMX; c < COLS + FMX; c++) {
           const f = sample(c, r);
-          if (f.land) continue;
+          if (f.land) { if (bChars) bFlush(); continue; }
           const lvl = Math.min(FLOOR_COLORS.length - 1, (f.speed * 5.4) | 0);
           const ink = seaPalette ? inkFor(seaPalette, 0.04 + 0.30 * f.speed) : null;
-          bctx.fillStyle = FLOOR_COLORS[lvl];
-          bctx.fillText(
-            ink ? ink.glyph : FLOW_GLYPHS[f.bucket * FLOW_LEVELS + Math.min(FLOW_LEVELS - 1, lvl + 1)],
-            c * CHARW + (ink ? (CHARW - ink.width) / 2 : 0), y
-          );
+          const glyph = ink ? ink.glyph
+            : FLOW_GLYPHS[f.bucket * FLOW_LEVELS + Math.min(FLOW_LEVELS - 1, lvl + 1)];
+          const fill = FLOOR_COLORS[lvl];
+          if (batchBase) {
+            if (bChars && (c !== bNext || fill !== bFill)) bFlush();
+            if (!bChars) { bX = c * CHARW; bY = y; bFill = fill; }
+            bChars += glyph;
+            bNext = c + 1;
+          } else {
+            bctx.fillStyle = fill;
+            bctx.fillText(glyph, c * CHARW + (ink ? (CHARW - ink.width) / 2 : 0), y);
+          }
           cells++;
           if (inRows && c >= 0 && c < COLS) edges.world++;
           else if (r < 0) edges.top++;
@@ -2262,6 +2348,7 @@ import {
           else edges.right++;
         }
       }
+      bFlush();
       floorInk = {
         cells: cells, edges: edges, serif: !!seaPalette, dpr: bdpr,
         width: baseW, height: baseH, cols: COLS + 2 * FMX, rows: ROWS + 2 * FMY
@@ -2296,13 +2383,22 @@ import {
     sctx.textBaseline = "middle";
     sctx.textAlign = "left";
 
+    /* The reading view's canvas, over the whole sea rather than over the world
+       grid alone: the same rectangle as the base canvas, at the same negative
+       offset and with the same translated origin (see artOX above). */
     artCanvas = document.createElement('canvas');
     artCanvas.className = 'map-art';
-    artCanvas.width = Math.round(mapW * DPR); artCanvas.height = Math.round(mapH * DPR);
-    artCanvas.style.width = mapW + 'px'; artCanvas.style.height = mapH + 'px';
+    artOX = FOX; artOY = FOY; artW = baseW; artH = baseH;
+    const adpr = artW * artH * DPR * DPR > 9e6 ? 1 : DPR;
+    artCanvas.width = Math.round(artW * adpr); artCanvas.height = Math.round(artH * adpr);
+    artCanvas.style.width = artW + 'px'; artCanvas.style.height = artH + 'px';
+    if (artOX) artCanvas.style.setProperty('left', -artOX + 'px');
+    if (artOY) artCanvas.style.setProperty('top', -artOY + 'px');
     artCanvas.setAttribute('aria-hidden', 'true');
     zoomEl.appendChild(artCanvas);
-    artCanvas.getContext('2d').scale(DPR, DPR);
+    const actx = artCanvas.getContext('2d');
+    actx.scale(adpr, adpr);
+    actx.translate(artOX, artOY);
     artInset = document.createElement('div');
     artInset.className = 'map-art-inset'; artInset.hidden = true;
     artInset.setAttribute('aria-hidden', 'true');
@@ -3591,6 +3687,54 @@ import {
       if (found) serifDir = table;
     }
 
+    /* ---- Row runs -------------------------------------------------------
+       One fillText per water cell is one canvas call per cell, and the world
+       grid is now 240 x 62 with an open ocean around it: at 2000 x 900 that is
+       twenty-one thousand cells, and the call itself — not the wave arithmetic
+       in front of it — is what a frame is made of.
+
+       In the monospace face every glyph the sea can paint is exactly one cell
+       wide (`batchRuns` measures that rather than trusting it, and the same
+       claim is a failing assertion in scripts/checks/ocean.mjs), so a row of
+       consecutive cells that want the same colour can be drawn as one string:
+       the glyphs land on their own cells because the advance *is* the cell.
+       A run ends at a gap (a cell left to the still floor, or land), at a
+       colour change, at the end of a row, or where the ripple lifts one cell
+       and not its neighbour — `runY` carries that lift, so a splash breaks the
+       runs around it and every glyph still bobs by its own displacement.
+
+       The serif face cannot do this: its glyphs are proportional and each one
+       is centred on its cell by its own measured advance, so it keeps the
+       per-cell call. What it gets instead is the tone table below. */
+    let runChars = "", runX = 0, runY = 0, runFill = "", runNext = -1;
+    let lastFill = "";
+    function flushRun() {
+      if (!runChars) return;
+      if (runFill !== lastFill) { sctx.fillStyle = runFill; lastFill = runFill; }
+      sctx.fillText(runChars, runX, runY);
+      runChars = "";
+      runNext = -1;
+    }
+    /* Troughs are drawn after the water, not inside it: they are a different
+       colour on top of a cell that has already been painted, and interrupting
+       a run to switch colour would cost more than the handful of cells a
+       splash ever dips. Position, not colour, so one flush draws them all. */
+    const troughX = new Float32Array(waterLen), troughY = new Float32Array(waterLen);
+    /* The serif sea's tone, tabulated. `(density / 1.15) ^ 1.6` was a pow()
+       per water cell per frame; the ramp it feeds has at most 24 rungs, so a
+       1024-entry table of the *rung index* is the same picture without the
+       transcendental. Rebuilt only when the palette changes. */
+    const SERIF_TONE_N = 1024;
+    let serifTone = null;
+    function buildSerifTone(p) {
+      const n = p.ramp.length - 1;
+      serifTone = new Uint8Array(SERIF_TONE_N);
+      for (let k = 0; k < SERIF_TONE_N; k++) {
+        const tone = Math.pow(k / (SERIF_TONE_N - 1), SERIF_SEA_GAMMA);
+        serifTone[k] = Math.max(0, Math.min(n, Math.round(tone * n)));
+      }
+    }
+
     function frame(now) {
       const t = (now - waveT0) / 1000;
       if (!viewportVisible) { loopRunning = false; return; } // off-screen: suspended
@@ -3625,10 +3769,20 @@ import {
       if (farFrame) { sctx.clearRect(-OX, -OY, exW, exH); marginDrawn = true; }
       else sctx.clearRect(0, 0, mapW, mapH);
       const inkPalette = serifMode && serifPalette && serifPalette.usable ? serifPalette : null;
-      if (inkPalette !== lastInkPalette) { lastInkPalette = inkPalette; syncSerifDirections(); }
+      if (inkPalette !== lastInkPalette) {
+        lastInkPalette = inkPalette;
+        syncSerifDirections();
+        if (inkPalette && inkPalette.ramp && inkPalette.ramp.length) buildSerifTone(inkPalette);
+      }
       sctx.font = inkPalette ? inkPalette.font : FONT;
       const N = farFrame ? waterLen : innerLen;
-      let lastFill = "";
+      // Batch only the monospace face, where the glyph advance is the cell.
+      const batch = batchRuns && !inkPalette;
+      const toneTable = inkPalette && serifTone && serifTone.length ? serifTone : null;
+      const toneLast = SERIF_TONE_N - 1;
+      lastFill = "";
+      runChars = ""; runNext = -1;
+      let troughN = 0;
       for (let w = 0; w < N; w++) {
         const i = waterList[w];
         const x = drawX[w];
@@ -3676,8 +3830,20 @@ import {
         const d = disp[i];
         const densityRaw = density + d * 1.5;
         const y0 = drawY[w];
-        const y = y0 + Math.max(-2.4, Math.min(2.4, d)) * LIFT;
-        if (densityRaw <= CUT) continue;       // the still floor shows through
+        /* The ripple lift, snapped to half a CSS pixel with a quarter-pixel
+           dead zone. A splash spreads through the spring until every cell in
+           the ocean has some minute displacement left in it, and an unsnapped
+           lift gives each of them its own baseline — which would leave no two
+           neighbours on the same line and no runs to batch, for a difference
+           of a hundredth of a pixel. Snapped, quiet water shares one baseline
+           and the cells a splash is actually lifting still bob by their own
+           displacement. */
+        const raw = Math.max(-2.4, Math.min(2.4, d)) * LIFT;
+        const y = y0 + (raw > -0.25 && raw < 0.25 ? 0 : Math.round(raw * 2) / 2);
+        if (densityRaw <= CUT) {               // the still floor shows through
+          if (runChars) flushRun();            // …and it breaks the row's run
+          continue;
+        }
         let lvl = Math.max(1, Math.min(5, (densityRaw * 6) | 0));
         /* A stream is never dark. Brightness normally follows the crest, but
            fast water is held at a floor set by its own speed, so the Gulf
@@ -3690,7 +3856,6 @@ import {
           if (floorLvl > lvl) lvl = floorLvl > 4 ? 4 : floorLvl;
         }
         const fill = OCEAN_COLORS[lvl];
-        if (fill !== lastFill) { sctx.fillStyle = fill; lastFill = fill; }
         /* Colour says how much water the crest lifted; shape says where it is
            going. Monospace has six ocean glyphs per direction and the colour
            ramp carries the rest, and a fast stream is given its direction glyph
@@ -3714,18 +3879,35 @@ import {
         let ink = null;
         if (inkPalette) {
           if (serifDir && lvl >= SERIF_DIR_LEVEL) ink = serifDir[g];
-          if (!ink) ink = inkFor(inkPalette, Math.pow(Math.min(1, densityRaw / 1.15), SERIF_SEA_GAMMA));
+          if (!ink) {
+            const q = densityRaw >= 1.15 ? toneLast : (densityRaw * (toneLast / 1.15)) | 0;
+            ink = toneTable
+              ? inkPalette.ramp[toneTable[q < 0 ? 0 : q]]
+              : inkFor(inkPalette, Math.pow(Math.min(1, densityRaw / 1.15), SERIF_SEA_GAMMA));
+          }
         }
-        sctx.fillText(
-          ink ? ink.glyph : (flowSpeed ? FLOW_GLYPHS[g] : OCEAN_GLYPHS[lvl]),
-          x + (ink ? (CHARW - ink.width) / 2 : 0), REDUCED ? y0 : y
-        );
+        const glyph = ink ? ink.glyph : (flowSpeed ? FLOW_GLYPHS[g] : OCEAN_GLYPHS[lvl]);
+        const py = REDUCED ? y0 : y;
+        if (batch) {
+          // Same colour, same lift, and the very next cell of the same row.
+          if (runChars && (i !== runNext || fill !== runFill || py !== runY)) flushRun();
+          if (!runChars) { runX = x; runY = py; runFill = fill; }
+          runChars += glyph;
+          runNext = i + 1;
+        } else {
+          if (fill !== lastFill) { sctx.fillStyle = fill; lastFill = fill; }
+          sctx.fillText(glyph, x + (ink ? (CHARW - ink.width) / 2 : 0), py);
+        }
         // Troughs dip below the baseline in a dimmer tone, so a splash has a
-        // visible leading and trailing edge, not just a bright crest.
-        if (d < -0.5) {
-          sctx.fillStyle = lastFill = "rgba(20, 40, 70, 0.55)";
-          sctx.fillText("·", x, y);
-        }
+        // visible leading and trailing edge, not just a bright crest. Held
+        // back to the end of the water so they cost one colour change between
+        // them rather than two each.
+        if (d < -0.5) { troughX[troughN] = x; troughY[troughN] = y; troughN++; }
+      }
+      flushRun();
+      if (troughN) {
+        sctx.fillStyle = lastFill = "rgba(20, 40, 70, 0.55)";
+        for (let k = 0; k < troughN; k++) sctx.fillText("·", troughX[k], troughY[k]);
       }
       // The sea's own text, on the same canvas and lifted by the same field:
       // the hovered place's story, and the sentences drifting on the currents.

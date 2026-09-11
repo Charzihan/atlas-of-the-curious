@@ -54,6 +54,20 @@ export const TAG_MAX_LINES = 3;
 // the dataset; a name that will not fit in them is simply left off this label
 // rather than pushing the tagline out of the water.
 export const NATIVE_MAX_LINES = 2;
+/* ---- Cells, and the grid they were tuned on ----------------------------
+   Every distance below is in cells of the 150-column grid this engine was
+   tuned on. The desktop world grid is now 240 columns of the same Earth, so a
+   cell is 1.6 times narrower on screen while a label is still set in the same
+   11px type — the same name needs 1.6 times as many cells, and a search that
+   still reached four of them would reach two thirds as far across the water as
+   it used to. `scaleCells()` converts at the point of use, against whatever
+   grid `setGrid()` was given, so the labels keep the density they had at the
+   same screen size and the mobile grid is not silently retuned with the
+   desktop one. */
+export const REF_COLS = 150;
+export function scaleCells(n, cols) {
+  return Math.max(1, Math.round(n * (cols > 0 ? cols : REF_COLS) / REF_COLS));
+}
 // How far from the dot an anchor may sit, in cells.
 export const LABEL_MAX_OFFSET = 4;
 export const LABEL_RUN_LIMIT = 44;    // longest free run worth scanning, in cells
@@ -68,7 +82,9 @@ export const OCEAN_SLIDE = 16;
 // [west, south, east, north], not coastline polygons (the land mask supplies
 // those). Every occupied cell's full lon/lat box must stay inside the window.
 // The two Pacific windows stop at the dateline rather than wrapping a label.
-// Even "Med. Sea" is too wide for the desktop Mediterranean's 4–5-cell runs.
+// The 240-column Mediterranean has a fifteen-cell run where the 150-column one
+// had five, so it takes the stacked "MEDITER- / RANEAN" at zoom 1 and its whole
+// name from 1.5x, where it used to fall all the way back to "Med.".
 export const OCEANS = [
   { name: "Pacific Ocean", lat: 0, lon: -132, extent: [-170, -50, -85, 60], parts: ["Pacific", "Ocean"], short: "Pacific" },
   { name: "Pacific Ocean", lat: 2, lon: 172, extent: [145, -25, 180, 45], parts: ["Pacific", "Ocean"], short: "Pacific" },
@@ -135,6 +151,8 @@ export function createLabelEngine(options) {
   const provider = typeof opts.handleProvider === "function" ? opts.handleProvider : null;
 
   let COLS = 0, ROWS = 0;
+  // The three cell distances above, converted to this grid once per build.
+  let maxOffset = LABEL_MAX_OFFSET, runLimit = LABEL_RUN_LIMIT, oceanSlide = OCEAN_SLIDE;
   let kind = new Uint8Array(0);
   let occupancy = new Uint8Array(0);
   let roles = {};
@@ -276,7 +294,7 @@ export function createLabelEngine(options) {
   function routeAt(handle, anchorCol, dir, cellW, maxLines, startRow) {
     const widths = [];
     for (let i = 0; i < maxLines; i++) {
-      widths.push(freeRun(startRow + i, anchorCol, dir, LABEL_RUN_LIMIT) * cellW);
+      widths.push(freeRun(startRow + i, anchorCol, dir, runLimit) * cellW);
     }
     tick();
     return routeText(handle.pre, widths, 1, {
@@ -299,7 +317,7 @@ export function createLabelEngine(options) {
     const nativeH = tier >= 2 && nativeOn ? nativeHandleFor(x) : null;
     const tagH = tier >= 2 ? tagHandleFor(x) : null;
     let best = null;
-    for (let off = 1; off <= LABEL_MAX_OFFSET; off++) {
+    for (let off = 1; off <= maxOffset; off++) {
       for (const d of LABEL_DIRS) {
         const col = x.col + d.dc * off;
         const row = x.row + d.dr * off;
@@ -378,7 +396,7 @@ export function createLabelEngine(options) {
             const h = handles[line], need = needs[line];
             const centre = anchorCol - Math.floor(need / 2);
             let start = -1;
-            for (let slide = 0; slide <= OCEAN_SLIDE && start < 0; slide++) {
+            for (let slide = 0; slide <= oceanSlide && start < 0; slide++) {
               for (const delta of slide === 0 ? [0] : [-slide, slide]) {
                 const c0 = centre + delta;
                 if (c0 < cMin || c0 + need - 1 > cMax) continue;
@@ -474,6 +492,9 @@ export function createLabelEngine(options) {
     setGrid: function (cfg) {
       COLS = cfg.cols | 0;
       ROWS = cfg.rows | 0;
+      maxOffset = scaleCells(LABEL_MAX_OFFSET, COLS);
+      runLimit = scaleCells(LABEL_RUN_LIMIT, COLS);
+      oceanSlide = scaleCells(OCEAN_SLIDE, COLS);
       kind = cfg.land;
       occupancy = new Uint8Array(COLS * ROWS);
     },

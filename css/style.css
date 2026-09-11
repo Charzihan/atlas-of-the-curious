@@ -1501,7 +1501,7 @@ dialog::backdrop {
   .dialog-foot { flex-wrap: wrap; }
   .dialog-foot .ghost-btn { flex: 1 1 auto; }
 
-  /* Mobile map: a wide band. The 96×25 grid is 3.84:1, so give it the full
+  /* Mobile map: a wide band. The 120×31 grid is 3.87:1, so give it the full
      content width and let its height follow (~260px on a 390px phone). The
      overlay is compacted so it doesn't swallow the map. */
   .atlas {
@@ -1525,7 +1525,7 @@ dialog::backdrop {
   .atlas-hint { font-size: 0.55rem; opacity: 0.85; }
   .map-readout { font-size: 0.6rem; }
 
-  /* No labels on a phone: the 96×25 grid has no room to route a name into,
+  /* No labels on a phone: the 120×31 grid has no room to route a name into,
      and the hover card already carries it. js/map.js skips the placement
      entirely below 640px; this is the belt to that pair of braces. */
   .map-label, .map-ocean-label { display: none !important; }

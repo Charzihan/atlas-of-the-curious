@@ -2,6 +2,7 @@
    proportional map ink. Pixel units always refer to the unzoomed map. */
 import { prepareWithSegments, layoutNextLineRange, materializeLineRange } from '../vendor/pretext/layout.js';
 import { MAP_STORY_TYPE } from './text.js';
+import { scaleCells } from './labels.js';
 
 // ---- Phase 8 helpers: glyph ink, and the land's distance-to-coast field -----
 // Printable ASCII, the printable half of Latin-1, and the typographic marks a
@@ -21,7 +22,9 @@ const MAX_SPILL = 0.06;
 // How much a glyph is penalised for being narrower than the cell it fills.
 const NARROW_WEIGHT = 0.4;
 // Coastlines take the darkest land tone; the interior fades to INTERIOR_TONE
-// over COAST_REACH cells.
+// over COAST_REACH cells — a distance on screen, so it is counted in cells of
+// the 150-column grid it was tuned on and scaled to whatever grid the request
+// carries (240 columns now: eight cells, the same band of coast as five were).
 const COAST_REACH = 5, INTERIOR_TONE = 0.3;
 
 // The worker has OffscreenCanvas; the synchronous fallback host has a document.
@@ -141,10 +144,11 @@ function landTones(req, levels) {
   const out = new Uint8Array(req.cols * req.rows);
   if (!req.land) return out;
   const dist = coastField(req.land, req.cols, req.rows);
+  const reach = scaleCells(COAST_REACH, req.cols);
   for (let i = 0; i < out.length; i++) {
     if (!req.land[i]) continue;
-    const d = dist[i] < 0 ? COAST_REACH : Math.min(COAST_REACH, dist[i]);
-    let tone = 1 - (1 - INTERIOR_TONE) * (d / COAST_REACH);
+    const d = dist[i] < 0 ? reach : Math.min(reach, dist[i]);
+    let tone = 1 - (1 - INTERIOR_TONE) * (d / reach);
     if (req.color) tone += ((req.color[i] % 3) - 1) * 0.025;
     out[i] = Math.max(0, Math.min(levels - 1, Math.round(tone * (levels - 1))));
   }
@@ -255,8 +259,8 @@ export function createMapArtEngine() {
   }
   /* ---- The silhouette --------------------------------------------------
      A country arrives as simplified lon/lat rings (js/landmap.js `outlines`),
-     not as grid cells: the 150x39 land grid is far too coarse to hold 400-odd
-     words inside anything smaller than a continent. The rings are projected
+     not as grid cells: even the 240x62 land grid is far too coarse to hold
+     400-odd words inside anything smaller than a continent. The rings are projected
      with the map's own equirectangular projection, then scaled about the
      country's own centre by k. Per text row the scanline runs of the polygon
      (even-odd over every ring, so holes are water) become the line widths fed
@@ -468,7 +472,7 @@ export function createMapArtEngine() {
       candidates: list.length, fitting, usable,
       reason: usable ? '' : !measurement.measured ? 'Serif map unavailable: canvas ink measurement failed.'
         : 'Serif map unavailable: fewer than ' + MIN_PALETTE_LEVELS + ' distinct tones fit this cell within the 6% ink spill limit.',
-      coast: { reach: COAST_REACH, interior: INTERIOR_TONE },
+      coast: { reach: scaleCells(COAST_REACH, req.cols), interior: INTERIOR_TONE },
       ramp, landLevel: usable ? landTones(req, levels) : null
     };
     cache.set(key, out);

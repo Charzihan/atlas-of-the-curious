@@ -17,9 +17,15 @@ const geo = JSON.parse(readFileSync(join(root, "data", "world-110m-countries.geo
 
 // Equirectangular grids. Desktop fills a 16:9-ish hero; mobile fills a
 // phone-width hero band (landscape strip).
+// The desktop grid is 240 x 62: the same 3.85:1 shape the 150 x 39 grid had,
+// at 2.5 times the cells, so one cell is 1.5 degrees of longitude instead of
+// 2.4. The Mediterranean was three rows of water with a five-cell run through
+// the widest of them; it is now five rows and a fifteen-cell run, which is the
+// difference between a gap in the coastline and a sea with a name in it. The
+// mobile grid keeps its proportion to it.
 const GRIDS = {
-  desktop: { cols: 150, rows: 39 },
-  mobile:  { cols: 96, rows: 25 },
+  desktop: { cols: 240, rows: 62 },
+  mobile:  { cols: 120, rows: 31 },
 };
 const SAMPLE = 4;      // SAMPLE x SAMPLE sub-points per cell → tight coastlines
 const THRESH = 6;      // land if ≥ THRESH of SAMPLE*SAMPLE samples hit a country
@@ -139,7 +145,7 @@ function buildGrid(cols, rows) {
 }
 
 // ---- Country outlines for the map reading view --------------------------
-// The 150x39 cell grid is far too coarse to hold a story inside most
+// Even the 240x62 cell grid is far too coarse to hold a story inside most
 // countries, so the reading view works from real polygon geometry instead and
 // picks its own scale. Only the countries the dataset actually names get
 // geometry, simplified (Douglas-Peucker) with a tolerance proportional to the

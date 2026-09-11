@@ -141,7 +141,8 @@ route from the granted location to the nearest wonder. **Clear story** clears
 country/route content; **Serif map** is independent.
 
 A country story is set inside the country's own polygon, not inside the land
-grid: the 150×39 cells are far too coarse to hold 400 words inside anything
+grid: even the 240×62 cells (150×39 when this was written) are far too coarse
+to hold 400 words inside anything
 smaller than a continent. The rings are projected with the map's own
 equirectangular projection and scaled about the country's centre by k. Per text
 row the scanline runs of the polygon — even-odd over every ring, so holes are
@@ -384,10 +385,11 @@ and `pnpm smoke` for both. Screenshots: `docs/screenshots/clouds-1280.png` and
 `docs/screenshots/clouds-zoom.png`.
 ## The open ocean (added after Phase 8)
 
-The hero's sea used to be exactly the world grid: a 150 x 39 character
-rectangle centred in `.map-viewport`, with dark space around it on a wide or
-tall screen, animated by three uniform traveling sine trains. It now fills the
-viewport and flows as real surface currents.
+The hero's sea used to be exactly the world grid: a character rectangle centred
+in `.map-viewport` (150 x 39 cells when this was written, 240 x 62 now), with
+dark space around it on a wide or tall screen, animated by three uniform
+traveling sine trains. It now fills the viewport and flows as real surface
+currents.
 
 **Extended grid.** `build()` computes a margin `MX x MY` in cells from the
 viewport and the cell size (capped by `MARGIN_CAP_X/Y = 30 x 12`), and every
@@ -430,10 +432,10 @@ water cells a frame not painted twice.
 **Watch out for.** The still floor rides on the base canvas *deliberately*: an
 earlier revision gave it a canvas of its own and that second full-viewport layer
 cost about 4ms a frame at 2000x900 under a 4x CPU throttle, purely in
-compositing. Do not split it out again. The Phase 7-8 art canvas is still sized
-to the world grid, so a country story dims the mapped ocean but not the margin
-around it; sizing `artCanvas` (and `paintSilhouette`'s dimming rect) to the
-extended grid is the natural follow-up.
+compositing. Do not split it out again. The follow-up this section named — the
+Phase 7-8 art canvas still being sized to the world grid, so a country story
+dimmed the mapped ocean but not the margin around it — is done; see "A larger
+atlas" below.
 
 ## Flags and offline cache
 
@@ -589,6 +591,103 @@ while cached sentences are only moving. The test now verifies positive fallback
 layout calls across startup plus the timed interval, while separately enforcing
 zero main-thread layout calls during worker-driven animation. Sea self-overlap
 is also now a failing assertion, not just a reported count.
+
+## A larger atlas (added after the open ocean)
+
+The complaint was that the map sits small in the hero and that a sea like the
+Mediterranean is three rows tall. Both are now addressed, and the second one is
+the substantial half.
+
+**The grid.** `scripts/build-map.mjs` builds 240 x 62 on desktop and 120 x 31 on
+mobile — the same 3.85:1 shape at 2.5x the cells, from the same Natural Earth
+110m data with the same SAMPLE/THRESH sampling. `js/landmap.js` is regenerated
+with `pnpm build-map`; the country index, the country outlines (31 countries,
+1,681 points) and everything else the generator emits are unchanged in kind. One
+cell is 1.5 degrees of longitude instead of 2.4: the Mediterranean goes from
+three rows of water with a five-cell run to five rows with a fifteen-cell run,
+the Red Sea appears as a channel, and the Caribbean has islands in it.
+
+**Cells are distances.** `scaleCells(n, cols)` in `js/labels.js` is the one
+rule: a figure written in cells of the 150-column grid is converted, where it is
+used, to the grid `setGrid()` was actually given. It covers the label anchor
+search and run limit and the ocean-name slide (`js/labels.js`), the hover spill
+and idle corridor sizes, the drift speed and the corridor widths (`js/sea.js`),
+the serif land tone's distance-to-coast reach (`js/map-art.js`) and the open
+ocean's margin cap (`js/map.js`, now 48 x 19 rather than 30 x 12). Text
+quantities are deliberately *not* scaled — one character is one cell on any
+grid. The mobile grid gets its own conversion from its own width.
+
+The visible outcome, measured at 1280 x 800: at zoom 1 the Mediterranean takes
+the stacked `MEDITER- / RANEAN` where the 150-column grid fell back to `MED.`,
+and the Caribbean takes `CARIBBEAN SEA` on one line where it used to stack; from
+1.5x the Mediterranean takes its whole name. Place labels at 2.5x went from 32
+to 35, at 1.5x from 32 to 33. The South China Sea still waits for 2.5x, as it
+did before.
+
+**The hero.** `PX_MAX` in `js/map.js` was 18px and bound before the hero ran
+out: a 2560 x 1440 screen showed 1626 x 828 of map inside a 2560 x 1276 hero, and
+a 4K screen showed the same 1626 x 828 inside 3840 x 1944. It is 32px now, so
+the grid scales until the viewport stops it — 2520 x 1276 and 3838 x 1944 at
+those sizes. At 1280 x 800 and 2000 x 900 the hero's height was already the
+binding constraint, so the rendered rectangle is essentially unchanged (1255 x
+636 and 1452 x 736 against 1247 x 636 and 1444 x 736): at those sizes the map is
+not bigger, it is 2.5 times finer. `PX_MIN` is untouched.
+
+**Row runs.** The sea's frame loop drew one `fillText` per water cell; on the
+new grid that is 10,679 water cells at 1280 x 800 and 16,183 at 2000 x 900. In
+the monospace face every glyph the sea paints is exactly one cell wide, so
+consecutive cells of a row that want the same colour are now drawn as one
+string. A run ends at a gap (a cell below the draw cut, or land), a colour
+change, the end of a row, or a change in the ripple lift. The lift is snapped to
+half a pixel with a quarter-pixel dead zone — without that, a splash that has
+spread through the whole spring leaves every cell on a baseline a hundredth of a
+pixel from its neighbour's and no two cells can share a call. Troughs are held
+back and drawn together after the water. That the glyph advance really is the
+cell is measured at build (`batchMeasured`, reported by `oceanState()` as
+`batchable`, and asserted per glyph by `scripts/checks/ocean.mjs`); a face that
+failed it keeps the per-cell painting. The land and the still floor on the base
+canvas batch the same way.
+
+The serif sea keeps its per-cell call — its glyphs are proportional and each is
+centred by its own measured advance — but its per-cell `Math.pow` is now a
+1024-entry tone table. Cells whose glyph and colour did not change are *not*
+skipped: the animated canvas is cleared every frame, so skipping would mean
+keeping a previous-state buffer *and* not clearing, which is a larger change
+than the one it would pay for. The ASCII clouds already painted one `fillText`
+per outline row and were left alone.
+
+Measured with `ATLAS_MAP_DEBUG.setBatched(false)` against the same build, 120
+frames of the idle sea (headless Chromium floors the interval at one vsync, so
+1280 x 800 is at the floor either way and the comparison has to be taken at 8x):
+
+| viewport | throttle | batched | per cell |
+| --- | --- | --- | --- |
+| 1280 x 800 | 4x | 16.67ms | 16.67ms |
+| 1280 x 800 | 8x | 27.36ms | 33.05ms |
+| 2000 x 900 | 4x | 17.36ms | 21.94ms |
+| 2000 x 900 | 8x | 36.11ms | 46.53ms |
+
+**The reading view.** `artCanvas` is now sized and offset like the base canvas —
+the world grid plus the uncapped margin — with its context translated so the
+reading view still paints in world pixels. `paintArt()`'s clear and
+`paintSilhouette()`'s dimming rectangle cover that whole rectangle, so a country
+story dims the open ocean too.
+
+The CORE list is unchanged — no module was added or removed — but `js/map.js`,
+`js/labels.js`, `js/sea.js`, `js/map-art.js` and the generated `js/landmap.js`
+all changed, and the cache is cache-first for scripts, so `sw.js` goes to
+`atlas-of-the-curious-v4`. A returning visitor would otherwise keep the 150-column
+map indefinitely.
+
+**Verification.** `pnpm build-map`, `pnpm validate`, `pnpm build`,
+`node scripts/checks/run-sea.mjs`, `node scripts/checks/run-map-art.mjs` and
+`pnpm smoke` all pass on this grid. `scripts/checks/clouds.mjs`'s morph
+assertion is flaky at about 0.64% per run (a re-fray of a random seed can land
+on the same outline; measured over 20,000 seeds at both cell aspects, so the
+grid change does not affect it) — it failed once and passed on the rerun.
+Screenshots `phase7-story.png`, `phase8-serif.png`, `ocean-wide.png`,
+`ocean-1280.png`, `ocean-serif.png`, `ocean-phone.png` and the new
+`scale-1280.png` were retaken on this grid.
 
 ## Reviewing or continuing
 

@@ -32,9 +32,23 @@
    sentence, then a line, then a word, and a click open the place it came from. */
 import { prepareWithSegments } from "../vendor/pretext/layout.js";
 import { routeText } from "./text-route.js";
-import { LABEL_DIRS } from "./labels.js";
+import { LABEL_DIRS, scaleCells, REF_COLS } from "./labels.js";
 
-/* ---- Tuning ------------------------------------------------------------- */
+/* ---- Tuning -------------------------------------------------------------
+
+   Every distance below is in cells of the 150-column grid the sea was tuned
+   on. The desktop world grid is now 240 columns of the same Earth, so a cell
+   is 1.6 times narrower on screen: a corridor of twenty cells is two thirds of
+   the water it used to be, and a sentence drifting one cell a second crawls.
+   `scaleCells()` (js/labels.js, one rule for both engines) converts them
+   against the grid `setGrid()` was actually given, so a spill covers the same
+   stretch of sea and drifts at the same speed on screen as it did at 150
+   columns — and the phone grid is not retuned by the desktop's change.
+
+   What is *not* scaled is anything counting text rather than distance: the
+   number of sentences adrift, the rows a spill may use, and the sentence
+   lengths themselves. One character is one cell whatever the grid is, so those
+   are already in the sea's own units. */
 
 // Stories on the water, on hover.
 export const HOVER_MAX_OFFSET = 5;      // cells from the dot an anchor may sit
@@ -124,6 +138,12 @@ export function createSeaEngine(options) {
   const random = typeof opts.random === "function" ? opts.random : Math.random;
 
   let COLS = 0, ROWS = 0;
+  /* The tuning above, converted to this grid once per build (see the header). */
+  let hoverMaxOffset = HOVER_MAX_OFFSET, hoverRunLimit = HOVER_RUN_LIMIT;
+  let hoverMinCells = HOVER_MIN_CELLS, hoverBudget = HOVER_CELL_BUDGET;
+  let idleSpeed = IDLE_SPEED_CELLS, idleMinCorridor = IDLE_MIN_CORRIDOR;
+  let idleMinTravel = IDLE_MIN_TRAVEL, idleMaxTravel = IDLE_MAX_TRAVEL;
+  let idleMinWidth = IDLE_MIN_WIDTH, idleMaxWidth = IDLE_MAX_WIDTH;
   let land = new Uint8Array(0);
   let occ = new Uint8Array(0);          // the labels' occupancy mask, live
   let reserve = new Uint8Array(0);      // corridors the drifting sentences hold
@@ -173,14 +193,14 @@ export function createSeaEngine(options) {
     const h = handleFor(handleText);
     const widths = [];
     for (let i = 0; i < maxLines; i++) {
-      widths.push(runFrom(startRow + i, anchorCol, dir, HOVER_RUN_LIMIT, open) * charW);
+      widths.push(runFrom(startRow + i, anchorCol, dir, hoverRunLimit, open) * charW);
     }
     tick();
     const res = routeText(h.pre, widths, 1, {
       maxLines: maxLines,
       text: h.text,
       startRow: startRow,
-      minWidth: HOVER_MIN_CELLS * charW,
+      minWidth: hoverMinCells * charW,
       contiguous: true
     });
     if (!res.complete || !res.lines.length) return null;
@@ -221,7 +241,7 @@ export function createSeaEngine(options) {
       }
     }
     let best = null;
-    for (let off = 1; off <= HOVER_MAX_OFFSET && !best; off++) {
+    for (let off = 1; off <= hoverMaxOffset && !best; off++) {
       for (const d of LABEL_DIRS) {
         const col = (r.col | 0) + d.dc * off;
         const row = (r.row | 0) + d.dr * off;
@@ -232,9 +252,9 @@ export function createSeaEngine(options) {
         let cells = first.cells;
         let from = lines[lines.length - 1].row + 1;
         for (let u = 1; u < units.length; u++) {
-          if (cells >= HOVER_CELL_BUDGET) break;
+          if (cells >= hoverBudget) break;
           const next = routeUnit(units[u].text, col, d.dir, from, units[u].maxLines, units[u].kind);
-          if (!next || cells + next.cells > HOVER_CELL_BUDGET) break;
+          if (!next || cells + next.cells > hoverBudget) break;
           for (const line of next.lines) lines.push(line);
           cells += next.cells;
           from = lines[lines.length - 1].row + 1;
@@ -274,7 +294,7 @@ export function createSeaEngine(options) {
       if (!openIdle(row, c)) { c++; continue; }
       const start = c;
       while (c < COLS && openIdle(row, c)) c++;
-      if (c - start >= IDLE_MIN_CORRIDOR) out.push({ c0: start, len: c - start });
+      if (c - start >= idleMinCorridor) out.push({ c0: start, len: c - start });
     }
     return out;
   }
@@ -311,7 +331,7 @@ export function createSeaEngine(options) {
       const row = run.row;
       // Claim a window inside the run rather than the whole thing, at a random
       // offset, so two sentences can share one wide ocean row.
-      const want = Math.min(run.len, IDLE_MAX_WIDTH + IDLE_MAX_TRAVEL);
+      const want = Math.min(run.len, idleMaxWidth + idleMaxTravel);
       const slack = run.len - want;
       const c0 = run.c0 + (slack > 0 ? ((random() * (slack + 1)) | 0) : 0);
 
@@ -327,8 +347,8 @@ export function createSeaEngine(options) {
       let cap = 0, available = Infinity;
       for (let i = 0; i < avail.length; i++) {
         available = Math.min(available, avail[i]);
-        const width = Math.min(IDLE_MAX_WIDTH, available - IDLE_MIN_TRAVEL);
-        if (width >= IDLE_MIN_WIDTH) cap = Math.max(cap, width * (i + 1));
+        const width = Math.min(idleMaxWidth, available - idleMinTravel);
+        if (width >= idleMinWidth) cap = Math.max(cap, width * (i + 1));
       }
       let lo = 0, hi = flat.length;
       while (lo < hi) {
@@ -345,26 +365,26 @@ export function createSeaEngine(options) {
       // attempt, which is most of the cost of a spawn.
       const floorLines = Math.max(1, Math.min(
         IDLE_MAX_LINES,
-        Math.ceil(h.text.length / Math.max(1, Math.min(avail[0] - IDLE_MIN_TRAVEL, IDLE_MAX_WIDTH)))
+        Math.ceil(h.text.length / Math.max(1, Math.min(avail[0] - idleMinTravel, idleMaxWidth)))
       ));
       for (let used = floorLines; used <= IDLE_MAX_LINES; used++) {
         let span = avail[0];
         for (let i = 1; i < used; i++) span = Math.min(span, avail[i]);
-        if (span < IDLE_MIN_WIDTH) break;
-        const setWidth = Math.min(span - IDLE_MIN_TRAVEL, IDLE_MAX_WIDTH);
-        if (setWidth < IDLE_MIN_WIDTH) break;
+        if (span < idleMinWidth) break;
+        const setWidth = Math.min(span - idleMinTravel, idleMaxWidth);
+        if (setWidth < idleMinWidth) break;
         const widths = [];
         for (let i = 0; i < used; i++) widths.push(setWidth * charW);
         tick();
         const res = routeText(h.pre, widths, 1, {
           maxLines: used, text: h.text, startRow: row,
-          minWidth: IDLE_MIN_WIDTH * charW, contiguous: true
+          minWidth: idleMinWidth * charW, contiguous: true
         });
         if (!res.complete || res.lines.length !== used) continue;
         let block = 1;
         for (const line of res.lines) block = Math.max(block, cellsWide(line.width, charW));
-        const corridor = Math.min(span, block + IDLE_MAX_TRAVEL);
-        if (corridor - block < IDLE_MIN_TRAVEL) continue;
+        const corridor = Math.min(span, block + idleMaxTravel);
+        if (corridor - block < idleMinTravel) continue;
 
         const lines = res.lines.map(function (line, i) {
           return {
@@ -384,7 +404,7 @@ export function createSeaEngine(options) {
         live.push({
           key: nextKey++, placeId: story.id, text: h.text,
           row: row, rows: used, col0: c0, span: corridor, block: block, dir: dir,
-          travelMs: ((corridor - block) / IDLE_SPEED_CELLS) * 1000,
+          travelMs: ((corridor - block) / idleSpeed) * 1000,
           elapsed: 0, fading: false, fadeMs: 0, lines: lines, isNew: true
         });
         lastSpawn = now;
@@ -481,6 +501,16 @@ export function createSeaEngine(options) {
     setGrid: function (cfg) {
       COLS = cfg.cols | 0;
       ROWS = cfg.rows | 0;
+      hoverMaxOffset = scaleCells(HOVER_MAX_OFFSET, COLS);
+      hoverRunLimit = scaleCells(HOVER_RUN_LIMIT, COLS);
+      hoverMinCells = scaleCells(HOVER_MIN_CELLS, COLS);
+      hoverBudget = scaleCells(HOVER_CELL_BUDGET, COLS);
+      idleSpeed = IDLE_SPEED_CELLS * (COLS > 0 ? COLS : REF_COLS) / REF_COLS;
+      idleMinCorridor = scaleCells(IDLE_MIN_CORRIDOR, COLS);
+      idleMinTravel = scaleCells(IDLE_MIN_TRAVEL, COLS);
+      idleMaxTravel = scaleCells(IDLE_MAX_TRAVEL, COLS);
+      idleMinWidth = scaleCells(IDLE_MIN_WIDTH, COLS);
+      idleMaxWidth = scaleCells(IDLE_MAX_WIDTH, COLS);
       land = cfg.land;
       occ = cfg.occupancy;
       reserve = new Uint8Array(COLS * ROWS);

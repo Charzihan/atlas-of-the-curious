@@ -593,7 +593,7 @@ css/style.css     — all styling (no external assets)
 css/place.css     — styling for the generated per-place share pages
 js/data.js        — the dataset (40 places, 7 categories; every place also
                     carries nativeName + nativeLang)
-js/landmap.js     — generated ASCII land grids (150×39 desktop, 96×25 mobile,
+js/landmap.js     — generated ASCII land grids (240×62 desktop, 120×31 mobile,
                     from Natural Earth),
                     plus simplified outlines for the 31 countries the dataset
                     names, for the country reading view (+11 KB)
@@ -714,7 +714,7 @@ mask and zoom are identical in both modes.
 
 ## The open ocean
 
-The character map is 150 x 39 cells of equirectangular Earth, and it is centred
+The character map is 240 x 62 cells of equirectangular Earth, and it is centred
 in the hero: on a wide or a tall screen that left dark nothing around it. The
 sea now fills the viewport instead, and it flows the way the ocean does.
 
@@ -732,9 +732,11 @@ hit test still speak in world cells, and one helper converts. A splash at the
 edge of the map ripples on into the open ocean because the neighbour graph the
 spring runs on does not stop at the coastline of the printed map. The margin is
 recomputed on every rebuild, and a resize that changes it — a window that gets
-wider without changing the cell size — is now a rebuild. It is capped at 30 x 12
-cells a side so a 4K viewport cannot ask for six times the world grid; past the
-cap the water is the still floor alone, painted once.
+wider without changing the cell size — is now a rebuild. It is capped so a 4K
+viewport cannot ask for six times the world grid; past the cap the water is the
+still floor alone, painted once. The cap is a distance on screen rather than a
+number of cells — thirty cells of the 150-column grid it was set on, which is
+48 x 19 of the 240-column grid's smaller ones.
 
 **Currents, not sines.** The sea used to be three traveling sine trains crossing
 the whole map in the same direction. `js/currents.js` carries a small table of
@@ -765,9 +767,9 @@ Under `prefers-reduced-motion: reduce` the field is drawn once and stands still,
 which is what the sea already did; on a phone the animation is unchanged and the
 water fills the band.
 
-Cost: at 1280x800 the extended grid is 156 x 41 cells (4,300 water cells, 15%
-more than the world grid's 3,754); at 2000x900 it is 210 x 41 (6,514 water
-cells, 74% more). It runs no slower than the sea it replaces at either size,
+Cost: at 1280x800 the extended grid is 248 x 64 cells (10,679 water cells, 10%
+more than the world grid's 9,687); at 2000x900 it is 334 x 64 (16,183 water
+cells, 67% more). It runs no slower than the sea it replaces at either size,
 because the arithmetic got cheaper in the same change: a 2,048-entry sine table
 instead of `Math.sin`, a squared gamma instead of `Math.pow`, per-cell paint
 positions worked out once at build instead of an integer division per cell per
@@ -792,3 +794,84 @@ their transitive JavaScript imports, including the vendored pretext modules.
 map-art checks.
 For the additional serif performance, offline, geolocation, mobile and
 screenshot checks, run `node scripts/checks/run-map-art.mjs`.
+
+## A larger atlas
+
+The map was drawn on 150 x 39 cells. At that resolution one cell is 2.4 degrees
+of longitude, which is wide enough that the Mediterranean is three rows of water
+with a five-cell gap through the widest of them — a notch in the coastline
+rather than a sea — and the hero could only ever show a coarse world.
+
+**The grid is 240 x 62.** The same 3.85:1 shape at two and a half times the
+cells: one cell is 1.5 degrees, the Mediterranean is five rows with a
+fifteen-cell run, the Red Sea is a channel between two continents instead of
+nothing at all, and the Caribbean has islands in it. The mobile grid follows at
+120 x 31. `pnpm build-map` regenerates both from the same Natural Earth 110m
+data with the same sampling; the country index and the country outlines are
+unchanged in kind.
+
+**What a cell is worth.** Several distances in this code are counted in cells
+because they are really distances on screen: how far from its dot a label may
+look for water, how long a free run is worth scanning, how wide a corridor a
+drifting sentence needs, how fast it drifts, how far inland the serif land tone
+fades, and how far the open ocean simulates past the map. A cell is now 1.6
+times narrower, so every one of those was scaled by the grid's own width
+(`scaleCells()` in `js/labels.js`, used by the sea and the reading view too)
+rather than left to shrink. The figures in the source stay in cells of the
+150-column grid they were tuned on, and the conversion happens where they are
+used — so the phone grid is not silently retuned by a desktop change, and the
+sea keeps the same density of text at the same screen size. What is *not*
+scaled is anything counting text rather than distance: one character is one
+cell whatever the grid is.
+
+At zoom 1 the finer grid gives the Mediterranean the stacked `MEDITER- /
+RANEAN` where it used to fall back to `MED.`, and the Caribbean its whole name
+on one line where it used to stack; from 1.5x the Mediterranean gets its whole
+name. Place labels at 2.5x went from 32 to 35 of the 40.
+
+**The map fills the hero.** The cell size is whichever of the viewport's width
+and height runs out first, capped so a cell cannot grow without limit. That cap
+was 18px, and it bound long before the hero ran out: on a 2560 x 1440 screen the
+map stopped at 1626 x 828 inside a 2560 x 1276 hero, and on a 4K screen it was
+that same 1626 x 828 in a 3840 x 1944 one. The cap is now 32px, which no hero
+this side of 4K reaches, so the grid scales until the viewport stops it: 2520 x
+1276 and 3838 x 1944 at those two sizes. At 1280 x 800 and 2000 x 900 the hero's
+height was already the binding constraint and the rendered rectangle is
+unchanged (1255 x 636 and 1452 x 736, against 1247 x 636 and 1444 x 736 before)
+— what changed there is that the same rectangle now holds 2.5 times the cells.
+The open-ocean margin still fills whatever the world grid leaves.
+
+**Painting rows, not cells.** The sea draws every water cell every frame, and
+2.5 times the cells is 2.5 times the `fillText` calls — which is what a frame is
+actually made of. In the monospace face every glyph the sea can paint is exactly
+one cell wide, so a row of consecutive cells that want the same colour is now
+drawn as one string: the glyphs land on their own cells because the advance *is*
+the cell. A run ends at a gap, a colour change, the end of a row, or a cell the
+ripple lifts and its neighbour does not. That the advance really is the cell is
+measured at build (and asserted independently by `scripts/checks/ocean.mjs`); a
+face that failed it keeps the per-cell painting. The land and the still floor on
+the base canvas are painted the same way — a continent is one long run of one
+colour and one texture glyph. The ripple lift is snapped to half a pixel with a
+quarter-pixel dead zone, so quiet water shares one baseline instead of each cell
+having its own after a splash has spread through it.
+
+The serif atlas cannot batch: its glyphs are proportional and each is centred on
+its cell by its own measured advance. It gets a 1024-entry tone table instead,
+in place of the `Math.pow` it used to do per water cell per frame.
+
+Measured at a 4x CPU throttle with the idle sea running (headless Chromium,
+which floors the frame interval at one vsync): 1280 x 800 holds 16.7ms either
+way, so the cost shows at 8x — 27.4ms batched against 33.1ms per cell. At 2000 x
+900, where the extended grid is 334 x 64, the 4x average is 17.4ms batched
+against 21.9ms per cell, and at 8x it is 36.1ms against 46.5ms. The gates in
+`scripts/checks/sea.mjs`, `scripts/checks/ocean.mjs` and
+`scripts/checks/map-art-extra.mjs` pass at both sizes with idle sentences and
+serif on.
+
+The service-worker cache goes to v4: its CORE list is unchanged, but the map
+modules and the generated grid are not, and scripts are served cache-first.
+
+**The reading view covers the whole sea.** The country-story canvas was still
+sized to the world grid, so opening a story dimmed the mapped ocean and left the
+open ocean around it at full brightness. It is now sized and offset like the
+base canvas, and the dimming rectangle with it.

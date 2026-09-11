@@ -25,7 +25,7 @@
       noise.
 
    2. Degrees are the working unit, and on this map they are very nearly
-      isotropic on screen: the desktop grid is 150 × 39 cells over 360° × 180°,
+      isotropic on screen: the desktop grid is 240 × 62 cells over 360° × 180°,
       so one degree of longitude and one degree of latitude are within a few
       percent of the same number of pixels. That is why a distance in degrees
       can be compared with a distance in degrees without a projection factor.

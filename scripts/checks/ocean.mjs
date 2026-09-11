@@ -1,10 +1,10 @@
 /* Atlas of the Curious — the open ocean.
 
-   The sea used to stop at the edge of the world grid: a 150 × 39 character
-   rectangle centred in the hero with dark nothing around it. It now fills the
-   viewport, and it flows as the real ocean does — five subtropical gyres, two
-   subpolar ones, the named boundary jets and the circumpolar band, out of the
-   table in js/currents.js.
+   The sea used to stop at the edge of the world grid: a character rectangle
+   centred in the hero — 150 × 39 cells then, 240 × 62 now — with dark nothing
+   around it. It now fills the viewport, and it flows as the real ocean does —
+   five subtropical gyres, two subpolar ones, the named boundary jets and the
+   circumpolar band, out of the table in js/currents.js.
 
    Six claims, in one place:
 
@@ -40,8 +40,10 @@
         old sea costs at the same size — at 2000×900 the old sea does not always
         clear that ceiling either, and a budget the code being replaced cannot
         meet is not a budget, it is a coincidence.
-        The extended grid carries 15% more water cells at 1280×800 and 74% more
-        at 2000×900, so "no dearer than what it replaces" is the real claim.
+        The extended grid carries 10% more water cells than the world grid at
+        1280×800 and 67% more at 2000×900 (it was 15% and 74% on the 150 × 39
+        grid, whose cells were larger and whose margin therefore held fewer of
+        them), so "no dearer than what it replaces" is the real claim.
 
    The ripple field, the serif ink, the land sweep and the drifting-word click
    sweep are scripts/checks/sea.mjs's claims and are unchanged by any of this;
