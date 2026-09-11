@@ -110,14 +110,72 @@ sequence/build IDs so obsolete layouts do not repaint a new map.
 
 ## Phase 8 — A serif atlas
 
-The map control **Serif map** toggles a Georgia glyph palette for land and the
-fluid sea. `prepareWithSegments` measures advances; palette selection scores
-both density and distance from the existing cell width. Narrow glyphs are
-centered in their cells. The land mask, marker coordinates and zoom stay fixed.
-The sea reuses the existing wave/ripple simulation and changes its ink. Labels
-and readable sea sentences keep their own measured fonts. Palette generation
-happens once per geometry/font, not in the animation loop. Reduced-motion mode
-has no autonomous fluid animation.
+The map control **Serif map** re-sets the map in the site's Georgia face
+(`--font-serif`). The first pass of this phase shipped a hand-ordered list of
+fourteen glyphs whose "tone" was its index, which produced a map that was
+indistinguishable from the monospace one. The palette is now measured.
+
+**The palette** (`palette()` in `js/map-art.js`). The candidates are printable
+ASCII, the printable half of Latin-1, and the typographic marks a WGL4 face
+such as Georgia also carries (`† ‡ • ≈ ∞ œ Œ – — ‰`); 198 in all. Each is
+rendered once into an `OffscreenCanvas` in the worker — a hidden DOM canvas on
+the synchronous fallback host — at the map's own cell size, drawn exactly as
+`repaintBase` draws it, and its ink is summed from the alpha channel. That
+gives two numbers per glyph: `coverage`, the share of the cell it inks, and
+`spill`, the share of its ink that lands outside the cell. Its advance comes
+from `prepareWithSegments`, the same measurement pretext lays text out with.
+
+A glyph is usable if its advance fits the cell (narrower is fine and is centred;
+wider is rejected, because that is what would put the ink out of step with the
+markers) and if it spills no more than 6% of its ink into the neighbouring rows.
+141 of the 198 survive that at the desktop cell size. A glyph the resolved face
+does not have is dropped first: it is detected by measuring an unassigned
+private-use code point and discarding anything that matches that notdef box, so
+the atlas is set in one face rather than in whatever the browser would
+substitute. Coverage is then normalised 0..1 over the usable set, so tone 0 and
+tone 1 are that cell's real lightest and darkest ink.
+
+The ramp has **24 rungs**. Each is the glyph minimising
+`|coverage − target| + 0.4 · max(0, (cellWidth − advance) / cellWidth)` among
+those darker than the rung below it, leaving one candidate behind for every rung
+still to come — so the ramp is strictly increasing in measured coverage and no
+rung repeats its neighbour. At 1280×800 it comes out as
+`¬÷=+<>×*«≈†}oLT4üFµZEÉÈË`, coverage 0.125 to 0.994. The whole thing is built
+once per geometry and font and cached in the engine; nothing measures inside a
+frame.
+
+**Land tone.** A multi-source breadth-first search over the land mask gives each
+land cell its distance to the nearest coast (columns wrap, so the antimeridian
+is not a false coastline; the poles count as edges). Tone runs from 1.0 at the
+coast down to 0.3 five cells inland, plus ±0.025 of the existing colour dither
+so a wide interior does not flatten into one even grey. That is what keeps a
+continent readable as a shape once the glyphs are no longer all one width: its
+outline stays the darkest thing on the map. The per-cell rung index is computed
+with the palette and travels with it, so `repaintBase` is a lookup. Country
+colours come from the existing palette, unchanged.
+
+**The sea.** The wave and ripple simulation is untouched; only its ink changes.
+Where the monospace sea quantises density into six glyphs and gets the rest of
+its contrast from colour, the serif sea maps `(density / 1.15) ^ 1.6` straight
+onto the 24-rung ramp per cell per frame, so crests and troughs read as one
+continuous tone. The gamma is there because a 24-rung ramp mapped linearly makes
+quiet water much heavier than the monospace floor. The still sea floor on the
+base canvas is tonal too, taken from the same static regional bias the wave
+trains use; under reduced motion, where the fluid layer never draws, that static
+tonal sea is the whole sea.
+
+The toggle is remembered in `localStorage` under `atlas:serif-map` (every access
+wrapped, including the property read, which throws outright in a browser with
+site data blocked). `aria-pressed` reflects it, and `serifAtlas` still gates
+both the control and the rendering. Land mask, cell positions, marker
+coordinates and zoom are identical in both modes; labels, hover cards and the
+readable sea sentences keep their own measured fonts. No new files, so `sw.js`
+is unchanged and still accurate. No inline style attributes, no `eval`.
+
+`ATLAS_MAP_ART.debug()` exposes `palette` (the ramp with its measured coverage
+and advances, without the per-cell array) and `base` — the base canvas's
+resolved font string and the multiset of land glyphs it last painted — so the
+checks can assert on what was actually drawn rather than diff pixels.
 
 ## Flags and offline cache
 
@@ -182,10 +240,31 @@ performed.
 - Extended map checks: painted place/ocean label clearance at 2.5× zoom,
   coincident/antipodal routes, actual geolocation, offline worker/serif reload,
   phone and reduced-motion behavior passed.
-- Serif + idle at 4× CPU: 33.05 ms average / 33.40 ms p95 against a 16.67 ms
-  baseline in the latest completed extended run; zero main-thread layout calls.
+- Serif palette checks (both backends, identical results): 24 rungs from
+  141 usable of 198 candidates, coverage 0.125→0.994 strictly increasing, every
+  rung's advance within the cell, no rung repeating its neighbour; the base
+  canvas font resolves to the serif family, the land glyph multiset differs from
+  the monospace one and the land mask is unchanged across the toggle.
+- Serif + idle at 4× CPU: 27.22 ms average / 33.40 ms p95, against **idle mode
+  in monospace under the same 4× throttle** at 27.78 ms / 33.40 ms; unthrottled
+  baseline 16.67 ms; zero main-thread layout calls. The like-for-like comparison
+  is the roadmap's own bar ("holds frame rate under the same throttle as idle
+  mode"); the unthrottled baseline is vsync-capped at ~16.7 ms, so twice it is
+  really "30 fps at 4× CPU" — a line monospace idle mode itself sits on, which
+  made that bound a coin flip rather than a measurement of the serif ink. It is
+  retained as an alternative, not as the sole gate.
+- Serif toggle persistence: on after an offline reload, off again after being
+  turned off and reloaded, with the palette rebuilt from the cached worker
+  modules and no network.
 - Desktop and phone screenshots inspected; corrected inset stacking so marker
   circles cannot paint over or receive clicks through the reading panel.
+- `docs/screenshots/phase8-serif.png` (1280×800) and
+  `phase8-serif-zoom.png` (the same view at 2.5× zoom) were inspected. At 2.5×
+  the map plainly reads as an atlas set in a serif face: Africa comes out as
+  `ÈZüL†××××†LüZÈ`, a dark lettered coast around a lighter interior. At 1× the
+  continents stay recognisable — the coastal outline carries them — though the
+  overall texture is busier than the monospace map, since a proportional face
+  has no glyph as quiet as a monospace `·`.
 - Final integrated rerun: **`node scripts/smoke.mjs` passed (`smoke OK`)**.
 - Final extended rerun: **`node scripts/checks/run-map-art.mjs --extra-only`
   passed**, including disabled feature flags and the editorial fallback.

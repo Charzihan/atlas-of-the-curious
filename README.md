@@ -636,8 +636,21 @@ Stories flow into country cells when they fit, otherwise into a regional
 reading inset or a full-story caption. **Locate me** also draws a great-circle
 journey to the nearest place. Route text avoids map labels; notes too long for
 a route remain readable in a caption. **Clear story** removes the reading view.
-**Serif map** switches land and fluid glyphs to measured Georgia ink while
-keeping marker positions fixed.
+**Serif map** re-sets the whole map in the site's Georgia face and is
+remembered between visits. Every candidate glyph — printable ASCII, the
+printable half of Latin-1, and the typographic marks a WGL4 face also carries —
+is rendered once at the map's own cell size and its ink is counted, so a
+glyph's tone is measured coverage rather than its position in a list; its
+advance comes from `prepareWithSegments`, and anything wider than the cell is
+rejected while narrower glyphs are centred in it. That gives a 24-rung ramp,
+strictly increasing in measured coverage. Land takes its tone from a
+distance-to-coast field over the land mask — dark coastlines fading to a
+lighter interior — which is what keeps a continent's shape readable once the
+glyphs are no longer all one width; the country colours are unchanged. The sea
+picks its ink out of the same ramp from the wave field's own density, per cell
+per frame, so crests and troughs read as continuous tone. Reduced motion gets
+the static tonal sea and no fluid. Marker positions, cell positions, the land
+mask and zoom are identical in both modes.
 
 New modules: `js/labels.js`, `js/sea.js`, `js/text-worker.js`, `js/map-art.js`.
 The service-worker cache is bumped to v2 and includes these modules.
