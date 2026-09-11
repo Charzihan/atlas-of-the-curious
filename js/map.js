@@ -21,13 +21,13 @@ import {
   layoutWithLines,
   measureLineStats
 } from "../vendor/pretext/layout.js";
-import { readFontRoles, dirForLang } from "./text.js";
+import { readFontRoles, readMapStoryFamily, dirForLang } from "./text.js";
 import {
   createLabelEngine, cellsOf, tierFor,
   TIER_NAME_Z, TIER_TAG_Z, TAG_MAX_LINES
 } from "./labels.js";
 import { createSeaEngine, IDLE_MAX_SENTENCES } from "./sea.js";
-import { createMapArtEngine } from "./map-art.js";
+import { createMapArtEngine, COUNTRY_MARKER } from "./map-art.js";
 
 (function () {
   "use strict";
@@ -1460,7 +1460,7 @@ import { createMapArtEngine } from "./map-art.js";
 
   // Phases 7–8: event-driven worker requests; the animation loop only paints.
   const artEngine = createMapArtEngine();
-  const serifFamily = getComputedStyle(document.documentElement).getPropertyValue('--font-serif').trim() || 'Georgia, serif';
+  const serifFamily = readMapStoryFamily(document);
   let artPinned = false;
   let artSeq = 0, artResult = null, artRequest = null, artCanvas = null, artInset = null;
   let serifMode = false, serifPalette = null, repaintBase = null, baseInk = null;
@@ -1468,12 +1468,6 @@ import { createMapArtEngine } from "./map-art.js";
   function artGeometry() {
     return { cols: COLS, rows: ROWS, charW: CHARW, lineH: LINEH, family: serifFamily };
   }
-  // The dataset spells a few countries its own way; scripts/build-map.mjs holds
-  // the same table when it decides which outlines to emit.
-  const COUNTRY_ALIASES = {
-    'Türkiye': 'Turkey', 'Malaysia (Borneo)': 'Malaysia',
-    'United States': 'United States of America', 'Tanzania': 'United Republic of Tanzania'
-  };
   // Simplified lon/lat rings for a place's country, delta-decoded once.
   // "Poland / Belarus" is two countries and simply becomes two sets of rings.
   const outlineCache = new Map();
@@ -1482,7 +1476,7 @@ import { createMapArtEngine } from "./map-art.js";
     const units = (MAPS && MAPS.outlineUnits) || 50;
     const rings = [];
     for (const part of String(country).split(' / ')) {
-      const name = COUNTRY_ALIASES[part] || part;
+      const name = (MAPS && MAPS.countryAliases && MAPS.countryAliases[part]) || part;
       const encoded = MAPS && MAPS.outlines && MAPS.countryNames && MAPS.outlines[MAPS.countryNames[name]];
       for (const delta of encoded || []) {
         const ring = new Array(delta.length);
@@ -1632,6 +1626,9 @@ import { createMapArtEngine } from "./map-art.js";
   }
   function requestArt() {
     if (!CHARW || !artRequest) return;
+    // Measure the controls at their reading-view size, including Clear story.
+    const clear = $('map-art-clear');
+    if (clear) clear.hidden = false;
     const geometry = artGeometry();
     if (artRequest.action === 'country') {
       const x = placeById.get(artRequest.id);
@@ -1682,13 +1679,13 @@ import { createMapArtEngine } from "./map-art.js";
     }
     // The place's own position, marked inside the silhouette it is read in.
     if (out.marker) {
-      for (const pass of [{ color: 'rgba(6, 14, 26, 0.85)', width: 3.6 }, { color: '#e8b45a', width: 1.6 }]) {
+      for (const pass of [{ color: 'rgba(6, 14, 26, 0.85)', width: COUNTRY_MARKER.stroke }, { color: '#e8b45a', width: COUNTRY_MARKER.innerStroke }]) {
         ctx.beginPath();
-        ctx.arc(out.marker.x, out.marker.y, 5.5, 0, Math.PI * 2);
+        ctx.arc(out.marker.x, out.marker.y, COUNTRY_MARKER.radius, 0, Math.PI * 2);
         ctx.strokeStyle = pass.color; ctx.lineWidth = pass.width; ctx.stroke();
       }
       ctx.beginPath();
-      ctx.arc(out.marker.x, out.marker.y, 1.8, 0, Math.PI * 2);
+      ctx.arc(out.marker.x, out.marker.y, COUNTRY_MARKER.dot, 0, Math.PI * 2);
       ctx.fillStyle = '#e8b45a'; ctx.fill();
     }
     ctx.restore();
@@ -1734,7 +1731,7 @@ import { createMapArtEngine } from "./map-art.js";
       // the multiset of land glyphs. Phase 8's own check reads this rather than
       // diffing pixels.
       base: baseInk,
-      geometry: artGeometry(), countries: MAP.countries
+      geometry: artGeometry(), countries: MAP.countries, panels: artPanels()
     })
   };
   window.addEventListener('atlas:highlight', e => showCountry(e.detail, false));

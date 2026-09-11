@@ -112,13 +112,20 @@ more of it.
   one-based entries in `countryCodes`. Existing glyph/color output is unchanged.
   The ownership follows the generator's existing sampled-country assignment.
 - It also emits `outlines`: simplified lon/lat rings for the 31 countries the
-  dataset names (it runs `js/data.js` to find them, through the same alias
-  table `js/map.js` uses). Rings are pruned to the cluster around the largest
-  one — so the Aleutians, Svalbard, the Galapagos and Easter Island do not
-  swallow the bounding box, while Indonesia, Japan and New Zealand stay whole —
+  dataset names (it runs `js/data.js` to find them). The alias table is emitted
+  as `countryAliases` in `js/landmap.js` for `js/map.js` to consume.
+  Pruning keeps each exterior with all its holes, and keeps every exterior at
+  least 15% of the largest one's area regardless of distance; only smaller
+  offshore parts must join the nearby cluster. Rings crossing the antimeridian
+  cause their whole polygon to be rejected rather than projected across the map.
+  The named `Malaysia (Borneo)` exception explicitly selects Borneo; a plain
+  Malaysia request preserves both Borneo and the peninsula. Exteriors are
   simplified with Douglas–Peucker at a tolerance proportional to the country's
-  own size, quantised to 1/50 of a degree and delta-encoded as integers.
-  That is +11 KB in `js/landmap.js` (41,891 → 53,248 bytes) for 1,592 points.
+  own size. Holes are never simplified or area-pruned; if quantisation collapses
+  one, its exterior is rejected too. Rings are quantised to 1/50 of a degree and
+  delta-encoded as integers. After the review fixes, `js/landmap.js` is 54,060
+  bytes for 1,681 outline points. Desktop/mobile glyphs, colors and countries
+  arrays remain identical to the pre-fix HEAD.
 - `js/landmap.js` is regenerated from the repository's existing Natural Earth
   data. No new network download is needed.
 - `js/map-art.js` supplies pure, cached country-story and route layout engines,
@@ -138,30 +145,39 @@ grid: the 150×39 cells are far too coarse to hold 400 words inside anything
 smaller than a continent. The rings are projected with the map's own
 equirectangular projection and scaled about the country's centre by k. Per text
 row the scanline runs of the polygon — even-odd over every ring, so holes are
-water, and the runs at five heights across the row are intersected so the whole
-line box is inside — become the widths fed to `layoutNextLineRange`. Several
-runs in one row are several slots, so a row that crosses two islands sets two
+water — become the widths fed to `layoutNextLineRange`. Full-height containment
+intersects the edge limits on both sides of every vertex height inside a row,
+plus its top and bottom; a narrow hole or notch between vertices cannot escape
+this check. Several runs in one row are several slots, so a row that crosses
+two islands sets two
 pieces of the story. A run that cannot hold the next *whole* word is left empty
 rather than breaking the word: that is the minimum-run rule, measured against
 the word actually coming rather than against a fixed number of cells.
 
-Type sizes are tried at 14, 13, 12, 11 and 10 px; the first that fits at the
+The Phase 0 registry's `MAP_STORY_TYPE` table in `js/text.js` owns the family
+property, candidate sizes/line heights and inset typography. Type sizes are
+tried at 14, 13, 12, 11 and 10 px; the first that fits at the
 largest scale the map allows is kept, and then a binary search finds the
 *smallest* k that still holds the whole story, which is the k that fills the
 shape. The view is anchored on the country's true position and slid only as far
 as it must to stay on the map and clear of the introduction panel and the map
 controls (`js/map.js` measures those once per request and passes them as
-`avoid`). The place's own coordinates are marked inside the silhouette; the
-outline is stroked in the country's palette colour and stamped with the grid's
-texture character at the grid's own cadence, over a dimmed map.
+`avoid`, after showing Clear story so the control box has its final size).
+Slots intersecting a panel are removed before fitting; anchoring prefers fewer
+removed slots before considering movement. The marker's full footprint,
+including its outer stroke (7.3 px radius), also removes slots before fitting.
+Insets obey panel clearance too, falling back to the complete caption when no
+clear placement fits. The place's own coordinates are marked inside the
+silhouette; the outline is stroked in the country's palette colour and stamped
+with the grid's texture character at the grid's own cadence, over a dimmed map.
 
-At the tested 1280×800 size, **37 of 40 stories fill their country's
-silhouette and 3 use the regional inset** — `marble-caves`, `atacama` and
+Before the review fixes, the tested 1280×800 size gave **37 of 40 stories in
+their country's silhouette and 3 regional insets** — `marble-caves`, `atacama` and
 `rapa-nui`, all Chile. Chile is 4,300 km long and about 180 km wide: scaled to
 the map's height it is a 100 px-wide ribbon whose rows hold roughly a third of
 the words, and scaling it to the map's width would make it nine screens tall.
-Rapa Nui is 3,500 km offshore and is dropped from Chile's rings for the same
-reason the Aleutians are dropped from America's. On a phone the map band is too
+Rapa Nui is 3,500 km offshore and was never present in the source Natural Earth
+110m Chile geometry; pruning did not remove it. On a phone the map band is too
 short for a silhouette at 10 px, so phones keep the inset. A story that fits no
 silhouette uses a 12 px regional inset near its marker; if even that cannot fit
 the map height, the full story is shown in a caption below the map. The
@@ -169,7 +185,20 @@ complete story also has a screen-reader text equivalent. Nothing is ever
 silently truncated: `scripts/checks/map-art.mjs` asserts that the lines
 concatenate back to the story, that every line box is inside the polygon, that
 the type never drops below 10 px, and that at least 34 of the 40 are
-silhouettes.
+silhouettes. The check now uses the exported full-height containment routine,
+asserts panel/marker clearance, and reports silhouettes, insets and captions
+separately for both layout hosts.
+
+The post-fix browser count is **unverified**: this sandbox blocks Chromium
+launch (`sandbox_host_linux.cc:41`, `Operation not permitted`). The Node-only
+`node scripts/checks/map-art-geometry.mjs` passes the narrow-hole/notch,
+sloped-edge, panel/marker, font-registry, Malaysia, retained-hole and dateline
+regressions; its flow fixtures use synthetic widths, not browser font metrics.
+`pnpm build-map` and `pnpm build` pass; `pnpm validate` passes the dataset checks
+but skips browser text checks. `node scripts/checks/run-map-art.mjs` and
+`pnpm smoke` cannot run browser assertions, and the Wadi Rum screenshot could
+not be retaken. These pnpm commands used `--config.verify-deps-before-run=false`
+to use the existing local dependencies without an automatic network install.
 
 Routes use spherical interpolation, split at the antimeridian and handle
 coincident/antipodal endpoints without NaN coordinates. Text runs rotate to

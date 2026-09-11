@@ -10,6 +10,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ringBox, clusterPolygons, encodePolygons } from "./map-outline-geometry.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const geo = JSON.parse(readFileSync(join(root, "data", "world-110m-countries.geojson"), "utf8"));
@@ -148,7 +149,7 @@ function buildGrid(cols, rows) {
 const OUTLINE_UNITS = 50;      // 1/50 degree ~ 2.2 km
 const OUTLINE_GAP = 3.5;       // degrees an island may sit from the kept cluster
 // The dataset spells a few countries differently from Natural Earth's ADMIN.
-// js/map.js holds the same table for the name -> code lookup at runtime.
+// Emitted as countryAliases so js/map.js uses this same table at runtime.
 const OUTLINE_ALIASES = {
   "Türkiye": "Turkey",
   "Malaysia (Borneo)": "Malaysia",
@@ -161,76 +162,15 @@ function datasetCountries() {
   // honest than pattern-matching the literal.
   const win = {};
   new Function("window", readFileSync(join(root, "js", "data.js"), "utf8"))(win);
-  const names = new Set();
+  const names = new Map();
   for (const place of win.ATLAS_DATA.places) {
-    for (const part of String(place.country).split(" / ")) names.add(OUTLINE_ALIASES[part] || part);
+    for (const part of String(place.country).split(" / ")) {
+      const name = OUTLINE_ALIASES[part] || part;
+      if (!names.has(name)) names.set(name, new Set());
+      names.get(name).add(part);
+    }
   }
   return names;
-}
-
-function ringBox(pts) {
-  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-  for (const [x, y] of pts) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
-  return { x0, y0, x1, y1 };
-}
-function ringArea(pts) {
-  let a = 0;
-  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) a += pts[j][0] * pts[i][1] - pts[i][0] * pts[j][1];
-  return Math.abs(a / 2);
-}
-function boxGap(a, b) {
-  return Math.max(Math.max(0, a.x0 - b.x1, b.x0 - a.x1), Math.max(0, a.y0 - b.y1, b.y0 - a.y1));
-}
-// Keep the cluster of rings around the largest one. This drops the outlying
-// territories that would otherwise dominate the bounding box (the Aleutians,
-// the Galapagos, Svalbard, Easter Island) while island chains that really do
-// read as the country — Indonesia, Japan, New Zealand — stay joined.
-function cluster(rings) {
-  const info = rings.map(pts => ({ pts, area: ringArea(pts), box: ringBox(pts) })).sort((a, b) => b.area - a.area);
-  const minArea = Math.max(0.01, info[0].area * 0.003);
-  const kept = new Set([info[0]]);
-  let box = { ...info[0].box };
-  for (let pass = 0, added = true; added && pass < 8; pass++) {
-    added = false;
-    for (const ring of info) {
-      if (kept.has(ring) || ring.area < minArea) continue;
-      if (boxGap(box, ring.box) > OUTLINE_GAP) continue;
-      kept.add(ring);
-      box = { x0: Math.min(box.x0, ring.box.x0), y0: Math.min(box.y0, ring.box.y0), x1: Math.max(box.x1, ring.box.x1), y1: Math.max(box.y1, ring.box.y1) };
-      added = true;
-    }
-  }
-  return [...kept].map(r => r.pts);
-}
-function simplify(pts, tol) {
-  const keep = new Uint8Array(pts.length);
-  keep[0] = 1; keep[pts.length - 1] = 1;
-  const stack = [[0, pts.length - 1]];
-  while (stack.length) {
-    const [a, b] = stack.pop();
-    if (b - a < 2) continue;
-    const ax = pts[a][0], ay = pts[a][1], dx = pts[b][0] - ax, dy = pts[b][1] - ay;
-    const len = Math.hypot(dx, dy);
-    let worst = -1, at = -1;
-    for (let i = a + 1; i < b; i++) {
-      const px = pts[i][0], py = pts[i][1];
-      const d = len < 1e-12 ? Math.hypot(px - ax, py - ay) : Math.abs(dy * (px - ax) - dx * (py - ay)) / len;
-      if (d > worst) { worst = d; at = i; }
-    }
-    if (worst > tol) { keep[at] = 1; stack.push([a, at], [at, b]); }
-  }
-  return pts.filter((_, i) => keep[i]);
-}
-function encodeRing(pts) {
-  const out = [];
-  let px = 0, py = 0;
-  for (const [lon, lat] of pts) {
-    const x = Math.round(lon * OUTLINE_UNITS), y = Math.round(lat * OUTLINE_UNITS);
-    if (out.length && x === px && y === py) continue; // quantisation collapsed a step
-    out.push(out.length ? x - px : x, out.length ? y - py : y);
-    px = x; py = y;
-  }
-  return out.length >= 8 ? out : null;
 }
 
 function buildOutlines() {
@@ -238,16 +178,22 @@ function buildOutlines() {
   const byAdmin = new Map(geo.features.map(f => [f.properties.ADMIN, f]));
   const outlines = {};
   let points = 0;
-  for (const name of wanted) {
+  for (const [name, labels] of wanted) {
     const feature = byAdmin.get(name);
     if (!feature) { console.warn("outline: no Natural Earth ADMIN for " + name); continue; }
     const ge = feature.geometry;
-    const rings = [];
-    for (const poly of ge.type === "Polygon" ? [ge.coordinates] : ge.coordinates) for (const ring of poly) rings.push(ring);
-    const kept = cluster(rings);
-    const box = kept.map(ringBox).reduce((a, b) => ({ x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1) }));
+    let polygons = ge.type === "Polygon" ? [ge.coordinates] : ge.coordinates;
+    // Named dataset exception: "Malaysia (Borneo)" deliberately depicts only
+    // Borneo. A plain "Malaysia" request keeps both substantial exteriors,
+    // including the peninsula 5.41 degrees away, through clusterPolygons.
+    if (labels.size === 1 && labels.has("Malaysia (Borneo)")) {
+      polygons = polygons.filter(poly => ringBox(poly[0]).x0 >= 108);
+    }
+    const kept = clusterPolygons(polygons, OUTLINE_GAP);
+    if (!kept.length) continue;
+    const box = kept.map(poly => ringBox(poly[0])).reduce((a, b) => ({ x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1) }));
     const tol = Math.max(0.02, Math.min(0.35, 0.006 * Math.max(box.x1 - box.x0, box.y1 - box.y0)));
-    const encoded = kept.map(pts => encodeRing(simplify(pts, tol))).filter(Boolean);
+    const encoded = encodePolygons(kept, tol, OUTLINE_UNITS);
     if (!encoded.length) continue;
     outlines[feature.properties.ADM0_A3] = encoded;
     points += encoded.reduce((n, ring) => n + ring.length / 2, 0);
@@ -257,7 +203,7 @@ function buildOutlines() {
 }
 
 const out = {
-  countryCodes, countryNames,
+  countryCodes, countryNames, countryAliases: OUTLINE_ALIASES,
   palette: PALETTE,
   paletteSteps: PALETTE_STEPS,
   continents: Object.fromEntries(continentIdx),

@@ -650,6 +650,20 @@ function lineText(l) { return l.text; }
  * 2. Font-role registry: CSS custom properties -> canvas font strings  *
  * ------------------------------------------------------------------ */
 
+// Phase 7 canvas stories: the resolved family is sent to both layout hosts.
+// Keep the existing candidate sizes and rounded 1.26 line heights together.
+export const MAP_STORY_TYPE = Object.freeze({
+  familyProperty: "--font-serif",
+  familyFallback: "Georgia, serif",
+  candidates: Object.freeze([14, 13, 12, 11, 10].map(size => Object.freeze({ size, lineHeight: Math.round(size * 1.26) }))),
+  inset: Object.freeze({ size: 12, lineHeight: 16 })
+});
+
+export function readMapStoryFamily(doc) {
+  return doc.defaultView.getComputedStyle(doc.documentElement)
+    .getPropertyValue(MAP_STORY_TYPE.familyProperty).trim() || MAP_STORY_TYPE.familyFallback;
+}
+
 // Every role the site knows about. Roles nothing renders yet still resolve, so
 // later phases can rely on them being present.
 export const ROLE_NAMES = [

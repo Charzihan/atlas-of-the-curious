@@ -1,20 +1,10 @@
 /* Browser acceptance checks for phases 7–8; runs both layout hosts. */
 import assert from 'node:assert/strict';
+import { containsLineBox, boxesOverlap, markerObstacle } from '../../js/map-art.js';
 
-// At 1280x800 every country but Chile — three places, a 4300 km ribbon 180 km
-// wide — holds its story inside its own outline.
+// At 1280x800 at least 34 stories must still fit after full-box containment
+// and panel/marker clearance; report the actual silhouette/inset counts.
 const MIN_SILHOUETTES = 34;
-
-// Even-odd containment against the returned view-space rings, the same rule
-// the layout used to cut each row into runs.
-function inside(rings, x, y) {
-  let odd = false;
-  for (const ring of rings) for (let i = 0, j = ring.length - 2; i < ring.length; j = i, i += 2) {
-    const xi = ring[i], yi = ring[i + 1], xj = ring[j], yj = ring[j + 1];
-    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) odd = !odd;
-  }
-  return odd;
-}
 
 export async function runMapArtChecks(browser, origin) {
   for (const query of ['', '?noflags=worker']) {
@@ -29,7 +19,7 @@ export async function runMapArtChecks(browser, origin) {
       await page.waitForTimeout(600);
       await page.evaluate(() => window.ATLAS_MAP_DEBUG.settle());
       const places = await page.evaluate(() => window.ATLAS_DATA.places.map(p => ({ id: p.id, story: p.story })));
-      let shaped = 0, regional = 0;
+      let shaped = 0, regional = 0, captions = 0;
       const fellBack = [];
       for (const p of places) {
         await page.evaluate(id => window.ATLAS_MAP_ART.country(id), p.id);
@@ -37,8 +27,12 @@ export async function runMapArtChecks(browser, origin) {
         const out = await snapshot.jsonValue();
         
         assert(out.result.complete, p.id + ' story incomplete');
-        assert.equal(out.result.lines.map(l => l.text).join('').replace(/\s/g, ''), p.story.replace(/\s/g, ''), p.id + ' story lost words');
-        if (out.result.mode === 'country') shaped++; else { regional++; fellBack.push(p.id + ':' + out.result.mode); }
+        const text = out.result.mode === 'caption' ? out.result.text : out.result.lines.map(l => l.text).join('');
+        assert.equal(text.replace(/\s/g, ''), p.story.replace(/\s/g, ''), p.id + ' story lost words');
+        if (out.result.mode === 'country') shaped++; else {
+          if (out.result.mode === 'region') regional++; else captions++;
+          fellBack.push(p.id + ':' + out.result.mode);
+        }
         const g = out.geometry;
         if (out.result.mode === 'country') {
           // The silhouette is its own drawing: readable type, inside the map,
@@ -54,13 +48,14 @@ export async function runMapArtChecks(browser, origin) {
         }
         for (const l of out.result.lines) {
           assert(l.x >= 0 && l.y >= 0 && l.x + l.width <= g.cols * g.charW + 0.1 && l.y + l.height <= g.rows * g.lineH + 0.1, p.id + ' off map');
+          assert(out.panels.every(box => !boxesOverlap(l, box)), p.id + ' text under a panel');
           if (out.result.mode === 'country') {
-            for (const x of [l.x + 0.2, l.x + l.width / 2, l.x + l.width - 0.2]) for (const y of [l.y + 1, l.y + l.height / 2, l.y + l.height - 1]) {
-              assert(inside(out.result.shape.rings, x, y), p.id + ' line escapes the silhouette');
-            }
+            assert(containsLineBox(out.result.shape.rings, l), p.id + ' line escapes the silhouette');
+            assert(!boxesOverlap(l, markerObstacle(out.result.marker)), p.id + ' text under its marker');
           }
         }
       }
+      console.log(`map art ${query || 'worker'}: ${shaped} silhouettes + ${regional} insets + ${captions} captions${fellBack.length ? ' (' + fellBack.join(', ') + ')' : ''}`);
       assert(shaped >= MIN_SILHOUETTES, `only ${shaped} of ${places.length} stories fill a silhouette (want ${MIN_SILHOUETTES}); fell back: ${fellBack.join(', ')}`);
       // Click real dialog controls, including a dateline-crossing journey.
       await page.evaluate(() => { window.ATLAS_MAP_ART.clear(); location.hash = '#/place/shibuya-crossing'; });
@@ -124,7 +119,7 @@ export async function runMapArtChecks(browser, origin) {
       await page.evaluate(() => window.ATLAS_MAP_ART.country('petra'));
       await page.waitForFunction(() => window.ATLAS_MAP_ART.debug().result?.id === 'petra');
       assert.deepEqual(errors, []);
-      console.log(`map art ${query || 'worker'}: ${shaped} silhouettes + ${regional} insets${fellBack.length ? ' (' + fellBack.join(', ') + ')' : ''}, complete stories for all ${places.length}; route controls, dateline, text, marker stability and resize OK`);
+      console.log(`map art ${query || 'worker'}: complete stories for all ${places.length}; route controls, dateline, text, marker stability and resize OK`);
     } finally { await context.close(); }
   }
 }

@@ -1,6 +1,7 @@
 /* Pure worker-side geometry for country stories, great-circle notes and
    proportional map ink. Pixel units always refer to the unzoomed map. */
 import { prepareWithSegments, layoutNextLineRange, materializeLineRange } from '../vendor/pretext/layout.js';
+import { MAP_STORY_TYPE } from './text.js';
 
 // ---- Phase 8 helpers: glyph ink, and the land's distance-to-coast field -----
 // Printable ASCII, the printable half of Latin-1, and the typographic marks a
@@ -117,6 +118,76 @@ function landTones(req, levels) {
   return out;
 }
 
+// Phase 7: share the painted marker dimensions with layout (outer stroke too).
+export const COUNTRY_MARKER = Object.freeze({ radius: 5.5, stroke: 3.6, innerStroke: 1.6, dot: 1.8 });
+
+function overlap(a, b) {
+  const out = [];
+  for (let i = 0, j = 0; i < a.length && j < b.length;) {
+    const lo = Math.max(a[i][0], b[j][0]), hi = Math.min(a[i][1], b[j][1]);
+    if (hi > lo) out.push([lo, hi]);
+    if (a[i][1] < b[j][1]) i++; else j++;
+  }
+  return out;
+}
+
+// Exact full-height runs for simple, non-crossing polygon rings (even-odd).
+// Between consecutive vertex heights, active edges and their order are fixed
+// and each x endpoint is linear in y. Intersect both limits of every slab:
+// this includes narrow holes/notches and both sides of horizontal boundaries.
+export function polygonBoxRuns(poly, top, bottom) {
+  if (!(bottom > top)) return [];
+  const cuts = new Set([top, bottom]);
+  for (const ring of poly) for (let i = 1; i < ring.length; i += 2) {
+    if (ring[i] > top && ring[i] < bottom) cuts.add(ring[i]);
+  }
+  const ys = [...cuts].sort((a, b) => a - b);
+  let runs = null;
+  for (let s = 0; s + 1 < ys.length; s++) {
+    const lo = ys[s], hi = ys[s + 1], edges = [];
+    for (const ring of poly) for (let i = 0, j = ring.length - 2; i < ring.length; j = i, i += 2) {
+      const yi = ring[i + 1], yj = ring[j + 1];
+      if (Math.min(yi, yj) >= hi || Math.max(yi, yj) <= lo || yi === yj) continue;
+      const xAt = y => ring[i] + ((y - yi) / (yj - yi)) * (ring[j] - ring[i]);
+      edges.push([xAt(lo), xAt(hi)]);
+    }
+    edges.sort((a, b) => (a[0] + a[1]) - (b[0] + b[1]));
+    const spans = [];
+    for (let i = 0; i + 1 < edges.length; i += 2) {
+      const left = Math.max(...edges[i]), right = Math.min(...edges[i + 1]);
+      if (right > left) spans.push([left, right]);
+    }
+    runs = runs ? overlap(runs, spans) : spans;
+    if (!runs.length) break;
+  }
+  return runs || [];
+}
+
+export function containsLineBox(poly, box) {
+  return box.width > 0 && polygonBoxRuns(poly, box.y, box.y + box.height)
+    .some(([left, right]) => box.x >= left - 1e-7 && box.x + box.width <= right + 1e-7);
+}
+
+export function boxesOverlap(a, b) {
+  return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+}
+
+export function markerObstacle(marker) {
+  const radius = COUNTRY_MARKER.radius + COUNTRY_MARKER.stroke / 2;
+  return { x: marker.x - radius, y: marker.y - radius, width: radius * 2, height: radius * 2 };
+}
+
+export function countrySlots(poly, top, bottom, lineHeight, minRun) {
+  const slots = [];
+  for (let y = top; y + lineHeight <= bottom; y += lineHeight) {
+    for (const [left, right] of polygonBoxRuns(poly, y, y + lineHeight)) {
+      const width = right - left - 2;
+      if (width >= minRun) slots.push({ x: left + 1, y, width, height: lineHeight });
+    }
+  }
+  return slots;
+}
+
 export function createMapArtEngine() {
   const cache = new Map();
   function prepare(text, font) {
@@ -160,7 +231,6 @@ export function createMapArtEngine() {
      fits is the one that is drawn — a larger k would leave the bottom of the
      country empty. */
   const VIEW_MARGIN = 8;
-  const SIZES = [14, 13, 12, 11, 10];
   function clamp(v, a, b) { return a > b ? (a + b) / 2 : Math.max(a, Math.min(b, v)); }
   function projectRings(rings, w, h) {
     return rings.map(ring => {
@@ -180,84 +250,48 @@ export function createMapArtEngine() {
     }
     return { x0, y0, x1, y1 };
   }
-  // The x spans inside the polygon on one horizontal line, even-odd.
-  function spansAt(poly, y) {
-    const xs = [];
-    for (const ring of poly) for (let i = 0, j = ring.length - 2; i < ring.length; j = i, i += 2) {
-      const yi = ring[i + 1], yj = ring[j + 1];
-      if ((yi > y) !== (yj > y)) xs.push(ring[i] + ((y - yi) / (yj - yi)) * (ring[j] - ring[i]));
-    }
-    xs.sort((a, b) => a - b);
-    const spans = [];
-    for (let i = 0; i + 1 < xs.length; i += 2) spans.push([xs[i], xs[i + 1]]);
-    return spans;
-  }
-  function overlap(a, b) {
-    const out = [];
-    for (let i = 0, j = 0; i < a.length && j < b.length;) {
-      const lo = Math.max(a[i][0], b[j][0]), hi = Math.min(a[i][1], b[j][1]);
-      if (hi > lo) out.push([lo, hi]);
-      if (a[i][1] < b[j][1]) i++; else j++;
-    }
-    return out;
-  }
-  // One candidate view: where the scaled silhouette sits, and the line slots
-  // inside it. The view is anchored on the country's true position and only
-  // slides far enough to stay on the map, so a place keeps its whereabouts.
-  // Where the scaled silhouette sits. It starts on the country's own position
-  // — a story should still be read where the place is — and only slides as far
-  // as it must to stay on the map and clear of the panels drawn over it.
-  function anchor(w, h, vw, vh, cx, cy, avoid) {
+  // Start at the country's true position. Prefer the fewest removed text
+  // slots, then the shortest move; panel clearance is never traded for distance.
+  function anchor(w, h, vw, vh, cx, cy, slots, avoid) {
     const lox = VIEW_MARGIN + vw / 2, hix = w - VIEW_MARGIN - vw / 2;
     const loy = VIEW_MARGIN + vh / 2, hiy = h - VIEW_MARGIN - vh / 2;
     const home = { x: clamp(cx, lox, hix), y: clamp(cy, loy, hiy) };
-    const tries = [home];
+    const xs = new Set([home.x]), ys = new Set([home.y]);
     for (const box of avoid || []) {
-      tries.push({ x: home.x, y: clamp(box.y + box.height + vh / 2 + 4, loy, hiy) });
-      tries.push({ x: home.x, y: clamp(box.y - vh / 2 - 4, loy, hiy) });
-      tries.push({ x: clamp(box.x + box.width + vw / 2 + 4, lox, hix), y: home.y });
-      tries.push({ x: clamp(box.x - vw / 2 - 4, lox, hix), y: home.y });
+      ys.add(clamp(box.y + box.height + vh / 2 + 4, loy, hiy));
+      ys.add(clamp(box.y - vh / 2 - 4, loy, hiy));
+      xs.add(clamp(box.x + box.width + vw / 2 + 4, lox, hix));
+      xs.add(clamp(box.x - vw / 2 - 4, lox, hix));
     }
-    let best = home, score = Infinity;
-    for (const at of tries) {
-      let covered = 0;
-      for (const box of avoid || []) {
-        covered += Math.max(0, Math.min(at.x + vw / 2, box.x + box.width) - Math.max(at.x - vw / 2, box.x))
-          * Math.max(0, Math.min(at.y + vh / 2, box.y + box.height) - Math.max(at.y - vh / 2, box.y));
+    let best = null, removed = Infinity, distance = Infinity;
+    for (const x of xs) for (const y of ys) {
+      const moved = slots.map(slot => ({ ...slot, x: slot.x + x - cx, y: slot.y + y - cy }));
+      const clear = moved.filter(slot => !(avoid || []).some(box => boxesOverlap(slot, box)));
+      const lost = slots.length - clear.length, d = Math.hypot(x - home.x, y - home.y);
+      if (lost < removed || (lost === removed && d < distance)) {
+        best = { x, y, slots: clear }; removed = lost; distance = d;
       }
-      // Least hidden, but not at the cost of moving the country across the
-      // world to dodge a corner of a panel.
-      const rank = covered + 40 * Math.hypot(at.x - home.x, at.y - home.y);
-      if (rank < score) { score = rank; best = at; }
     }
     return best;
   }
-  function silhouetteView(poly, box, k, size, w, h, avoid) {
-    const lh = Math.round(size * 1.26);
+  function silhouetteView(poly, box, k, type, w, h, avoid, place) {
+    const { size, lineHeight: lh } = type;
     const cx = (box.x0 + box.x1) / 2, cy = (box.y0 + box.y1) / 2;
     const vw = (box.x1 - box.x0) * k, vh = (box.y1 - box.y0) * k;
-    const at = anchor(w, h, vw, vh, cx, cy, avoid);
-    const ox = at.x, oy = at.y;
-    const toX = px => (px - cx) * k + ox, toY = py => (py - cy) * k + oy;
-    const top = oy - vh / 2;
-    // A minimum run: a sliver of coastline never holds a word.
-    const minRun = Math.max(20, size * 2.4);
-    const slots = [];
-    for (let y = top; y + lh <= top + vh + 0.01; y += lh) {
-      // The whole line box has to be inside the shape, so intersect the runs
-      // at its top, middle and bottom rather than sampling one height.
-      let runs = null;
-      for (const at of [y + 1, y + lh * 0.3, y + lh * 0.5, y + lh * 0.7, y + lh - 1]) {
-        const spans = spansAt(poly, (at - oy) / k + cy);
-        runs = runs ? overlap(runs, spans) : spans;
-        if (!runs.length) break;
-      }
-      for (const run of runs || []) {
-        const width = (run[1] - run[0]) * k - 2;
-        if (width >= minRun) slots.push({ x: toX(run[0]) + 1, y: y, width: width, height: lh });
-      }
-    }
-    return { slots: slots, lh: lh, k: k, toX: toX, toY: toY, box: { x: ox - vw / 2, y: top, width: vw, height: vh } };
+    const scaled = poly.map(ring => ring.map((v, i) => i % 2 ? (v - cy) * k + cy : (v - cx) * k + cx));
+    const marker = place ? { x: (((place.lon + 180) / 360) * w - cx) * k + cx, y: (((90 - place.lat) / 180) * h - cy) * k + cy } : null;
+    // Reserve the whole outer stroke before fitting, in the same coordinates
+    // as the slots. The marker moves with the shape, so anchoring cannot clear it.
+    const obstacle = marker && markerObstacle(marker);
+    const slots = countrySlots(scaled, cy - vh / 2, cy + vh / 2, lh, Math.max(20, size * 2.4))
+      .filter(slot => !obstacle || !boxesOverlap(slot, obstacle));
+    const at = anchor(w, h, vw, vh, cx, cy, slots, avoid);
+    const toX = px => (px - cx) * k + at.x, toY = py => (py - cy) * k + at.y;
+    return {
+      slots: at.slots, lh, k, toX, toY,
+      box: { x: at.x - vw / 2, y: at.y - vh / 2, width: vw, height: vh },
+      marker: marker ? { x: marker.x + at.x - cx, y: marker.y + at.y - cy } : null
+    };
   }
   function silhouette(req, w, h) {
     const poly = projectRings(req.rings, w, h);
@@ -265,10 +299,11 @@ export function createMapArtEngine() {
     const bw = Math.max(1e-6, box.x1 - box.x0), bh = Math.max(1e-6, box.y1 - box.y0);
     const kMax = Math.min((w - 2 * VIEW_MARGIN) / bw, (h - 2 * VIEW_MARGIN) / bh);
     if (!(kMax > 0)) return null;
-    for (const size of SIZES) {
+    for (const type of MAP_STORY_TYPE.candidates) {
+      const { size } = type;
       const font = size + 'px ' + req.family;
       const fit = k => {
-        const view = silhouetteView(poly, box, k, size, w, h, req.avoid);
+        const view = silhouetteView(poly, box, k, type, w, h, req.avoid, req.at);
         if (!view.slots.length) return null;
         const out = flow(req.text, font, view.slots, true);
         return out.complete && out.lines.length ? { view: view, lines: out.lines } : null;
@@ -294,7 +329,7 @@ export function createMapArtEngine() {
             return out;
           })
         },
-        marker: req.at ? { x: view.toX(((req.at.lon + 180) / 360) * w), y: view.toY(((90 - req.at.lat) / 180) * h) } : null
+        marker: view.marker
       };
     }
     return null;
@@ -310,15 +345,19 @@ export function createMapArtEngine() {
     // within the map height. A regional inset keeps all the words at a
     // readable size, anchored near the place.
     const width = Math.min(460, w - 24);
-    const insetFont = '12px ' + family;
-    const trial = flow(text, insetFont, Array.from({ length: 100 }, (_, i) => ({ x: 0, y: i * 16, width: width - 24, height: 16 })));
-    const height = trial.lines.length * 16 + 24;
+    const { size, lineHeight: lh } = MAP_STORY_TYPE.inset;
+    const insetFont = size + 'px ' + family;
+    const trial = flow(text, insetFont, Array.from({ length: 100 }, (_, i) => ({ x: 0, y: i * lh, width: width - 24, height: lh })));
+    const height = trial.lines.length * lh + 24;
     if (height > h - 24) return { complete: true, lines: [], font: insetFont, mode: "caption", id: req.id, text };
     const x = Math.max(12, Math.min(w - width - 12, req.col * charW - width / 2));
     let y = Math.max(12, Math.min(h - height - 12, req.row * lineH + lineH));
     // Keep western insets below the map introduction at the base view.
     if (w > 640 && x < 440) y = Math.max(y, Math.min(320, h - height - 12));
-    return { ...trial, lines: trial.lines.map(l => ({ ...l, x: l.x + x + 12, y: l.y + y + 12 })), font: insetFont, mode: 'region', id: req.id, box: { x, y, width, height } };
+    const slots = trial.lines.map(l => ({ ...l, x: l.x + x + 12, y: l.y + y + 12 }));
+    const at = anchor(w, h, width, height, x + width / 2, y + height / 2, slots, req.avoid);
+    if (at.slots.length < slots.length) return { complete: true, lines: [], font: insetFont, mode: 'caption', id: req.id, text };
+    return { ...trial, lines: at.slots, font: insetFont, mode: 'region', id: req.id, box: { x: at.x - width / 2, y: at.y - height / 2, width, height } };
   }
   function route(req) {
     const { from, to, charW, lineH, cols, rows, occupancy, text, family } = req;
