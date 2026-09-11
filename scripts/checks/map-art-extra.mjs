@@ -56,7 +56,10 @@ export async function runMapArtExtraChecks(browser, origin) {
     assert(sentenceCount > 0, 'no sentences adrift');
     for (const [name, sample] of [['idle', idle], ['serif', serif]]) {
       assert(sample.idleOn.every(Boolean), `${name} sample ended idle mode`);
-      assert(sample.sentences.every(n => n === sentenceCount), `${name} workload changed: ${counts(sample)} sentences, expected ${sentenceCount}`);
+      // Sentences retire and respawn on their own clock, so one may be in
+      // transit during a sample; the workload is the same if the slots stay
+      // within one of full.
+      assert(sample.sentences.every(n => n >= sentenceCount - 1 && n <= sentenceCount), `${name} workload changed: ${counts(sample)} sentences, expected ${sentenceCount}`);
     }
     assert.equal(serif.layouts, 0, 'serif fluid performed main-thread layout');
     assert.equal(idle.layouts, 0, 'idle mode performed main-thread layout');
