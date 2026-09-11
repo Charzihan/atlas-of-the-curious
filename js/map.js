@@ -576,14 +576,18 @@ import { createMapArtEngine, COUNTRY_MARKER } from "./map-art.js";
   // cell the name starts at and the tracking that zoom earned it.
   function renderOceanLabels(recs) {
     let used = 0;
-    for (const rec of recs) {
-      const text = rec.lines[0].text;
-      const el = oceanEl(used++);
-      if (el.textContent !== text) el.textContent = text;
-      el.style.setProperty("letter-spacing", (Math.round(rec.lsPx * 100) / 100) + "px");
-      el.style.setProperty("left", (rec.col * CHARW) + "px");
-      el.style.setProperty("top", (rec.row * LINEH) + "px");
-      if (!el.classList.contains("is-placed")) el.classList.add("is-placed");
+    for (let index = 0; index < recs.length; index++) {
+      const rec = recs[index];
+      for (const line of rec.lines) {
+        const el = oceanEl(used++);
+        if (el.textContent !== line.text) el.textContent = line.text;
+        // Connect each painted line to its ocean record for the smoke walk.
+        el.dataset.oceanIndex = String(index);
+        el.style.setProperty("letter-spacing", rec.lsPx + "px");
+        el.style.setProperty("left", ((line.col == null ? rec.col : line.col) * CHARW) + "px");
+        el.style.setProperty("top", (line.row * LINEH) + "px");
+        if (!el.classList.contains("is-placed")) el.classList.add("is-placed");
+      }
     }
     for (let i = used; i < oceanEls.length; i++) oceanEls[i].classList.remove("is-placed");
   }
