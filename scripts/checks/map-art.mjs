@@ -59,6 +59,7 @@ export async function runMapArtChecks(browser, origin) {
       }
       console.log(`map art ${query || 'worker'}: ${shaped} silhouettes + ${regional} insets + ${captions} captions${fellBack.length ? ' (' + fellBack.join(', ') + ')' : ''}`);
       assert(shaped >= MIN_SILHOUETTES, `only ${shaped} of ${places.length} stories fill a silhouette (want ${MIN_SILHOUETTES}); fell back: ${fellBack.join(', ')}`);
+      await checkArtDismissal(page);
       // Click real dialog controls, including a dateline-crossing journey.
       await page.evaluate(() => { window.ATLAS_MAP_ART.clear(); location.hash = '#/place/shibuya-crossing'; });
       await page.waitForSelector('#place-dialog[open]');
@@ -137,6 +138,84 @@ export async function runMapArtChecks(browser, origin) {
     } finally { await context.close(); }
   }
   await checkSerifEdgeCases(browser, origin);
+}
+
+async function checkArtDismissal(page) {
+  assert(await page.evaluate(() => !!window.ATLAS_MAP_ART.debug().result), 'dismissal check needs a visible story');
+  const point = await page.evaluate(() => {
+    window.scrollTo(0, 0);
+    const D = window.ATLAS_MAP_DEBUG, map = window.LANDMAPS.desktop;
+    const boxes = D.seaObstacles().boxes.concat(Array.from(document.querySelectorAll('.map-marker, .map-label, .map-ocean-label, .map-art-inset'), el => el.getBoundingClientRect()));
+    const words = D.idleSentences().flatMap(s => s.words);
+    for (let row = 1; row < map.rows - 1; row++) for (let col = 1; col < map.cols - 1; col++) {
+      if (map.colors[row][col] !== ' ') continue;
+      if (words.some(w => row === w.row && col >= w.col - 2 && col < w.col + w.cells + 2)) continue;
+      const at = D.cellToClient(col, row);
+      if (!at || at.x < 8 || at.y < 8 || at.x > innerWidth - 8 || at.y > innerHeight - 8) continue;
+      if (boxes.some(b => b.right > b.left && b.bottom > b.top && at.x >= b.left - 8 && at.x <= b.right + 8 && at.y >= b.top - 8 && at.y <= b.bottom + 8)) continue;
+      const el = document.elementFromPoint(at.x, at.y);
+      if (el?.matches('.map-base, .map-sea, .map-markers, .map-zoom, .map-stage')) return at;
+    }
+    return null;
+  });
+  assert(point, 'no clear sea cell available for story dismissal');
+  const storyId = await page.evaluate(() => window.ATLAS_MAP_ART.debug().result.id);
+  await page.mouse.move(point.x, point.y);
+  await page.mouse.down();
+  await page.mouse.move(point.x + 6, point.y, { steps: 3 });
+  await page.mouse.up();
+  assert.equal(await page.evaluate(() => window.ATLAS_MAP_ART.debug().result?.id), storyId, 'panning dismissed the story');
+  await page.mouse.click(point.x, point.y);
+  const assertCleared = async reason => {
+    assert.equal(await page.evaluate(() => window.ATLAS_MAP_ART.debug().result), null, reason);
+    assert.equal(await page.locator('#map-art-clear').evaluate(el => el.hidden), true, reason + ': Clear story remains visible');
+  };
+  await assertCleared('clicking clear sea did not dismiss the story');
+
+  await page.evaluate(() => window.ATLAS_MAP_ART.country('petra'));
+  await page.waitForFunction(() => window.ATLAS_MAP_ART.debug().result?.id === 'petra');
+  await page.keyboard.press('Escape');
+  await assertCleared('Escape did not dismiss the story');
+  await page.waitForFunction(() => window.ATLAS_MAP_DEBUG.idleState().alpha <= 0.05);
+
+  await page.evaluate(() => window.ATLAS_MAP_ART.country('hoh-rainforest'));
+  await page.waitForFunction(() => window.ATLAS_MAP_ART.debug().result?.id === 'hoh-rainforest');
+  const textPoint = await page.evaluate(() => {
+    const d = window.ATLAS_MAP_ART.debug();
+    if (d.result.mode !== 'country') return null;
+    for (const l of d.result.lines) {
+      const at = window.ATLAS_MAP_DEBUG.cellToClient((l.x + l.width / 2) / d.geometry.charW - 0.5, (l.y + l.height / 2) / d.geometry.lineH - 0.5);
+      const el = at && document.elementFromPoint(at.x, at.y);
+      if (el?.closest('.map-stage') && !el.closest('.map-marker, .map-art-inset, .map-card')) return at;
+    }
+    return null;
+  });
+  assert(textPoint, 'no silhouette text available for story dismissal');
+  await page.mouse.click(textPoint.x, textPoint.y);
+  await assertCleared('clicking silhouette text did not dismiss the story');
+
+  await page.evaluate(() => window.ATLAS_MAP_ART.country('petra'));
+  await page.waitForFunction(() => window.ATLAS_MAP_ART.debug().result?.id === 'petra');
+  await page.evaluate(() => { location.hash = '#/place/shibuya-crossing'; });
+  await page.waitForSelector('#place-dialog[open]');
+  await page.waitForFunction(() => window.ATLAS_MAP_ART.debug().result?.id === 'shibuya-crossing');
+  const preview = await page.evaluate(() => {
+    const d = window.ATLAS_MAP_ART.debug();
+    return { request: d.request, result: d.result };
+  });
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.getElementById('place-dialog').open);
+  // Closing the dialog retains its hash and unpinned preview until navigation.
+  assert.equal(await page.evaluate(() => location.hash), '#/place/shibuya-crossing');
+  assert.deepEqual(await page.evaluate(() => {
+    const d = window.ATLAS_MAP_ART.debug();
+    return { request: d.request, result: d.result };
+  }), preview, 'dialog Escape changed the story preview');
+  assert.equal(await page.locator('#map-art-clear').evaluate(el => el.hidden), false);
+  await page.evaluate(() => { location.hash = '#/'; });
+  await page.waitForFunction(() => window.ATLAS_MAP_ART.debug().result === null);
+  await assertCleared('leaving the place hash did not clear its unpinned preview');
+  console.log('  map art dismissal: sea/text clicks, pan preservation, Escape and dialog preview preservation OK');
 }
 
 export function checkRampConstruction() {

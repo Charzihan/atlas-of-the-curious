@@ -2792,6 +2792,10 @@ import { createMapArtEngine, COUNTRY_MARKER } from "./map-art.js";
       noteInput();
     }, { passive: true });
     listen("keydown", noteInput, { passive: true });
+    // Check before the dialog's document listener closes it on this Escape.
+    listen("keydown", (e) => {
+      if (e.key === "Escape" && !$("place-dialog")?.open) clearArt();
+    }, { capture: true });
     listen("wheel", noteInput, { passive: true });
 
     // Pan: drag on the stage (pointer events cover mouse + touch).
@@ -2889,9 +2893,18 @@ import { createMapArtEngine, COUNTRY_MARKER } from "./map-art.js";
         spawnRipple(mpt.x, mpt.y, 96);
       }
     }, { passive: true });
-    // Tap empty sea also dismisses an open card (but a pan shouldn't).
+    // Tapping elsewhere dismisses the card and map reading view; panning doesn't.
     stage.addEventListener("click", (e) => {
       if (drag.moved) return;
+      if (e.target.closest(".map-marker, .map-art-inset")) return;
+      // The reading canvas ignores pointer events; its text can cover a label.
+      let onStoryText = false;
+      if (artResult?.mode === "country") {
+        const box = zoomEl.getBoundingClientRect();
+        const x = (e.clientX - box.left) / view.zoom, y = (e.clientY - box.top) / view.zoom;
+        onStoryText = artResult.lines.some(l => x >= l.x && x < l.x + l.width && y >= l.y && y < l.y + l.height);
+      }
+      if (!onStoryText && e.target.closest(".map-label, .map-ocean-label")) return;
       // A drifting word is a link: it opens the field note it was lifted from.
       // The sentences stay on the water behind the dialog. The gate is the
       // painted alpha rather than `idleRunning`, so a word that is still on
@@ -2906,8 +2919,15 @@ import { createMapArtEngine, COUNTRY_MARKER } from "./map-art.js";
           return;
         }
       }
-      if (e.target === base || e.target === sea) hideCard();
-    });
+      // Ocean labels ignore pointer events, so their painted boxes need a check.
+      if (!onStoryText && oceanEls.some(el => {
+        const box = el.getBoundingClientRect();
+        return box.width && box.height && e.clientX >= box.left && e.clientX < box.right && e.clientY >= box.top && e.clientY < box.bottom;
+      })) return;
+      if (onStoryText) e.stopPropagation();
+      hideCard();
+      clearArt();
+    }, { capture: true });
 
     if (!REDUCED) ambientTimer = setInterval(() => {
       const i = waterCells[(Math.random() * waterCells.length) | 0];
