@@ -127,6 +127,7 @@ export function createSeaEngine(options) {
   let land = new Uint8Array(0);
   let occ = new Uint8Array(0);          // the labels' occupancy mask, live
   let reserve = new Uint8Array(0);      // corridors the drifting sentences hold
+  let chrome = new Uint8Array(0);       // cells the host's own DOM sits over
   let font = "", charW = 1;
   let stories = [];                     // [{ id, tagline, sentences: [string] }]
   let flat = [];                        // every sentence, flat: [{ story, text }]
@@ -152,7 +153,7 @@ export function createSeaEngine(options) {
   function open(row, col) {
     if (!inGrid(row, col)) return false;
     const i = row * COLS + col;
-    return !land[i] && !occ[i];
+    return !land[i] && !occ[i] && !chrome[i];
   }
   function openIdle(row, col) {
     if (!open(row, col)) return false;
@@ -483,6 +484,7 @@ export function createSeaEngine(options) {
       land = cfg.land;
       occ = cfg.occupancy;
       reserve = new Uint8Array(COLS * ROWS);
+      chrome = new Uint8Array(COLS * ROWS);
       live = [];
     },
     // The sea is painted in the map's own monospace grid font, so one character
@@ -492,6 +494,38 @@ export function createSeaEngine(options) {
       charW = Number(cfg.charW) || 1;
       live = [];
       if (reserve.length) reserve.fill(0);
+    },
+    /* The cells the host's own chrome covers.
+
+       The sea canvas is not the top layer. A floating intro panel sits over the
+       water and a control cluster sits over it in the other corner, both opaque
+       boxes on a layer of their own, and the hover card is a third. A sentence
+       routed behind one of them is a sentence nobody can read, and a word
+       behind a *link* in one of them would answer a click with a navigation
+       instead of a place — which is exactly how this was found.
+
+       So the host measures those boxes, turns them into cell rectangles and
+       hands them over; from here on they are simply not water. `rects` is
+       [{ r0, c0, r1, c1 }], inclusive, in grid cells. A sentence already
+       drifting through a cell that has just been covered fails its stillClear()
+       test on the next frame and is retired, the same way it is when a zoom
+       re-places a label on top of it. */
+    setObstacles: function (rects) {
+      if (!chrome.length) return 0;
+      chrome.fill(0);
+      let cells = 0;
+      for (const r of (rects || [])) {
+        const r0 = Math.max(0, r.r0 | 0), r1 = Math.min(ROWS - 1, r.r1 | 0);
+        const c0 = Math.max(0, r.c0 | 0), c1 = Math.min(COLS - 1, r.c1 | 0);
+        for (let row = r0; row <= r1; row++) {
+          const base = row * COLS;
+          for (let c = c0; c <= c1; c++) {
+            if (!chrome[base + c]) cells++;
+            chrome[base + c] = 1;
+          }
+        }
+      }
+      return cells;
     },
     // [{ id, tagline, story }] — the sentences are cut here, once.
     setStories: function (list) {

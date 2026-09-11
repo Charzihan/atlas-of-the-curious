@@ -425,6 +425,10 @@ browser without a rebuild:
 | `nativeNames` | `js/text.js` | no second name anywhere — no card line, no hover-card line, no dialog line, and the map label goes back to name + tagline |
 | `searchHighlight` | `js/app.js` | a search leaves the taglines as plain, balanced text instead of flowing them with the matches bold |
 | `localeText` | `js/text.js` | native names are prepared at the page's own locale instead of each place's (the `word-break` option is still applied) |
+| `worker` | `js/map.js` | label and sea layout run on the main thread instead of in `js/text-worker.js` (same engines, same answers, counted by `ATLAS_MAP_DEBUG.mainThreadLayoutCalls()`) |
+| `seaStories` | `js/map.js` | no tagline spills into the water on hover, and no field note follows when the place is opened |
+| `idleSea` | `js/map.js` | no sentences drift after twelve idle seconds |
+| `seaClick` | `js/map.js` | a drifting word no longer brightens under the pointer or opens its place when clicked |
 | `bookMode` | `js/reader.js` | no `window.ATLAS_READER`, no `#/read/<id>` route, and the "Read as a book" control is not offered at all |
 | `notebook` | `js/dialog.js` | no notes box in the dialog and no saved note in the field guide (anything already in `localStorage` is left untouched) |
 
@@ -579,6 +583,11 @@ js/app.js        — predictive masonry (FLIP, scroll anchor, fitted text,
                     the dialog to js/dialog.js (with a plain fallback)
 js/text-route.js — pure variable-width text routing (worker-ready): pretext
                     handle + per-row widths -> the lines that fit
+js/labels.js     — the map's label placement engine as pure data in / data out
+                    (no DOM): coastline routing, the occupancy mask, ocean names
+js/sea.js        — the living sea, pure: hover spills and the corridors the
+                    idle sentences drift along
+js/text-worker.js— the same-origin module worker both engines run inside
 js/justify.js    — pure Knuth-Plass line breaking + river detection
                     (worker-ready): prepared handle + width -> positioned words
 js/dialog.js     — the detail dialog as an editorial spread: drop cap, pull
@@ -630,6 +639,19 @@ The desktop map now routes labels and sea text in a same-origin Web Worker
 (with a synchronous fallback). Hover a marker for a tagline on the water;
 after twelve idle seconds, clickable field-note sentences drift in the sea.
 Idle animation is disabled on phones and under reduced motion.
+
+Sea text is routed around the page's own floating chrome as well as around the
+coast. The intro panel, the control cluster and the hover card are opaque boxes
+over the water, so their cells are measured on each rebuild and handed to the
+engine alongside the land mask: nothing is ever set behind them. That is a
+readability rule first — a tagline half-hidden by the card it belongs to reads
+as breakage — and a correctness rule second, because the intro panel carries an
+outbound link, and a drifting word behind it would answer a click by leaving
+the site. It costs some spills: on a real hover 11 of the 40 markers now place
+a complete tagline on the water where 19 did before — but 10 of those 19 were
+at least half-hidden behind the card, and 42% of all spilled cells were behind
+it. Fewer spills, none of them mutilated. Landlocked and crowded markers
+already degraded to the card alone.
 
 A place dialog offers **Read on the map** and **Journey to / Show route**.
 Stories flow into country cells when they fit, otherwise into a regional

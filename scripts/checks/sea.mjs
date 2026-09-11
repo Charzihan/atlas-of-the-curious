@@ -220,7 +220,7 @@ async function landSweep(page) {
 /* ---- done-when 3: a drifting word is a link ---------------------------- */
 
 async function clickSweep(page, picks) {
-  const out = { picks: 0, opened: 0, wrong: [], skipped: 0, words: [] };
+  const out = { picks: 0, opened: 0, wrong: [], skipped: 0, words: [], covered: [] };
   await page.evaluate(() => { window.ATLAS_MAP_DEBUG.setZoom(1); });
   await page.evaluate(() => window.ATLAS_MAP_DEBUG.startIdle());
   await page.waitForTimeout(IDLE_WARMUP_MS);
@@ -228,14 +228,38 @@ async function clickSweep(page, picks) {
   // Every pick has to land; a sweep that quietly did nineteen would prove
   // nothing, so a moment where nothing is adrift is retried rather than counted.
   for (let attempt = 0; out.picks < picks && attempt < picks * 3; attempt++) {
-    // Read the sentences fresh each time: they are drifting, and Escape (or any
-    // key) would dissolve them, so the dialog is closed through the hash route.
-    // A candidate has to be on screen and not underneath a marker button or a
-    // label — those are links of their own and would answer the click first.
-    const pick = await page.evaluate(() => {
+    /* Read the sentences fresh each time: they are drifting, and Escape (or any
+       key) would dissolve them, so the dialog is closed through the hash route.
+
+       A candidate must be a word the sea itself will answer for, which means
+       the topmost thing at its point has to be one of the map's own paint
+       layers. Anything else there is a placement failure, not something to
+       quietly skip: the engine put a readable, clickable word somewhere it is
+       neither. Two ways that happens, and both are checked, because they need
+       different questions asked.
+
+         - Something on top answers the click first. A marker button, a label,
+           the hover card, a zoom control — or the intro panel's outbound link,
+           which took the whole page with it and left this sweep reporting
+           "Execution context was destroyed". elementFromPoint finds these.
+
+         - Something on top hides the word without taking the click. The intro
+           panel is `pointer-events: none`, so elementFromPoint looks straight
+           through it to the canvas and sees nothing wrong, while the panel is
+           opaque and the sentence behind it cannot be read at all. Only the
+           geometry says so, which is what ATLAS_MAP_DEBUG.seaObstacles() is
+           for — the same boxes the engine is told to treat as land. */
+    const found = await page.evaluate(() => {
       const D = window.ATLAS_MAP_DEBUG;
       window.scrollTo(0, 0);
-      const cands = [];
+      const SURFACE = /^(map-sea|map-base|map-markers|map-zoom|map-stage)$/;
+      const boxes = D.seaObstacles().boxes;
+      const name = (el) => {
+        if (!el) return "(nothing)";
+        const cls = typeof el.className === "string" && el.className ? "." + el.className.trim().split(/\s+/).join(".") : "";
+        return el.tagName.toLowerCase() + cls + (el.href ? ` -> ${el.href}` : "");
+      };
+      const cands = [], covered = [];
       for (const s of D.idleSentences()) {
         if (s.alpha < 0.5) continue;
         for (const w of s.words) {
@@ -243,14 +267,32 @@ async function clickSweep(page, picks) {
           if (!at) continue;
           if (at.x < 8 || at.y < 8 ||
               at.x > window.innerWidth - 8 || at.y > window.innerHeight - 8) continue;
+          const box = boxes.find((b) =>
+            at.x >= b.left && at.x <= b.right && at.y >= b.top && at.y <= b.bottom);
+          if (box) {
+            covered.push(`"${w.text}" (${s.id}) at r${w.row} c${w.col} is behind a ` +
+              `floating panel (${Math.round(box.left)},${Math.round(box.top)}..` +
+              `${Math.round(box.right)},${Math.round(box.bottom)})`);
+            continue;
+          }
           const el = document.elementFromPoint(at.x, at.y);
-          if (el && el.closest && (el.closest(".map-marker") || el.closest(".map-label"))) continue;
+          const surface = el && el.classList
+            ? [...el.classList].some((c) => SURFACE.test(c)) : false;
+          if (!surface) {
+            covered.push(`"${w.text}" (${s.id}) at r${w.row} c${w.col} sits under ` +
+              `${name(el)}, which would answer the click instead of the sea`);
+            continue;
+          }
           cands.push({ id: s.id, word: w.text, col: w.col, row: w.row, x: at.x, y: at.y });
         }
       }
-      if (!cands.length) return null;
-      return cands[(Math.random() * cands.length) | 0];
+      return {
+        pick: cands.length ? cands[(Math.random() * cands.length) | 0] : null,
+        covered: covered
+      };
     });
+    for (const c of found.covered) if (out.covered.length < 12) out.covered.push(c);
+    const pick = found.pick;
     if (!pick) {
       out.skipped++;
       await page.evaluate(() => window.ATLAS_MAP_DEBUG.startIdle());
@@ -270,6 +312,12 @@ async function clickSweep(page, picks) {
     if (state.open && landed === pick.id) out.opened++;
     else out.wrong.push(`"${pick.word}" (${pick.id}) -> ${landed || "nothing"}`);
     await page.evaluate(() => { location.hash = "#/"; });
+    // And wait for it to actually be gone. The next pick asks what is on top of
+    // each word, and a dialog still closing over the map would answer for all
+    // of them — the sweep would blame the sea for the test's own timing.
+    await page.waitForFunction(
+      () => !document.getElementById("place-dialog").open, null, { timeout: 5000 }
+    ).catch(() => {});
     await page.waitForTimeout(140);
   }
   await page.evaluate(() => window.ATLAS_MAP_DEBUG.stopIdle());
@@ -329,7 +377,12 @@ async function visitSea(browser, origin, options) {
 
     const land = await landSweep(page);
     const clicks = await clickSweep(page, CLICK_PICKS);
-    return { flags, worker, pool, idleState, baseline, throttled, land, clicks, errors };
+    const chrome = await page.evaluate(() => window.ATLAS_MAP_DEBUG.seaObstacles());
+    const agreement = await page.evaluate(() => window.ATLAS_MAP_DEBUG.fontAgreement());
+    return {
+      flags, worker, pool, idleState, baseline, throttled, land, clicks,
+      chrome, agreement, errors
+    };
   } finally {
     await context.close();
   }
@@ -421,6 +474,38 @@ function reportOne(label, res, fail, expectWorker) {
          `counter is not measuring the fallback`);
   }
 
+  /* ---- The two hosts must be measuring the same font --------------- */
+  // Nothing here has an @font-face, so both sides are looking at the same
+  // installed faces and there is nothing to load into the worker. But "the same
+  // stack resolves the same way in a worker" is an assumption, and if it were
+  // wrong the sea would be routed against one cell width and painted at
+  // another. Both sides measure the grid's reference string and must agree.
+  const fa = res.agreement;
+  console.log(
+    `  cell width: page ${fmt(fa.main)}px, worker ` +
+    (fa.reported ? `${fmt(fa.worker)}px (delta ${fmt(fa.delta)}px)` : "not reported")
+  );
+  if (expectWorker) {
+    if (!fa.reported) fail(`${label} the worker never reported what it measured`);
+    else if (fa.delta > 0.01) {
+      fail(`${label} the worker measured the grid font at ${fmt(fa.worker)}px per ` +
+           `cell and the page at ${fmt(fa.main)}px — the same font string resolved ` +
+           `to different faces on the two threads`);
+    }
+  }
+
+  /* ---- The page's own chrome is an obstacle, not water -------------- */
+  const chrome = res.chrome || { boxes: [], rects: [] };
+  console.log(
+    `  floating over the water: ${chrome.boxes.length} box(es) masking ` +
+    `${chrome.rects.map((r) => (r.r1 - r.r0 + 1) + "x" + (r.c1 - r.c0 + 1)).join(" + ") || "nothing"} cells`
+  );
+  if (chrome.rects.length < 2) {
+    fail(`${label} only ${chrome.rects.length} floating box(es) were masked — the ` +
+         `intro panel and the control cluster are both over the sea, so the ` +
+         `"nothing hides behind the chrome" checks below prove nothing`);
+  }
+
   /* ---- done-when 2: nothing on land -------------------------------- */
   let violations = 0, cells = 0;
   for (const s of res.land.stages) {
@@ -448,7 +533,8 @@ function reportOne(label, res, fail, expectWorker) {
     }
   }
   if (violations) {
-    fail(`${label} drew ${violations} glyph cell(s) on land, a label or an ocean name`);
+    fail(`${label} drew ${violations} glyph cell(s) on land, a label, an ocean ` +
+         `name or the page's own chrome`);
   }
   if (!cells) fail(`${label} never drew a single sea glyph — the check proves nothing`);
   for (const what of ["idle sea", "idle sea @2.5x"]) {
@@ -474,6 +560,13 @@ function reportOne(label, res, fail, expectWorker) {
     c.words.slice(0, 4).map((s) => `"${s}"`).join(", ")
   );
   for (const bad of c.wrong.slice(0, 5)) console.error(`      ${bad}`);
+  // A word that something else on the page owns is a placement failure: the sea
+  // routed a readable, clickable sentence into cells it does not own.
+  for (const bad of c.covered.slice(0, 6)) console.error(`      ${bad}`);
+  if (c.covered.length) {
+    fail(`${label} ${c.covered.length} drifting word(s) were under the page's own ` +
+         `chrome — unreadable there, and a click would go somewhere else`);
+  }
   if (c.picks < CLICK_PICKS) {
     fail(`${label} only ${c.picks} of ${CLICK_PICKS} click picks found a sentence`);
   }

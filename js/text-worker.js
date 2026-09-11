@@ -26,6 +26,7 @@
    when a sentence is first routed, and referred to by key ever after. */
 import { createLabelEngine } from "./labels.js";
 import { createSeaEngine } from "./sea.js";
+import { prepareWithSegments, measureNaturalWidth } from "../vendor/pretext/layout.js";
 
 import { createMapArtEngine } from "./map-art.js";
 const art = createMapArtEngine();
@@ -69,6 +70,24 @@ self.onmessage = function (e) {
     case "geom": {
       sea.setFont({ font: m.font, charW: m.charW });
       if (m.markers) labels.setMarkerCells(m.markers);
+      /* And the one thing that could silently differ between the two hosts:
+         which face the font string actually resolved to. There is no @font-face
+         anywhere in the site — every role is a stack of local faces — so the
+         worker and the page are looking at the same installed fonts and there is
+         nothing to load in here. But "should resolve the same" is an assumption,
+         and a worker that fell through to a different fallback would measure a
+         different advance, put the character grid and its own measurements out
+         of step, and land glyphs on the coast. So the advance the worker gets for
+         the grid's own reference string goes back with every geometry change and
+         js/map.js compares it with the width it measured in the page. */
+      try {
+        reply({
+          type: "metrics", build: m.build, font: m.font,
+          charW: measureNaturalWidth(prepareWithSegments(m.ref, m.font)) / m.ref.length
+        });
+      } catch (e) {
+        reply({ type: "metrics", build: m.build, font: m.font, charW: 0 });
+      }
       break;
     }
 
@@ -97,6 +116,11 @@ self.onmessage = function (e) {
       });
       break;
     }
+
+    // The cells the page's own floating chrome covers. They are not water:
+    // text behind an opaque panel cannot be read, and a drifting word behind
+    // a link in one would answer a click with a navigation.
+    case "sea-obstacles": { sea.setObstacles(m.rects); break; }
 
     case "idle-start": { sea.startIdle(m.now); break; }
     case "idle-stop": { sea.stopIdle(); break; }

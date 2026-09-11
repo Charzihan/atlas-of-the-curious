@@ -47,10 +47,18 @@ idle sentences and per-word hit testing. This continuation additionally:
 - `js/labels.js`: the former map label placement logic, now a pure engine.
 - `js/sea.js`: coastline-safe hover spills and idle sentence corridors. Prepared
   text is cached by text/font; sentences travel within a reserved rectangle.
+  `setObstacles()` takes the cells the page's own floating chrome covers; they
+  are treated exactly like land (added in the Phase 5 review, see below).
 - `js/text-worker.js`: same-origin module worker, with init/geometry/placement,
   hover, idle and map-art messages. Idle position arrays use transferable buffers.
 - `js/map.js`: asynchronous backend, drawing, fading, hit testing and main-thread
-  fallback using the same engines. `ATLAS_MAP_DEBUG` exposes diagnostics.
+  fallback using the same engines. `ATLAS_MAP_DEBUG` exposes diagnostics,
+  including `fontAgreement()`: the worker measures the grid's reference string
+  with pretext and the page measures it with a canvas, and the two must agree.
+  There is no `@font-face` in the site, so every role is a stack of locally
+  installed faces and there is nothing to load into the worker — but a stack
+  that resolved to a different face there would route the sea at one cell width
+  and paint it at another, so it is checked rather than assumed.
 - `js/text-route.js`: line results retain start/end cursors for per-word geometry.
 - `scripts/checks/sea.mjs` and `run-sea.mjs`: both backends, 4× CPU timing,
   hover/collision sweeps, twenty click picks per backend, phone and reduced motion.
@@ -66,6 +74,34 @@ rectangular corridors, then moved within those corridors by the worker. They
 are not unnecessarily re-typeset every frame as the original proposal suggested.
 Worker frames still update positions, opacity, lifetime and occupancy validity.
 Landlocked/crowded markers can have no spill; their normal hover card remains.
+
+**Phase 5 review (later).** Neither the hover spill nor an idle corridor may use
+cells that the intro panel, the control cluster or the hover card sits over.
+Those boxes are measured on the main thread, converted through the same inverse
+pan/zoom transform the hit test uses, and posted to the engine (`sea-obstacles`)
+or set on the fallback directly. Before this, a quarter of all drifting-word
+placements were behind the opaque intro panel, and some of those were on its
+outbound @chenglou/pretext link — clicking one navigated away and was the cause
+of the intermittent "Execution context was destroyed" failure in the sea click
+sweep. `ATLAS_MAP_DEBUG.checkSeaText()` now counts those cells as violations
+("under page chrome") and `ATLAS_MAP_DEBUG.seaObstacles()` exposes the boxes.
+`.map-marker-ring` also became `pointer-events: none`: the decorative pulse
+scales to roughly a 49px invisible click target and could swallow a click meant
+for a drifting word underneath it.
+
+The dev assertion also now runs on its own, as the roadmap asked. Only the label
+walk had been wired to a placement, so `checkSeaText()` fired only when a test
+called it; it now runs (under `DEBUG_MAP`) after every placement and at every
+spawn or retirement — the two moments the sea's cells change for a reason other
+than drifting. It is deliberately not per frame: a sliding sentence already has
+every cell of the block it is moving into revalidated in `js/sea.js` on every
+frame, and a full grid walk per frame on localhost would land inside the
+frame-rate measurement in `scripts/checks/sea.mjs`.
+
+Masking the hover card costs spills — on a real hover about 11 of 40 markers now
+place a complete tagline on the water, against 19 before, but 10 of those 19
+were at least half-hidden behind the card. Nothing half-drawn is preferred to
+more of it.
 
 ## Phase 7 — Shapes and paths
 
@@ -190,11 +226,17 @@ performed.
 - Final extended rerun: **`node scripts/checks/run-map-art.mjs --extra-only`
   passed**, including disabled feature flags and the editorial fallback.
 - Final sea results: 20/20 clicked words opened the correct place on each
-  backend; zero land/label/ocean-name collisions and zero self-overlap.
+  backend; zero land/label/ocean-name/page-chrome collisions and zero
+  self-overlap.
   Both zoom levels sustained six drifting sentences. At 4× CPU the worker run
   averaged 30.05 ms/frame and the fallback 28.72 ms/frame (33.33 ms budget).
-  Worker main-thread layout calls were zero; fallback calls were observed in
-  warmup and the timed run. Nine empty-water retries per click sweep were not
+  Worker main-thread layout calls were zero. Fallback calls are reliably
+  observed during startup and only sometimes during the timed interval: once six
+  sentences are adrift and merely moving, the fallback has nothing left to lay
+  out, and a spawn may or may not fall inside a given 120 frames. The check
+  therefore requires the sum across startup and the timed run to be positive,
+  which is the correct assertion — not that layout happens while the sea is only
+  drifting. Nine empty-water retries per click sweep were not
   counted as picks; all twenty actual picks succeeded.
 - The generated map's original glyph/color arrays were compared with HEAD:
   unchanged on desktop and mobile. Country array dimensions/water indices pass.

@@ -1003,6 +1003,12 @@ dialog::backdrop {
   border-radius: 50%;
   border: 1px solid currentColor;
   opacity: 0;
+  /* Decorative only. The pulse scales this to 1.7x of a 29px box, so without
+     this the marker carries an invisible ~49px click target that breathes in
+     and out — it swallowed clicks meant for the drifting sentences underneath
+     it (Phase 5), and made the dot's own hover radius depend on where in the
+     animation you happened to reach for it. The 19px button is the target. */
+  pointer-events: none;
   animation: ring-pulse 3.2s ease-out infinite;
 }
 

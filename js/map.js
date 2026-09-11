@@ -57,6 +57,11 @@ import { createMapArtEngine } from "./map-art.js";
   // would put the character grid and its measurements out of step.
   const MONO_FALLBACK =
     'SFMono-Regular, Menlo, Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace';
+  // The string the grid's cell width is measured from, on both hosts: the page
+  // measures it through a canvas, the worker through pretext, and js/map.js
+  // compares the two so a font that resolved differently in the worker cannot
+  // quietly put the character grid and its own measurements out of step.
+  const CHARW_REF = "MMMMMMMMMM";
   const MONO = (function () {
     try {
       const v = getComputedStyle(document.documentElement)
@@ -385,6 +390,9 @@ import { createMapArtEngine } from "./map-art.js";
     typeof Worker === "function" && typeof OffscreenCanvas !== "undefined";
   let worker = null, workerReady = false;
   let placeSeq = 0, placeApplied = -1;
+  // What the worker measured the grid's reference string at, for the agreement
+  // check in ATLAS_MAP_DEBUG.fontAgreement(). 0 until it has reported.
+  let workerCharW = 0;
   let seaSeq = 0, seaApplied = -1;
   let idleSeq = 0, idleApplied = -1, idleInFlight = false;
   let buildSeq = 0;
@@ -400,6 +408,11 @@ import { createMapArtEngine } from "./map-art.js";
       workerReady = false;
       if (worker) { worker.terminate(); worker = null; }
       idleInFlight = false;
+      workerCharW = 0;
+      // The host changed, so everything the old one had been told has to be
+      // said again to this one: the chrome mask included.
+      seaObstacleKey = "";
+      syncSeaObstacles();
       requestPlacement();
       if (idleRunning) localEngines().sea.startIdle(performance.now());
       requestArt();
@@ -415,6 +428,12 @@ import { createMapArtEngine } from "./map-art.js";
   function onWorkerMessage(m) {
     if (!m) return;
     if (m.type === "art") { acceptArt(m); return; }
+    if (m.type === "metrics") {
+      // A reply for the cell size that has just been rebuilt away says nothing
+      // about the current grid.
+      if (m.build === buildSeq) workerCharW = Number(m.charW) || 0;
+      return;
+    }
     if (m.type === "ready") {
       workerReady = true;
       sendGeometry();
@@ -447,8 +466,10 @@ import { createMapArtEngine } from "./map-art.js";
     if (!workerActive() || !CHARW) return;
     worker.postMessage({
       type: "geom", build: buildSeq, font: PX + "px " + MONO, charW: CHARW,
-      markers: markerCells()
+      markers: markerCells(), ref: CHARW_REF
     });
+    // The mask depends on the cell size, so it has to follow the geometry.
+    syncSeaObstacles();
   }
 
   // Start it now, not at the first build: preparing 120-odd strings takes the
@@ -613,8 +634,18 @@ import { createMapArtEngine } from "./map-art.js";
         // eslint-disable-next-line no-console
         console.warn("[atlas:map] " + report.overlaps + " label cell(s) overlap land or another label", report);
       }
+      /* The labels have just been re-drawn under whatever is already on the
+         water, which is precisely when a drifting line can end up somewhere it
+         does not belong. A *spill* is skipped here: rerouteSeaText() below has
+         to make a worker round trip, so for a frame or two the painted spill is
+         deliberately the old one against the new mask, and warning about a
+         transient the design chose would only teach people to ignore this.
+         scripts/checks/sea.mjs sweeps every spill at both zooms instead. */
+      if (idleAlpha > 0.02 || seaAlpha <= 0.02) warnSeaText("after a placement");
     }
-    // The water the sea text was routed into may have just changed hands.
+    // The water the sea text was routed into may have just changed hands — and
+    // a placement follows a zoom, which moves the chrome mask too.
+    syncSeaObstacles();
     rerouteSeaText();
     requestArt();
   }
@@ -717,10 +748,97 @@ import { createMapArtEngine } from "./map-art.js";
     return "rgba(" + base + ", " + (Math.round(alpha * 1000) / 1000) + ")";
   }
 
+  /* ---- What the page's own chrome covers ---------------------------------
+
+     The sea canvas is not the top layer. A floating intro panel sits over the
+     water at the top left, the zoom cluster sits over it at the bottom right,
+     and the hover card is a third box that comes and goes with the pointer.
+     All three are opaque, and the intro panel carries an outbound link.
+
+     Text routed into the cells behind one of them is text nobody can read, and
+     a drifting *word* behind that link answers a click by leaving the site
+     instead of by opening a place — which is how this was found: the click
+     sweep in scripts/checks/sea.mjs picked a word sitting on the
+     @chenglou/pretext credit and navigated away mid-check.
+
+     So the boxes are measured and handed to the engine as cell rectangles,
+     where they join the land mask and the labels' occupancy: js/sea.js simply
+     does not treat those cells as water. The boxes are in viewport px and the
+     grid is in map px, so the rectangle depends on the current zoom and pan;
+     it is recomputed whenever the engine is about to be asked for something
+     and only posted when it has actually moved. */
+  let seaObstacleRects = [];
+  let seaObstacleKey = "";
+
+  // Every box that floats over the water, in client px.
+  function seaChromeBoxes() {
+    const out = [];
+    if (!stage) return out;
+    /* The panels live on the viewport, beside the stage rather than inside it,
+       so they neither pan nor zoom. Whatever is there is read rather than
+       named: a later phase adding a fourth panel gets this for free.
+
+       Anything a phase puts *inside* the stage does not, because it pans and
+       zooms with the map and has to be measured per box — the hover card below
+       is the one case that earns it. Phases 7–8's `.map-art` canvas and
+       `.map-art-inset` are in there and are both transparent, so they hide no
+       glyph; if the inset ever grows a background, it belongs in this list. */
+    for (const el of viewport.children) {
+      if (el === stage || el.hidden || typeof el.getBoundingClientRect !== "function") continue;
+      const r = el.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) out.push(r);
+    }
+    /* The hover card is inside the stage and moves with the pointer, and it is
+       shown (and positioned) before the spill beside it is asked for — so it
+       can be measured here rather than guessed at. A tagline must not spill
+       under the very card that triggered it.
+
+       The crosshair and the coordinate readout are deliberately *not* here.
+       They follow the pointer frame by frame, so masking them would re-route
+       the sea continuously for a box that has already moved; and wherever the
+       pointer is, the drifting sentences are dissolving anyway, because any
+       pointer movement that is not tracking a word ends idle mode. */
+    if (card && cardVisibleId) {
+      const r = card.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) out.push(r);
+    }
+    return out;
+  }
+
+  /* Post the mask, if it has moved. The key carries the host as well as the
+     cells: a worker that has just died has to be told everything again. */
+  function syncSeaObstacles() {
+    if (!stage || !view || !CHARW) return;
+    const sr = stage.getBoundingClientRect();
+    const rects = [];
+    for (const box of seaChromeBoxes()) {
+      // The same inverse transform the hit test uses: client -> stage -> map.
+      const a = toMap(box.left - sr.left, box.top - sr.top);
+      const b = toMap(box.right - sr.left, box.bottom - sr.top);
+      const r = {
+        r0: Math.floor(a.y / LINEH), r1: Math.ceil(b.y / LINEH) - 1,
+        c0: Math.floor(a.x / CHARW), c1: Math.ceil(b.x / CHARW) - 1
+      };
+      if (r.r1 < 0 || r.c1 < 0 || r.r0 >= ROWS || r.c0 >= COLS) continue;
+      rects.push(r);
+    }
+    const key = (workerActive() ? "w" : "m") + "|" +
+      rects.map((r) => r.r0 + "," + r.c0 + "," + r.r1 + "," + r.c1).join(" ");
+    if (key === seaObstacleKey) return;
+    seaObstacleKey = key;
+    seaObstacleRects = rects;
+    if (workerActive()) {
+      worker.postMessage({ type: "sea-obstacles", build: buildSeq, rects: rects });
+    } else {
+      localEngines().sea.setObstacles(rects);
+    }
+  }
+
   // ---- Stories on the water ----------------------------------------------
   function requestSeaText(x, extend) {
     if (!SEA_ON || !x || !x.pos) return;
     noteInput();
+    syncSeaObstacles();
     seaTextId = x.p.id;
     seaTextMode = extend ? "open" : "hover";
     seaAccent = x.accent;
@@ -774,6 +892,9 @@ import { createMapArtEngine } from "./map-art.js";
     idleFrameState = [];
     idleApplied = -1;
     idleInFlight = false;
+    // The panels may have moved (a resize, a zoom) since the last time anyone
+    // asked; no corridor should be opened behind one.
+    syncSeaObstacles();
     const now = performance.now();
     if (workerActive()) worker.postMessage({ type: "idle-start", build: buildSeq, now: now });
     else localEngines().sea.startIdle(now);
@@ -836,6 +957,9 @@ import { createMapArtEngine } from "./map-art.js";
       idleFrameState = out;
     } else {
       idleFrameState = m.sentences || [];
+    }
+    if (DEBUG_MAP && ((m.fresh && m.fresh.length) || (m.retired && m.retired.length))) {
+      warnSeaText("as the drifting sentences changed");
     }
   }
 
@@ -953,7 +1077,17 @@ import { createMapArtEngine } from "./map-art.js";
   // against the mask the labels and ocean names claimed this placement. The
   // routing is supposed to make this impossible; this is the proof.
   function checkSeaText() {
+    // Measure the floating panels now rather than trusting the last sync: the
+    // claim being tested is about what is on screen at this instant.
+    syncSeaObstacles();
     const mask = new Uint8Array(COLS * ROWS);
+    for (const rec of seaObstacleRects) {
+      for (let row = Math.max(0, rec.r0); row <= Math.min(ROWS - 1, rec.r1); row++) {
+        for (let c = Math.max(0, rec.c0); c <= Math.min(COLS - 1, rec.c1); c++) {
+          mask[row * COLS + c] = 3;
+        }
+      }
+    }
     for (const rec of oceanRecords) {
       for (const s of cellsOf(rec)) {
         if (s.row < 0 || s.row >= ROWS) continue;
@@ -983,6 +1117,10 @@ import { createMapArtEngine } from "./map-art.js";
           violations++; problems.push({ what: what, id: id, row: row, col: c, why: "ocean name" });
         } else if (mask[i] === 2) {
           violations++; problems.push({ what: what, id: id, row: row, col: c, why: "label" });
+        } else if (mask[i] === 3) {
+          // Behind the intro panel, the control cluster or the hover card:
+          // painted, but not readable and not clickable as a word.
+          violations++; problems.push({ what: what, id: id, row: row, col: c, why: "under page chrome" });
         } else if (seen[i]) {
           selfOverlaps++;
         }
@@ -1009,11 +1147,32 @@ import { createMapArtEngine } from "./map-art.js";
     }
     return {
       cells: cells, violations: violations, selfOverlaps: selfOverlaps,
+      chromeRects: seaObstacleRects.length,
       seaLines: seaLines, idleLines: idleLines,
       sentences: idleFrameState.length, hovered: seaText ? seaText.id : null,
       extended: !!(seaText && seaText.extended),
       problems: problems.slice(0, 20)
     };
+  }
+
+  /* The same walk as an assertion rather than a report. Phase 1 does this for
+     the labels after every placement; the sea needs it at the two moments its
+     own cells change for a reason other than drifting: a placement (the label
+     mask moved under it) and a spawn or retirement (the set of sentences
+     changed). In between, a sentence only slides, and js/sea.js re-checks every
+     cell of the block it is sliding into on every frame — running a full grid
+     walk per frame here would cost more than the thing it is watching, and on
+     localhost (where DEBUG_MAP is on) it would land inside the frame-rate
+     measurement in scripts/checks/sea.mjs. */
+  function warnSeaText(when) {
+    const report = checkSeaText();
+    if (!report.violations && !report.selfOverlaps) return;
+    // eslint-disable-next-line no-console
+    console.warn(
+      "[atlas:map] " + report.violations + " sea glyph cell(s) on land, a label, " +
+      "an ocean name or the page's own chrome, and " + report.selfOverlaps +
+      " self-overlap(s) " + when, report
+    );
   }
 
   // The drifting sentences as data, for the click check in scripts/smoke.mjs.
@@ -1228,6 +1387,29 @@ import { createMapArtEngine } from "./map-art.js";
       };
     },
     idleSentences: idleSentences,
+    /* The boxes the page floats over the water, and the cells they cover. The
+       click sweep in scripts/checks/sea.mjs needs both: `boxes` because a panel
+       with `pointer-events: none` is invisible to elementFromPoint yet still
+       hides every glyph behind it, and `rects` to say what the engine was
+       actually told. */
+    seaObstacles: function () {
+      syncSeaObstacles();
+      const boxes = seaChromeBoxes().map(function (b) {
+        return { left: b.left, top: b.top, right: b.right, bottom: b.bottom };
+      });
+      return { boxes: boxes, rects: seaObstacleRects.slice() };
+    },
+    /* Does the worker's font resolve to the face the page's does? Both measure
+       the grid's reference string — the page through a canvas, the worker
+       through pretext — and a disagreement would mean the cell width the sea is
+       routed against is not the cell width it is painted at. */
+    fontAgreement: function () {
+      return {
+        font: PX + "px " + MONO, main: CHARW, worker: workerCharW,
+        delta: workerCharW ? Math.abs(workerCharW - CHARW) : null,
+        reported: workerCharW > 0
+      };
+    },
     // The tagline (and, once opened, the story) spilled into the water.
     seaText: function () {
       return seaText
@@ -1516,7 +1698,7 @@ import { createMapArtEngine } from "./map-art.js";
     LINEH = PX * ROW_FACTOR;
     const probe = document.createElement("canvas").getContext("2d");
     probe.font = PX + "px " + MONO;
-    CHARW = probe.measureText("MMMMMMMMMM").width / 10;
+    CHARW = probe.measureText(CHARW_REF).width / CHARW_REF.length;
     mapW = COLS * CHARW;
     mapH = ROWS * LINEH;
     const FONT = PX + "px " + MONO;
@@ -2298,6 +2480,10 @@ import { createMapArtEngine } from "./map-art.js";
     // the new cell size (and the new marker cells) after every rebuild.
     lastInputAt = performance.now();
     sendGeometry();
+    // The panels sit in different cells at a new cell size, and the fallback
+    // host is not told by sendGeometry().
+    seaObstacleKey = "";
+    syncSeaObstacles();
 
     applyView();
     requestPlacement();   // ocean names at tier 0, place names from 1.4×
