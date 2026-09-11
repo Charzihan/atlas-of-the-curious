@@ -214,39 +214,51 @@ sequence/build IDs so obsolete layouts do not repaint a new map.
 
 ## Phase 8 — A serif atlas
 
-The map control **Serif map** re-sets the map in the site's Georgia face
-(`--font-serif`). The first pass of this phase shipped a hand-ordered list of
-fourteen glyphs whose "tone" was its index, which produced a map that was
-indistinguishable from the monospace one. The palette is now measured.
+The map control **Serif map** requests the site's serif stack (`--font-serif`,
+starting with Georgia). The browser resolves that stack against installed fonts;
+headless Linux substitutes for Georgia. The first pass shipped a hand-ordered
+list of fourteen glyphs whose "tone" was its index. The palette is now measured.
 
 **The palette** (`palette()` in `js/map-art.js`). The candidates are printable
 ASCII, the printable half of Latin-1, and the typographic marks a WGL4 face
-such as Georgia also carries (`† ‡ • ≈ ∞ œ Œ – — ‰`); 198 in all. Each is
-rendered once into an `OffscreenCanvas` in the worker — a hidden DOM canvas on
-the synchronous fallback host — at the map's own cell size, drawn exactly as
-`repaintBase` draws it, and its ink is summed from the alpha channel. That
-gives two numbers per glyph: `coverage`, the share of the cell it inks, and
-`spill`, the share of its ink that lands outside the cell. Its advance comes
-from `prepareWithSegments`, the same measurement pretext lays text out with.
+such as Georgia commonly carries (`† ‡ • ≈ ∞ œ Œ – — ‰`); 198 in all. Each is
+rendered into an `OffscreenCanvas` in the worker, or a DOM canvas on the
+synchronous host (even when that host also offers `OffscreenCanvas`). Measurement
+uses the fractional CSS cell width and height and the painter's DPR, capped at
+2. The probe is scaled by DPR and the glyph is centred by its measured advance
+at a middle baseline, just as in `repaintBase` and the sea loop.
 
-A glyph is usable if its advance fits the cell (narrower is fine and is centred;
-wider is rejected, because that is what would put the ink out of step with the
-markers) and if it spills no more than 6% of its ink into the neighbouring rows.
-141 of the 198 survive that at the desktop cell size. A glyph the resolved face
-does not have is dropped first: it is detected by measuring an unassigned
-private-use code point and discarding anything that matches that notdef box, so
-the atlas is set in one face rather than in whatever the browser would
-substitute. Coverage is then normalised 0..1 over the usable set, so tone 0 and
-tone 1 are that cell's real lightest and darkest ink.
+The reference placement is cell (0, 0), before the sea's animated ripple lift.
+Padding is a whole number of device pixels so it preserves that cell's raster
+phase. Fractional boundary pixels are apportioned by their overlap with the
+cell. `inkCoverage` is the share of the cell inked; `spill` is the share of the
+glyph's ink outside any of the four cell edges. This is a reference-cell fit
+bound, not a bound on the intentional motion of a ripple or a promise that
+antialiasing is identical at every translated cell. The advance comes from
+`prepareWithSegments`, the same measurement pretext lays text out with.
 
-The ramp has **24 rungs**. Each is the glyph minimising
+A glyph fits only if its advance is at most the cell width, it has visible ink,
+and it spills no more than **6%** of its ink outside the reference cell. These
+limits never expand to fill a target rung count. The U+E000 probe only removes
+likely notdef boxes with matching width and coverage. It cannot detect a real
+glyph supplied by a fallback font, and it can mistakenly exclude supported ink
+that resembles the probe. Canvas does not identify the face behind each glyph;
+there is **no single-face guarantee**. All scores measure the resolved stack,
+including substitutions. The browser assertion checks that the canvas font
+string contains the registry's serif family; it does not prove Georgia exists.
+
+The ramp has **up to 24 rungs**, one per distinct measured coverage. Equal
+coverages keep the widest fitting glyph. Coverage is normalised over the fitting
+set, then each rung minimises
 `|coverage − target| + 0.4 · max(0, (cellWidth − advance) / cellWidth)` among
-those darker than the rung below it, leaving one candidate behind for every rung
-still to come — so the ramp is strictly increasing in measured coverage and no
-rung repeats its neighbour. At 1280×800 it comes out as
-`¬÷=+<>×*«≈†}oLT4üFµZEÉÈË`, coverage 0.125 to 0.994. The whole thing is built
-once per geometry and font and cached in the engine; nothing measures inside a
-frame.
+those darker than the rung below it, leaving one candidate for each remaining
+rung. Shorter ramps are never padded. With fewer than **6** distinct tones, or
+failed canvas measurement, the palette is unusable: serif mode stays off, the
+toggle is disabled, and its tooltip gives the reason. A requested mode only
+becomes active when a usable palette arrives. Geometry rebuilds retry the
+request. The engine caches by font, fractional geometry, and DPR; no measurement
+runs inside a frame. Actual ramp lengths and glyphs depend on the font resolver
+and raster scale and are printed by the checks.
 
 **Land tone.** A multi-source breadth-first search over the land mask gives each
 land cell its distance to the nearest coast (columns wrap, so the antimeridian
@@ -261,8 +273,9 @@ colours come from the existing palette, unchanged.
 **The sea.** The wave and ripple simulation is untouched; only its ink changes.
 Where the monospace sea quantises density into six glyphs and gets the rest of
 its contrast from colour, the serif sea maps `(density / 1.15) ^ 1.6` straight
-onto the 24-rung ramp per cell per frame, so crests and troughs read as one
-continuous tone. The gamma is there because a 24-rung ramp mapped linearly makes
+onto the available ramp per cell per frame, so crests and troughs read as one
+continuous tone. Both land and water index by the actual ramp length. The gamma
+is there because a measured ramp mapped linearly makes
 quiet water much heavier than the monospace floor. The still sea floor on the
 base canvas is tonal too, taken from the same static regional bias the wave
 trains use; under reduced motion, where the fluid layer never draws, that static
@@ -279,8 +292,31 @@ No inline style attributes, no `eval`.
 
 `ATLAS_MAP_ART.debug()` exposes `palette` (the ramp with its measured coverage
 and advances, without the per-cell array) and `base` — the base canvas's
-resolved font string and the multiset of land glyphs it last painted — so the
-checks can assert on what was actually drawn rather than diff pixels.
+requested font string, land glyph multiset, and painted land cell positions.
+Checks compare those positions across toggles, rasterise every chosen rung with
+production placement at DPR 1, 1.25 and 2, verify strictly increasing coverage and
+at most 6% spill, and assert worker/DOM-canvas ramp equality. Sparse synthetic
+palettes cover 0, 1, 5, 6, 12, 24 and 30 fitting tones, including rejected width
+and spill violations and the equal-coverage width tie.
+
+**Timing.** The check warms the palette before timing, starts idle mode, waits
+for its full sentence count, and switches serif via `ATLAS_MAP_ART.setSerif(true)`
+without moving the pointer. Every sampled frame must have idle mode on and the
+same nonzero sentence count in both samples. At 4× CPU, both average and p95
+must be at most **1.25× monospace idle**, and each must also clear its **2×
+unthrottled vsync** ceiling. All timings and sentence-count ranges are printed
+before assertions, including on a failed gate.
+
+**Phase 8 fixes — sandbox verification.** Syntax checks on all four changed
+JavaScript files and the synthetic ramp checks passed, including a no-canvas
+engine returning an unusable zero-rung palette. `pnpm validate` passed dataset
+validation but skipped browser text checks; `pnpm build` generated all 40 pages.
+`node scripts/checks/run-map-art.mjs` and `pnpm smoke` both failed at Chromium
+startup (`Target page, context or browser has been closed`). No browser check
+passed in this sandbox, and the production ramp length and all new timing
+numbers are **unavailable**. The pnpm scripts used
+`--config.verifyDepsBeforeRun=false` with a local copy of the parent checkout's
+pinned dependencies after the automatic install failed on npm registry DNS.
 
 ## Flags and offline cache
 
@@ -379,19 +415,12 @@ the original branch requires a Git operation outside this sandbox.
 - Extended map checks: painted place/ocean label clearance at 2.5× zoom,
   coincident/antipodal routes, actual geolocation, offline worker/serif reload,
   phone and reduced-motion behavior passed.
-- Serif palette checks (both backends, identical results): 24 rungs from
-  141 usable of 198 candidates, coverage 0.125→0.994 strictly increasing, every
-  rung's advance within the cell, no rung repeating its neighbour; the base
-  canvas font resolves to the serif family, the land glyph multiset differs from
-  the monospace one and the land mask is unchanged across the toggle.
-- Serif + idle at 4× CPU: 27.22 ms average / 33.40 ms p95, against **idle mode
-  in monospace under the same 4× throttle** at 27.78 ms / 33.40 ms; unthrottled
-  baseline 16.67 ms; zero main-thread layout calls. The like-for-like comparison
-  is the roadmap's own bar ("holds frame rate under the same throttle as idle
-  mode"); the unthrottled baseline is vsync-capped at ~16.7 ms, so twice it is
-  really "30 fps at 4× CPU" — a line monospace idle mode itself sits on, which
-  made that bound a coin flip rather than a measurement of the serif ink. It is
-  retained as an alternative, not as the sole gate.
+- The original serif palette counts and glyph string are superseded by the
+  Phase 8 measurement-parity fixes above; they used rounded, unscaled cells.
+- The original serif timing comparison (27.22 ms average / 33.40 ms p95 versus
+  idle 27.78 ms / 33.40 ms, baseline 16.67 ms) is **invalid**: clicking the toggle
+  moved the pointer and ended idle mode. It is not evidence for the new 1.25×
+  average/p95 gates or the additional 2× vsync ceilings.
 - Serif toggle persistence: on after an offline reload, off again after being
   turned off and reloaded, with the palette rebuilt from the cached worker
   modules and no network.

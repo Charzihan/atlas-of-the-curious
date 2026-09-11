@@ -5,8 +5,8 @@ import { MAP_STORY_TYPE } from './text.js';
 
 // ---- Phase 8 helpers: glyph ink, and the land's distance-to-coast field -----
 // Printable ASCII, the printable half of Latin-1, and the typographic marks a
-// WGL4 face such as Georgia also carries. Nothing here should need a fallback
-// font; anything that does is detected and dropped when the palette is built.
+// WGL4 face such as Georgia commonly carries. The browser may substitute faces
+// or individual glyphs; the notdef heuristic below cannot detect that fallback.
 const PALETTE_CANDIDATES = (function () {
   let s = '';
   for (let c = 0x21; c <= 0x7e; c++) s += String.fromCharCode(c);
@@ -14,9 +14,10 @@ const PALETTE_CANDIDATES = (function () {
   s += '†‡•≈∞œŒ–—‰';
   return Array.from(new Set(Array.from(s)));
 })();
-// An unassigned private-use code point: whatever this measures as is notdef.
+// A private-use probe for likely notdef boxes, not a font-availability test.
 const TOFU_PROBE = '\ue000';
-const PALETTE_LEVELS = 24;
+const PALETTE_LEVELS = 24, MIN_PALETTE_LEVELS = 6;
+const MAX_SPILL = 0.06;
 // How much a glyph is penalised for being narrower than the cell it fills.
 const NARROW_WEIGHT = 0.4;
 // Coastlines take the darkest land tone; the interior fades to INTERIOR_TONE
@@ -26,50 +27,82 @@ const COAST_REACH = 5, INTERIOR_TONE = 0.3;
 // The worker has OffscreenCanvas; the synchronous fallback host has a document.
 function inkContext(w, h) {
   try {
-    if (typeof OffscreenCanvas !== 'undefined') return new OffscreenCanvas(w, h).getContext('2d', { willReadFrequently: true });
     if (typeof document !== 'undefined') {
       const canvas = document.createElement('canvas');
       canvas.width = w; canvas.height = h;
-      return canvas.getContext('2d', { willReadFrequently: true });
+      return { ctx: canvas.getContext('2d', { willReadFrequently: true }), host: 'dom' };
     }
+    if (typeof OffscreenCanvas !== 'undefined') return { ctx: new OffscreenCanvas(w, h).getContext('2d', { willReadFrequently: true }), host: 'offscreen' };
   } catch (e) { /* measured tone is unavailable; the caller falls back */ }
   return null;
 }
 
 // Ink coverage per glyph, counted inside one cell drawn exactly the way
-// js/map.js draws it (left aligned, middle baseline). `spill` is the fraction of
-// a glyph's ink that lands outside its own cell.
-function measureGlyphs(font, charW, lineH, glyphs, advance) {
-  const cellW = Math.max(1, Math.round(charW)), cellH = Math.max(1, Math.round(lineH));
-  const padX = cellW + 2, padY = cellH + 2;
-  const w = cellW + padX * 2, h = cellH + padY * 2;
-  const ctx = inkContext(w, h);
-  // No canvas at all: ordinal tone, so the palette still answers. Nothing in a
-  // browser takes this path.
-  if (!ctx) return glyphs.map((glyph, i) => ({ glyph, width: advance(glyph), coverage: i / Math.max(1, glyphs.length - 1), spill: 0, measured: false }));
+// js/map.js draws it: centred by advance, middle baseline, fractional CSS cells
+// and DPR scaling. The reference is cell (0, 0), before the sea's ripple lift;
+// integer device-pixel padding preserves that cell's subpixel raster phase.
+// Fractional edge pixels contribute in proportion to their overlap with the
+// cell. `spill` counts ink outside any edge, not only the neighbouring rows.
+function measureGlyphs(font, charW, lineH, dpr, glyphs, advance) {
+  const cellW = charW * dpr, cellH = lineH * dpr;
+  const pad = Math.ceil(Math.max(charW, lineH, parseFloat(font)) * dpr) + 2;
+  const w = Math.ceil(cellW) + pad * 2, h = Math.ceil(cellH) + pad * 2;
+  const probe = inkContext(w, h), ctx = probe && probe.ctx;
+  if (!ctx) return { glyphs: [], host: 'unavailable', measured: false };
+  ctx.scale(dpr, dpr);
   ctx.font = font;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = '#fff';
-  return glyphs.map(glyph => {
-    ctx.clearRect(0, 0, w, h);
-    ctx.fillText(glyph, padX, padY + cellH / 2);
-    const data = ctx.getImageData(0, 0, w, h).data;
-    let inside = 0, outside = 0;
-    for (let y = 0; y < h; y++) {
-      const row = y >= padY && y < padY + cellH;
-      for (let x = 0; x < w; x++) {
-        const alpha = data[(y * w + x) * 4 + 3];
-        if (!alpha) continue;
-        if (row && x >= padX && x < padX + cellW) inside += alpha; else outside += alpha;
+  try {
+    const measured = glyphs.map(glyph => {
+      const width = advance(glyph);
+      ctx.clearRect(0, 0, w / dpr, h / dpr);
+      ctx.fillText(glyph, pad / dpr + (charW - width) / 2, pad / dpr + lineH / 2);
+      const data = ctx.getImageData(0, 0, w, h).data;
+      let inside = 0, outside = 0;
+      for (let y = 0; y < h; y++) {
+        const row = Math.max(0, Math.min(y + 1, pad + cellH) - Math.max(y, pad));
+        for (let x = 0; x < w; x++) {
+          const alpha = data[(y * w + x) * 4 + 3];
+          if (!alpha) continue;
+          const share = row * Math.max(0, Math.min(x + 1, pad + cellW) - Math.max(x, pad));
+          inside += alpha * share; outside += alpha * (1 - share);
+        }
       }
-    }
-    return {
-      glyph, width: advance(glyph), measured: true,
-      coverage: inside / (cellW * cellH * 255),
-      spill: outside / (inside + outside || 1)
-    };
-  });
+      return {
+        glyph, width,
+        coverage: inside / (cellW * cellH * 255),
+        spill: outside / (inside + outside || 1)
+      };
+    });
+    return { glyphs: measured, host: probe.host, measured: true };
+  } catch (e) { return { glyphs: [], host: probe.host, measured: false }; }
+}
+
+// Fixed fit limits: fewer distinct coverages produce a shorter ramp. Exported
+// so acceptance checks can exercise sparse palettes without relying on a font.
+export function buildInkRamp(glyphs, charW) {
+  const fitting = glyphs.filter(g => g.width > 0.05 && g.width <= charW && g.spill <= MAX_SPILL && g.coverage > 0);
+  const lo = fitting.reduce((m, g) => Math.min(m, g.coverage), Infinity);
+  const span = fitting.reduce((m, g) => Math.max(m, g.coverage), -Infinity) - lo || 1;
+  const scaled = fitting
+    .map(g => ({ ...g, inkCoverage: g.coverage, coverage: (g.coverage - lo) / span }))
+    .sort((a, b) => a.coverage - b.coverage || b.width - a.width || (a.glyph < b.glyph ? -1 : 1));
+  // Equal coverage keeps the widest fitting glyph, matching the width score.
+  const sorted = scaled.filter((g, i) => i === 0 || g.coverage > scaled[i - 1].coverage);
+  const levels = Math.min(PALETTE_LEVELS, sorted.length), ramp = [];
+  let from = 0;
+  for (let level = 0; level < levels; level++) {
+    const target = levels > 1 ? level / (levels - 1) : 0;
+    const score = g => Math.abs(g.coverage - target) + NARROW_WEIGHT * Math.max(0, (charW - g.width) / charW);
+    const until = sorted.length - (levels - 1 - level);
+    let at = from;
+    for (let i = from + 1; i < until; i++) if (score(sorted[i]) < score(sorted[at])) at = i;
+    ramp.push(sorted[at]);
+    from = at + 1;
+  }
+  return { ramp, fitting: sorted.length, usable: levels >= MIN_PALETTE_LEVELS };
 }
 
 // Distance to the nearest coast, in cells: a multi-source breadth-first search
@@ -412,60 +445,31 @@ export function createMapArtEngine() {
   // Built once per geometry and font and cached here; never called from a frame.
   function palette(req) {
     const font = req.size + 'px ' + req.family;
-    const key = ['palette', font, req.charW, req.lineH, req.cols, req.rows].join('\n');
+    const dpr = req.dpr || 1;
+    const key = ['palette', font, req.charW, req.lineH, dpr, req.cols, req.rows].join('\n');
     const hit = cache.get(key);
     if (hit) return hit;
     const advance = glyph => prepare(glyph, font).widths.reduce((a, b) => a + b, 0);
-    const all = measureGlyphs(font, req.charW, req.lineH, PALETTE_CANDIDATES.concat([TOFU_PROBE]), advance);
-    // A glyph the resolved face does not have renders as the same notdef box as
-    // an unassigned private-use code point. Those are dropped rather than
-    // painted: the atlas must be set in one face, not in whatever the browser
-    // would substitute for a missing mark.
-    const probe = all[all.length - 1];
+    const measurement = measureGlyphs(font, req.charW, req.lineH, dpr, PALETTE_CANDIDATES.concat([TOFU_PROBE]), advance);
+    // This only rejects likely notdef boxes: a real fallback glyph can differ
+    // from U+E000, and a real supported glyph can resemble it. Canvas does not
+    // identify the face supplying each glyph. We measure the resolved stack,
+    // including substitutions, and make no claim that all ink uses one face.
+    const all = measurement.glyphs, probe = all[all.length - 1];
     let list = all.slice(0, -1);
-    if (probe.measured && probe.coverage > 0) {
+    if (probe && probe.coverage > 0) {
       list = list.filter(g => !(Math.abs(g.width - probe.width) < 0.01 && Math.abs(g.coverage - probe.coverage) < 0.002));
     }
-    // Narrower than the cell is fine — it gets centred. Wider would push the
-    // ink out of step with the markers, and a glyph whose ink escapes its own
-    // cell would smear into the row above or below.
-    const fits = (allowance, spill) => list.filter(g => g.width > 0.05 && g.width <= req.charW * allowance + 0.25 && g.spill <= spill);
-    let usable = fits(1, 0.06);
-    if (usable.length < PALETTE_LEVELS) usable = fits(1, 0.14);
-    if (usable.length < PALETTE_LEVELS) usable = fits(1.15, 0.2);
-    if (usable.length < PALETTE_LEVELS) usable = list.slice();
-    // Coverage is normalised over the glyphs that can actually be used, so tone
-    // 0 and tone 1 are this cell's real lightest and darkest ink rather than a
-    // range the ramp would saturate in.
-    const lo = usable.reduce((m, g) => Math.min(m, g.coverage), Infinity);
-    const span = usable.reduce((m, g) => Math.max(m, g.coverage), -Infinity) - lo || 1;
-    const scaled = usable
-      .map(g => ({ glyph: g.glyph, width: g.width, coverage: (g.coverage - lo) / span }))
-      .sort((a, b) => a.coverage - b.coverage || a.width - b.width || (a.glyph < b.glyph ? -1 : 1));
-    // Two glyphs that measure to the same ink are one rung, not two.
-    const sorted = scaled.filter((g, i) => i === 0 || g.coverage > scaled[i - 1].coverage);
-    // One pass per level, left to right: each level takes the best-scoring glyph
-    // that is darker than the level below it, and leaves one glyph behind for
-    // every level still to come. The ramp is therefore strictly increasing in
-    // measured coverage, and no level has to repeat its neighbour's glyph.
-    const ramp = [];
-    let from = 0;
-    for (let level = 0; level < PALETTE_LEVELS; level++) {
-      const target = level / (PALETTE_LEVELS - 1);
-      const score = g => Math.abs(g.coverage - target) + NARROW_WEIGHT * Math.max(0, (req.charW - g.width) / req.charW);
-      const until = Math.max(from + 1, Math.min(sorted.length, sorted.length - (PALETTE_LEVELS - 1 - level)));
-      let at = Math.min(from, sorted.length - 1);
-      for (let i = at; i < until && i < sorted.length; i++) if (score(sorted[i]) < score(sorted[at])) at = i;
-      const best = sorted[at];
-      ramp.push({ glyph: best.glyph, coverage: best.coverage, width: best.width });
-      from = at + 1;
-    }
+    const { ramp, fitting, usable } = buildInkRamp(list, req.charW);
+    const levels = ramp.length;
     const out = {
-      font, family: req.family, size: req.size, charW: req.charW, lineH: req.lineH,
-      levels: PALETTE_LEVELS, measured: probe.measured,
-      candidates: list.length, usable: sorted.length,
+      font, family: req.family, size: req.size, charW: req.charW, lineH: req.lineH, dpr,
+      levels, measured: measurement.measured, canvas: measurement.host,
+      candidates: list.length, fitting, usable,
+      reason: usable ? '' : !measurement.measured ? 'Serif map unavailable: canvas ink measurement failed.'
+        : 'Serif map unavailable: fewer than ' + MIN_PALETTE_LEVELS + ' distinct tones fit this cell within the 6% ink spill limit.',
       coast: { reach: COAST_REACH, interior: INTERIOR_TONE },
-      ramp, landLevel: landTones(req, PALETTE_LEVELS)
+      ramp, landLevel: usable ? landTones(req, levels) : null
     };
     cache.set(key, out);
     return out;

@@ -8,12 +8,16 @@ export async function runMapArtExtraChecks(browser, origin) {
   page.on('pageerror', e => errors.push(e.message));
   page.on('console', m => { if (m.type() === 'error' && !m.text().includes('frame-ancestors')) errors.push(m.text()); });
   const frames = () => new Promise(resolve => {
-    const samples = []; let last;
+    const samples = [], sentences = [], idleOn = []; let last;
     const tick = t => {
-      if (last) samples.push(t - last);
+      if (last) {
+        samples.push(t - last);
+        const state = window.ATLAS_MAP_DEBUG.idleState();
+        sentences.push(state.sentences); idleOn.push(state.on);
+      }
       last = t;
       if (samples.length < 120) requestAnimationFrame(tick);
-      else resolve({ avg: samples.reduce((a, b) => a + b, 0) / samples.length, p95: samples.sort((a, b) => a - b)[114], layouts: window.ATLAS_MAP_DEBUG.mainThreadLayoutCalls() });
+      else resolve({ avg: samples.reduce((a, b) => a + b, 0) / samples.length, p95: samples.sort((a, b) => a - b)[113], sentences, idleOn, layouts: window.ATLAS_MAP_DEBUG.mainThreadLayoutCalls() });
     }; requestAnimationFrame(tick);
   });
   try {
@@ -22,32 +26,46 @@ export async function runMapArtExtraChecks(browser, origin) {
     await page.waitForTimeout(600);
     await page.evaluate(() => { window.ATLAS_MAP_ART.clear(); window.ATLAS_MAP_DEBUG.resetCounters(); });
     const baseline = await page.evaluate(frames);
+    // Prepare both modes before sampling so palette construction is outside
+    // the frame timings and cannot age the sentences between the two samples.
+    await page.evaluate(() => window.ATLAS_MAP_ART.setSerif(true));
+    await page.waitForFunction(() => window.ATLAS_MAP_ART.debug().base?.serif);
+    await page.evaluate(() => window.ATLAS_MAP_ART.setSerif(false));
     // The roadmap asks whether the typographic fluid holds frame rate under the
     // same throttle as idle mode, so the comparison is like for like: the same
     // sea, the same drifting sentences, the same 4x CPU, monospace then serif.
-    await page.evaluate(() => window.ATLAS_MAP_DEBUG.startIdle());
-    await page.waitForFunction(() => window.ATLAS_MAP_DEBUG.idleSentences().length > 0);
+    assert(await page.evaluate(() => window.ATLAS_MAP_DEBUG.startIdle()), 'idle mode did not start');
+    await page.waitForFunction(() => {
+      const d = window.ATLAS_MAP_DEBUG.idleState();
+      return d.on && d.alpha === 1 && d.sentences === d.maxSentences;
+    });
+    const sentenceCount = await page.evaluate(() => window.ATLAS_MAP_DEBUG.idleSentences().length);
     const cdp = await context.newCDPSession(page);
     await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
     await page.evaluate(() => window.ATLAS_MAP_DEBUG.resetCounters());
     const idle = await page.evaluate(frames);
-    await page.click('#map-serif');
+    await page.evaluate(() => window.ATLAS_MAP_ART.setSerif(true));
     // The serif ink has to be on the canvas before the frames are timed, not
     // merely requested: wait for the repaint the palette's arrival triggers.
     await page.waitForFunction(() => window.ATLAS_MAP_ART.debug().base?.serif);
     await page.evaluate(() => window.ATLAS_MAP_DEBUG.resetCounters());
     const serif = await page.evaluate(frames);
     await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
+    const counts = sample => `${Math.min(...sample.sentences)}..${Math.max(...sample.sentences)}`;
+    console.log(`serif fluid at 4x CPU: avg ${serif.avg.toFixed(2)}ms, p95 ${serif.p95.toFixed(2)}ms, sentences ${counts(serif)}; idle at 4x CPU: avg ${idle.avg.toFixed(2)}ms, p95 ${idle.p95.toFixed(2)}ms, sentences ${counts(idle)}; unthrottled vsync: avg ${baseline.avg.toFixed(2)}ms, p95 ${baseline.p95.toFixed(2)}ms; main-thread layouts ${serif.layouts}`);
+    assert(sentenceCount > 0, 'no sentences adrift');
+    for (const [name, sample] of [['idle', idle], ['serif', serif]]) {
+      assert(sample.idleOn.every(Boolean), `${name} sample ended idle mode`);
+      assert(sample.sentences.every(n => n === sentenceCount), `${name} workload changed: ${counts(sample)} sentences, expected ${sentenceCount}`);
+    }
     assert.equal(serif.layouts, 0, 'serif fluid performed main-thread layout');
     assert.equal(idle.layouts, 0, 'idle mode performed main-thread layout');
-    // "Holds frame rate under the same throttle as idle mode" is the roadmap's
-    // bar, and it is the one that means something here: the unthrottled
-    // baseline is vsync-capped at ~16.7ms, so twice it is really "30fps at 4x
-    // CPU" — a line monospace idle mode itself sits on. Serif must not be worse
-    // than idle mode under the same throttle; clearing the old absolute bound
-    // as well is welcome but not required of it.
-    assert(serif.avg < Math.max(idle.avg * 1.35, baseline.avg * 2), `serif fluid ${serif.avg.toFixed(2)}ms is more than 1.35x idle mode ${idle.avg.toFixed(2)}ms at the same 4x throttle`);
-    console.log(`serif fluid at 4x CPU: avg ${serif.avg.toFixed(2)}ms, p95 ${serif.p95.toFixed(2)}ms; idle mode at the same 4x CPU: avg ${idle.avg.toFixed(2)}ms, p95 ${idle.p95.toFixed(2)}ms; unthrottled baseline ${baseline.avg.toFixed(2)}ms; main-thread layouts ${serif.layouts}`);
+    // Both the relative idle comparison and the absolute 2x vsync ceiling
+    // must pass, for the average and the tail of the frame distribution.
+    for (const metric of ['avg', 'p95']) {
+      assert(serif[metric] <= idle[metric] * 1.25, `serif ${metric} ${serif[metric].toFixed(2)}ms exceeds 1.25x idle ${idle[metric].toFixed(2)}ms`);
+      assert(serif[metric] <= baseline[metric] * 2, `serif ${metric} ${serif[metric].toFixed(2)}ms exceeds 2x vsync ${baseline[metric].toFixed(2)}ms`);
+    }
     await mkdir('docs/screenshots', { recursive: true });
     await page.screenshot({ path: 'docs/screenshots/phase8-serif.png' });
     // The same serif atlas close up, where the glyphs are legible as type.
@@ -97,8 +115,8 @@ export async function runMapArtExtraChecks(browser, origin) {
     await page.waitForFunction(() => window.ATLAS_MAP_DEBUG?.workerActive());
     // Serif mode was on before the reload, so it is on after it — and the
     // palette is rebuilt from the cached worker modules with no network at all.
-    assert.equal(await page.getAttribute('#map-serif', 'aria-pressed'), 'true', 'serif mode did not persist across a reload');
     await page.waitForFunction(() => window.ATLAS_MAP_ART.debug().base?.serif);
+    assert.equal(await page.getAttribute('#map-serif', 'aria-pressed'), 'true', 'serif mode did not persist across a reload');
     await page.click('#map-serif');
     assert.equal(await page.getAttribute('#map-serif', 'aria-pressed'), 'false');
     await page.reload();

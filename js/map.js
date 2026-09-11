@@ -98,7 +98,7 @@ import { createMapArtEngine, COUNTRY_MARKER } from "./map-art.js";
   const WAVE_GAMMA = 1.9;          // >1 → quiet floor, thin bright crests
   // The same, for the serif sea's ink: the monospace sea has six glyphs and
   // gets most of its contrast from colour, so mapping density straight onto a
-  // 24-rung measured ramp would make quiet water far heavier than it is now.
+  // measured ramp would make quiet water far heavier than it is now.
   const SERIF_SEA_GAMMA = 1.6;
   // Clouds are withheld from Antarctica (it is already white ice): the fade
   // ramps 1 → 0 over the last few rows so a cloud dissolves into the ice.
@@ -1463,7 +1463,7 @@ import { createMapArtEngine, COUNTRY_MARKER } from "./map-art.js";
   const serifFamily = readMapStoryFamily(document);
   let artPinned = false;
   let artSeq = 0, artResult = null, artRequest = null, artCanvas = null, artInset = null;
-  let serifMode = false, serifPalette = null, repaintBase = null, baseInk = null;
+  let serifMode = false, serifRequested = false, serifPalette = null, repaintBase = null, baseInk = null;
   const artLatest = { country: 0, route: 0, palette: 0 };
   function artGeometry() {
     return { cols: COLS, rows: ROWS, charW: CHARW, lineH: LINEH, family: serifFamily };
@@ -1572,10 +1572,10 @@ import { createMapArtEngine, COUNTRY_MARKER } from "./map-art.js";
   // The palette carries the land mask with it: the distance-to-coast field that
   // gives each land cell its tone is part of the same once-per-geometry answer.
   function askPalette() {
-    askArt('palette', { ...artGeometry(), size: PX, land: kind, color: cellColor });
+    askArt('palette', { ...artGeometry(), size: PX, dpr: DPR, land: kind, color: cellColor });
   }
-  // Measured coverage 0..1 → the nearest rung of the measured ramp. A lookup and
-  // a rounding, which is all the sea can afford per cell per frame.
+  // Normalised target tone 0..1 → a rounded ramp index. Rungs are scored for
+  // coverage and width, so this is not a nearest-measured-coverage search.
   function inkFor(p, tone) {
     const last = p.ramp.length - 1;
     return p.ramp[Math.max(0, Math.min(last, Math.round(tone * last)))];
@@ -1603,7 +1603,7 @@ import { createMapArtEngine, COUNTRY_MARKER } from "./map-art.js";
     if (m.build !== buildSeq || m.seq !== artLatest[m.action]) return;
     if (m.action === 'palette') {
       serifPalette = m.result;
-      if (repaintBase) repaintBase();
+      syncSerif();
       return;
     }
     if (!artRequest || artRequest.action !== m.action) return;
@@ -1706,12 +1706,21 @@ import { createMapArtEngine, COUNTRY_MARKER } from "./map-art.js";
     artRequest = null; artResult = null; paintArt();
     for (const id of ['map-story-status', 'map-route-note', 'map-story-copy', 'map-art-clear']) if ($(id)) $(id).hidden = true;
   }
-  function setSerif(on) {
-    serifMode = !!on && FLAGS.serifAtlas !== false;
-    $('map-serif')?.setAttribute('aria-pressed', String(serifMode));
-    if (FLAGS.serifAtlas !== false) writeSerifPref(serifMode);
-    if (serifMode && !serifPalette) askPalette();
+  function syncSerif() {
+    serifMode = serifRequested && !!(serifPalette && serifPalette.usable);
+    const toggle = $('map-serif');
+    if (toggle) {
+      toggle.setAttribute('aria-pressed', String(serifMode));
+      toggle.disabled = !!serifPalette && !serifPalette.usable;
+      toggle.title = toggle.disabled ? serifPalette.reason : '';
+    }
     if (repaintBase) repaintBase();
+  }
+  function setSerif(on) {
+    serifRequested = !!on && FLAGS.serifAtlas !== false;
+    if (FLAGS.serifAtlas !== false) writeSerifPref(serifRequested);
+    if (serifRequested && !serifPalette) askPalette();
+    syncSerif();
     return serifMode;
   }
   window.ATLAS_MAP_ART = {
@@ -1722,14 +1731,14 @@ import { createMapArtEngine, COUNTRY_MARKER } from "./map-art.js";
       // behind it, not another copy of the grid.
       palette: serifPalette && {
         font: serifPalette.font, family: serifPalette.family, size: serifPalette.size,
-        charW: serifPalette.charW, levels: serifPalette.levels, measured: serifPalette.measured,
-        candidates: serifPalette.candidates, usable: serifPalette.usable,
+        charW: serifPalette.charW, lineH: serifPalette.lineH, dpr: serifPalette.dpr,
+        levels: serifPalette.levels, measured: serifPalette.measured, canvas: serifPalette.canvas,
+        candidates: serifPalette.candidates, fitting: serifPalette.fitting, usable: serifPalette.usable, reason: serifPalette.reason,
         coast: serifPalette.coast, ramp: serifPalette.ramp,
         cells: serifPalette.landLevel ? serifPalette.landLevel.length : 0
       },
-      // What the base canvas last actually painted: its resolved font string and
-      // the multiset of land glyphs. Phase 8's own check reads this rather than
-      // diffing pixels.
+      // What the base canvas last painted: its font string, land glyph multiset
+      // and cell positions. The font string does not identify substituted faces.
       base: baseInk,
       geometry: artGeometry(), countries: MAP.countries, panels: artPanels()
     })
@@ -1863,6 +1872,7 @@ import { createMapArtEngine, COUNTRY_MARKER } from "./map-art.js";
     mapH = ROWS * LINEH;
     const FONT = PX + "px " + MONO;
     serifPalette = null;
+    serifMode = false;
     view = { zoom: 1 };
     panX = 0; panY = 0;
     vpW = viewport.clientWidth || mapW;
@@ -1943,16 +1953,17 @@ import { createMapArtEngine, COUNTRY_MARKER } from "./map-art.js";
     bctx.scale(DPR, DPR);
     repaintBase = function () {
     bctx.clearRect(0, 0, mapW, mapH);
-    const palette = serifMode && serifPalette;
-    // The palette's tone field is sized for the geometry it was built for; a
-    // stale one paints nothing rather than the wrong cells.
-    const landLevel = palette && palette.landLevel && palette.landLevel.length === COLS * ROWS
-      ? palette.landLevel : null;
+    // A stale or unusable palette falls back to the monospace font and glyphs.
+    const palette = serifMode && serifPalette && serifPalette.usable && serifPalette.landLevel
+      && serifPalette.landLevel.length === COLS * ROWS && serifPalette.charW === CHARW
+      && serifPalette.lineH === LINEH && serifPalette.dpr === DPR ? serifPalette : null;
+    const landLevel = palette && palette.landLevel;
     bctx.font = palette ? palette.font : FONT;
     bctx.textBaseline = "middle";
     bctx.textAlign = "left";
     // The multiset of land glyphs actually painted, for the phase 8 check.
     const tally = {};
+    const landPositions = [];
     let landCells = 0;
     for (let r = 0; r < ROWS; r++) {
       const rowBase = r * COLS;
@@ -1968,6 +1979,7 @@ import { createMapArtEngine, COUNTRY_MARKER } from "./map-art.js";
           const glyph = ink ? ink.glyph : String.fromCharCode(cellGlyph[i]);
           tally[glyph] = (tally[glyph] || 0) + 1;
           landCells++;
+          landPositions.push([x, y]);
           bctx.fillText(glyph, x + (ink ? (CHARW - ink.width) / 2 : 0), y);
         } else {
           bctx.fillStyle = "rgba(80, 130, 170, 0.10)";
@@ -1980,11 +1992,11 @@ import { createMapArtEngine, COUNTRY_MARKER } from "./map-art.js";
         }
       }
     }
-    baseInk = { font: bctx.font, serif: !!palette, land: tally, landCells: landCells };
+    baseInk = { font: bctx.font, serif: !!palette, land: tally, landCells: landCells, landPositions: landPositions };
 
     };
-    repaintBase();
-    if (serifMode) askPalette();
+    syncSerif();
+    if (serifRequested) askPalette();
 
     const sea = document.createElement("canvas");
     sea.width = Math.round(mapW * DPR);
@@ -2942,7 +2954,7 @@ import { createMapArtEngine, COUNTRY_MARKER } from "./map-art.js";
       }
 
       sctx.clearRect(0, 0, mapW, mapH);
-      const inkPalette = serifMode && serifPalette;
+      const inkPalette = serifMode && serifPalette && serifPalette.usable ? serifPalette : null;
       sctx.font = inkPalette ? inkPalette.font : FONT;
       const N = waterLen;
       for (let w = 0; w < N; w++) {
@@ -3101,7 +3113,7 @@ import { createMapArtEngine, COUNTRY_MARKER } from "./map-art.js";
     // owned by app.js (it runs geolocation); map.js only reacts to its events.
     if ($("map-serif")) {
       $("map-serif").hidden = FLAGS.serifAtlas === false;
-      $("map-serif").addEventListener("click", () => setSerif(!serifMode));
+      $("map-serif").addEventListener("click", () => setSerif(!serifRequested));
       // A visitor who chose the serif atlas last time gets it back. build() has
       // already run, so this only costs the palette and one repaint.
       if (readSerifPref()) setSerif(true);
