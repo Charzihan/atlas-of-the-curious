@@ -20,6 +20,7 @@ const CORE = [
   "/js/text-route.js",
   "/js/labels.js",
   "/js/sea.js",
+  "/js/clouds.js",
   "/js/map-art.js",
   "/js/text-worker.js",
   "/js/justify.js",

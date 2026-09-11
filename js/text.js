@@ -789,6 +789,8 @@ export const DEFAULT_FLAGS = {
   worker: true, seaStories: true, idleSea: true, seaClick: true,
   // Phases 7–8 — shapes, routes, and proportional map ink.
   countryStories: true, routeText: true, serifAtlas: true,
+  asciiClouds: true,    // the sky is drawn in the map's own alphabet (js/clouds.js);
+                        // off restores the blurred radial-gradient blobs
   // Phase 6 — ways to read.
   bookMode: true,       // "Read as a book": the paginated field guide
   notebook: true        // the visitor's notebook in the dialog and the reader

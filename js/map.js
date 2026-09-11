@@ -28,6 +28,7 @@ import {
 } from "./labels.js";
 import { createSeaEngine, IDLE_MAX_SENTENCES } from "./sea.js";
 import { createMapArtEngine, COUNTRY_MARKER } from "./map-art.js";
+import { generateCloud, generateCloudSet } from "./clouds.js";
 
 (function () {
   "use strict";
@@ -2025,84 +2026,331 @@ import { createMapArtEngine, COUNTRY_MARKER } from "./map-art.js";
     artResult = null;
 
     // ---- Cloud layer --------------------------------------------------------
-    // A handful of drifting white clouds crossing the map (land and sea).
-    // Each cloud is a cluster of 3..5 independently wobbling, slowly rotating
-    // sub-puffs, so the silhouette morphs continuously (less blocky than a
-    // single stamped sprite). Each cloud fades out near the pole — the
-    // Antarctica rows are already white ice, so the fade makes the white
-    // dissolve into the white instead of reading as an opaque band. The
-    // canvas sits above the sea and below the markers so a dot stays visible
-    // when a cloud passes.
+    /* Clouds, drawn in the map's own alphabet. js/clouds.js generates each one
+       as a little ASCII drawing — a closed outline of `.` `-` `_` `(` `)` `~`
+       `,` `'` and a backtick on whole grid cells, blank inside —
+
+               .--.
+            .-(    ).
+           (__________)
+
+       and the soft white radial-gradient sprite is poured into the blank
+       interior through the silhouette itself, so a cloud still reads as a
+       fluffy white mass that happens to be wearing a drawn outline. Nothing is stamped: the
+       shapes are generated per visit and no two in the sky are the same, and
+       every few seconds one of them re-frays its outline from its own seed and
+       cross-fades into the new one, so the sky is never the same twice.
+
+       The drawing is snapped to whole cells, rows and columns both. That is the
+       whole point of drawing the sky in type — an outline half a cell off the
+       grid reads as a misprint against the land glyphs beside it — so the drift
+       advances a column at a time (one step every second or so at this speed,
+       unsynchronised between clouds) while the soft fill inside keeps sliding
+       smoothly with the sub-cell remainder. The mass churns continuously; the
+       outline walks the grid.
+
+       Clouds cross the whole map now, Antarctica included: an ASCII outline
+       reads over the ice where a white blob did not, so the old Antarctic fade
+       is gone from this path (`cloudFade` still governs the blob path below).
+       Over the pale polar rows the ink turns slate blue and the fill turns
+       faintly blue, because soft white on white ice is nothing at all.
+
+       `?noflags=asciiClouds` restores the blurred-blob clouds below, unchanged.
+
+       The canvas sits above the sea and below the markers so a dot stays visible
+       when a cloud passes, and it keeps its own monospace font for good: the
+       serif toggle repaints the land and the sea, never the sky. These are
+       drawings, not map ink. */
+    const ASCII_CLOUDS = FLAGS.asciiClouds !== false;
     const cloudsEl = document.createElement("canvas");
-    cloudsEl.width = Math.round(mapW);   // 1x is plenty for soft blobs
-    cloudsEl.height = Math.round(mapH);
+    // Blurred blobs never needed device pixels; glyphs do.
+    const cloudDPR = ASCII_CLOUDS ? DPR : 1;
+    cloudsEl.width = Math.round(mapW * cloudDPR);
+    cloudsEl.height = Math.round(mapH * cloudDPR);
     cloudsEl.className = "map-sea";      // reuse the absolute-position style
     cloudsEl.style.width = mapW + "px";
     cloudsEl.style.height = mapH + "px";
     zoomEl.appendChild(cloudsEl);
     const cctx = cloudsEl.getContext("2d");
+    if (cloudDPR !== 1) cctx.scale(cloudDPR, cloudDPR);
+    if (ASCII_CLOUDS) {
+      cctx.font = FONT;
+      cctx.textBaseline = "middle";
+      cctx.textAlign = "left";
+    }
 
     const CLOUD_N = isMobile ? 4 : 6;
     // Pre-render several soft, lumpy cloud sprites (random radial-gradient
     // lobes). Several distinct shapes plus per-cloud sub-puff clusters keep
-    // the outline from looking like a repeating blocky blob.
-    function makeCloudSprite() {
+    // the outline from looking like a repeating blocky blob. The ASCII path
+    // fills its outlines from the same sprites, in its own two tints: `stops`
+    // is how it asks for the cooler one it needs over the polar ice.
+    const CLOUD_SOFT_STOPS = [
+      "rgba(248, 251, 254, 0.92)", "rgba(242, 247, 252, 0.42)", "rgba(238, 245, 252, 0)"
+    ];
+    const CLOUD_ICE_STOPS = [
+      "rgba(150, 190, 226, 0.95)", "rgba(130, 174, 214, 0.55)", "rgba(126, 170, 212, 0)"
+    ];
+    // The mass inside an ASCII outline is the same soft white as the blobs, a
+    // shade below the outline's own ink so the drawing stays the brightest
+    // thing on the cloud where the two meet.
+    const CLOUD_ASCII_STOPS = [
+      "rgba(238, 246, 253, 0.92)", "rgba(226, 238, 250, 0.46)", "rgba(222, 236, 250, 0)"
+    ];
+    function makeCloudSprite(stops) {
       const W = 360, H = 200;
       const cv = document.createElement("canvas");
       cv.width = W; cv.height = H;
       const sc = cv.getContext("2d");
+      const ramp = stops || CLOUD_SOFT_STOPS;
       const n = 5 + ((Math.random() * 3) | 0); // 5..7 lobes
       for (let l = 0; l < n; l++) {
         const bx = 0.20 + Math.random() * 0.60;
         const by = 0.26 + Math.random() * 0.48;
         const br = (0.15 + Math.random() * 0.20) * W;
         const g = sc.createRadialGradient(bx * W, by * H, 0, bx * W, by * H, br);
-        g.addColorStop(0, "rgba(248, 251, 254, 0.92)");
-        g.addColorStop(0.45, "rgba(242, 247, 252, 0.42)");
-        g.addColorStop(1, "rgba(238, 245, 252, 0)");
+        g.addColorStop(0, ramp[0]);
+        g.addColorStop(0.45, ramp[1]);
+        g.addColorStop(1, ramp[2]);
         sc.fillStyle = g;
         sc.fillRect(0, 0, W, H);
       }
       return cv;
     }
-    const sprites = [makeCloudSprite(), makeCloudSprite(), makeCloudSprite()];
+    const sprites = ASCII_CLOUDS ? null : [makeCloudSprite(), makeCloudSprite(), makeCloudSprite()];
+    const iceSprite = ASCII_CLOUDS ? makeCloudSprite(CLOUD_ICE_STOPS) : null;
+    const asciiSprites = ASCII_CLOUDS
+      ? [makeCloudSprite(CLOUD_ASCII_STOPS), makeCloudSprite(CLOUD_ASCII_STOPS), makeCloudSprite(CLOUD_ASCII_STOPS)]
+      : null;
+    // The outline ink: a clear white, a shade brighter than the mass it encloses
+    // (which is held below it on purpose — a drawing that matches its own cloud
+    // is not a drawing), and a cool slate over the near-white polar ice, where
+    // white would disappear the other way.
+    const CLOUD_INK = "rgba(255, 255, 255, 0.95)";
+    const CLOUD_INK_ICE = "rgba(60, 100, 142, 0.92)";
+    // Which grid rows are that ice: the rows where the land is drawn in the
+    // palest palette entry. Read off the same per-cell colour the base canvas
+    // paints, so it follows the map rather than a hard-coded latitude.
+    const PALE_COLOR = PALETTE ? PALETTE.length - 1 : 6;
+    const paleRow = new Uint8Array(ROWS);
+    for (let r = 0; r < ROWS; r++) {
+      let pale = 0;
+      for (let c = 0; c < COLS; c++) {
+        const i = r * COLS + c;
+        if (kind[i] && cellColor[i] === PALE_COLOR) pale++;
+      }
+      paleRow[r] = pale > COLS * 0.2 ? 1 : 0;
+    }
+
     const clouds = [];
-    for (let k = 0; k < CLOUD_N; k++) {
-      const wPx = (0.18 + Math.random() * 0.16) * mapW;   // cloud footprint
-      const hPx = wPx * 0.5;
-      const cy = (0.08 + Math.random() * 0.55) * mapH;    // stays clear of the white polar strip
-      const nSub = 3 + ((Math.random() * 3) | 0);         // 3..5 sub-puffs
-      const sub = [];
-      for (let s = 0; s < nSub; s++) {
-        sub.push({
-          spr: (Math.random() * sprites.length) | 0,
-          ox: (Math.random() - 0.5) * 0.9 * wPx,           // rest offset from center
-          oy: (Math.random() - 0.5) * 0.7 * hPx,
-          sw: 0.06 + Math.random() * 0.10,                // wobble speed
-          sa: (0.15 + Math.random() * 0.20) * wPx,        // wobble amplitude (x)
-          sb: (0.10 + Math.random() * 0.18) * hPx,        // wobble amplitude (y)
+    /* How strongly the sprite shows through the outline. Faint over water and
+       land, where the ink is white and the ground is dark; firmer over the ice,
+       where the fill is the only thing darkening a white field. */
+    const CLOUD_FILL = 0.68, CLOUD_FILL_ICE = 0.82;
+    const CLOUD_ASPECT = LINEH / CHARW;
+
+    /* The soft mass that lives inside one outline, rendered once.
+
+       Clipping the sprite straight to the interior cells gives a staircase of
+       hard-edged rectangles — a stack of boxes, not a cloud. So the silhouette
+       is blurred into a mask first and the sprite is poured through it
+       (`source-in`), about half a cell of feather, which is enough to lose the
+       cell edges and to leave the outline glyphs the brightest thing in the
+       drawing. A browser without canvas filters simply gets the crisp version.
+
+       This happens when an outline is generated, never in a frame; the frame
+       does one drawImage. */
+    function renderCloudFill(path, sprite, alpha, wPx, hPx, pad) {
+      const cv = document.createElement("canvas");
+      const w = wPx + pad * 2, h = hPx + pad * 2;
+      cv.width = Math.max(1, Math.round(w * DPR));
+      cv.height = Math.max(1, Math.round(h * DPR));
+      const fx = cv.getContext("2d");
+      fx.scale(DPR, DPR);
+      fx.translate(pad, pad);
+      fx.filter = "blur(" + Math.max(1.5, CHARW * 0.45).toFixed(1) + "px)";
+      fx.fillStyle = "#fff";
+      fx.fill(path);
+      fx.filter = "none";
+      fx.globalCompositeOperation = "source-in";
+      fx.globalAlpha = alpha;
+      // The sprite is drawn well larger than the cloud, so what lands inside is
+      // the soft middle of its gradient and not a solid slab of it.
+      fx.drawImage(sprite, -wPx * 0.11, -hPx * 0.62, wPx * 1.22, hPx * 2.24);
+      return { canvas: cv, w: w, h: h };
+    }
+
+    /* A draw plan for one generated shape, built once per outline and never in
+       a frame: the per-row strings come straight from the generator, the blank
+       interior becomes the fill above (two of them, when a cloud straddles the
+       ice line), and each row gets its ink. `top` is the grid row the drawing
+       starts on; clouds are anchored by their base line, so a morph that gains a
+       row grows upward instead of sliding the base out from under itself. */
+    function planCloud(baseRow, shape) {
+      const top = baseRow - shape.rows + 1;
+      const soft = new Path2D(), ice = new Path2D();
+      let softRuns = 0, iceRuns = 0;
+      for (const run of shape.interior) {
+        const gridRow = top + run[0];
+        const pale = gridRow >= 0 && gridRow < ROWS && paleRow[gridRow];
+        // A third of a cell of bleed on every side: before the feather is even
+        // applied the mass already reaches under the outline glyph's own cell,
+        // so the drawing sits on the cloud rather than beside it.
+        const x = (run[1] - 0.3) * CHARW, w = (run[2] - run[1] + 1.6) * CHARW;
+        const y = (run[0] - 0.22) * LINEH, h = LINEH * 1.7;
+        if (pale) { ice.rect(x, y, w, h); iceRuns++; } else { soft.rect(x, y, w, h); softRuns++; }
+      }
+      const inks = new Array(shape.rows);
+      for (let i = 0; i < shape.rows; i++) {
+        const gridRow = top + i;
+        inks[i] = gridRow >= 0 && gridRow < ROWS && paleRow[gridRow] ? CLOUD_INK_ICE : CLOUD_INK;
+      }
+      const wPx = shape.cols * CHARW, hPx = shape.rows * LINEH;
+      const pad = Math.ceil(CHARW * 2);
+      return {
+        shape: shape, top: top, y: top * LINEH, pad: pad,
+        softRuns: softRuns, iceRuns: iceRuns, inks: inks,
+        fillSoft: softRuns ? renderCloudFill(soft, asciiSprites[(Math.random() * asciiSprites.length) | 0], CLOUD_FILL, wPx, hPx, pad) : null,
+        fillIce: iceRuns ? renderCloudFill(ice, iceSprite, CLOUD_FILL_ICE, wPx, hPx, pad) : null,
+        wPx: wPx, hPx: hPx
+      };
+    }
+
+    if (ASCII_CLOUDS) {
+      // One seed per visit, so the sky is new every time; every shape in the
+      // set is distinct by construction (see generateCloudSet).
+      const sky = (Math.random() * 0x7ffffffe + 1) | 0;
+      const shapes = generateCloudSet(CLOUD_N, { seed: sky, aspect: CLOUD_ASPECT });
+      for (let k = 0; k < CLOUD_N; k++) {
+        const shape = shapes[k];
+        // Anchored by the base line, anywhere down the full height of the map.
+        const baseRow = Math.min(ROWS - 1, shape.rows + ((Math.random() * Math.max(1, ROWS - shape.rows)) | 0));
+        const plan = planCloud(baseRow, shape);
+        clouds.push({
+          seed: shape.seed, morph: 0, baseRow: baseRow,
+          plan: plan, nextPlan: null, blend: 0, timer: 0,
+          x: Math.random() * mapW, wPx: plan.wPx,
+          v: 0.22 + Math.random() * 0.22,                 // px/frame, west→east
           ph: Math.random() * 6.283,
-          size: (0.5 + Math.random() * 0.55) * wPx,       // sub-puff sprite width
-          rs: -0.5 + Math.random(),                        // rad/s slow rotation
-          al: 0.28 + Math.random() * 0.24                 // sub-puff alpha
+          sp: 0.05 + Math.random() * 0.06
         });
       }
-      clouds.push({
-        x: Math.random() * mapW,
-        y: cy, w: wPx, h: hPx,
-        v: 0.22 + Math.random() * 0.22,                   // px/frame, west→east
-        ph: Math.random() * 6.283,
-        sp: 0.05 + Math.random() * 0.06,
-        sub
-      });
+    } else {
+      for (let k = 0; k < CLOUD_N; k++) {
+        const wPx = (0.18 + Math.random() * 0.16) * mapW;   // cloud footprint
+        const hPx = wPx * 0.5;
+        const cy = (0.08 + Math.random() * 0.55) * mapH;    // stays clear of the white polar strip
+        const nSub = 3 + ((Math.random() * 3) | 0);         // 3..5 sub-puffs
+        const sub = [];
+        for (let s = 0; s < nSub; s++) {
+          sub.push({
+            spr: (Math.random() * sprites.length) | 0,
+            ox: (Math.random() - 0.5) * 0.9 * wPx,           // rest offset from center
+            oy: (Math.random() - 0.5) * 0.7 * hPx,
+            sw: 0.06 + Math.random() * 0.10,                // wobble speed
+            sa: (0.15 + Math.random() * 0.20) * wPx,        // wobble amplitude (x)
+            sb: (0.10 + Math.random() * 0.18) * hPx,        // wobble amplitude (y)
+            ph: Math.random() * 6.283,
+            size: (0.5 + Math.random() * 0.55) * wPx,       // sub-puff sprite width
+            rs: -0.5 + Math.random(),                        // rad/s slow rotation
+            al: 0.28 + Math.random() * 0.24                 // sub-puff alpha
+          });
+        }
+        clouds.push({
+          x: Math.random() * mapW,
+          y: cy, w: wPx, h: hPx,
+          v: 0.22 + Math.random() * 0.22,                   // px/frame, west→east
+          ph: Math.random() * 6.283,
+          sp: 0.05 + Math.random() * 0.06,
+          sub
+        });
+      }
+      // Per-cloud Antarctic fade from each sub-puff's rest row.
+      for (const cl of clouds) {
+        let f = 1;
+        for (const s of cl.sub) f = Math.min(f, cloudFade((cl.y + s.oy) / LINEH));
+        cl.fade = f;
+      }
     }
-    // Per-cloud Antarctic fade from each sub-puff's rest row.
-    for (const cl of clouds) {
-      let f = 1;
-      for (const s of cl.sub) f = Math.min(f, cloudFade((cl.y + s.oy) / LINEH));
-      cl.fade = f;
+
+    /* The morph. Regenerating an outline allocates, so it happens on a timer
+       between frames and never inside one: the frame loop only walks the
+       cross-fade it left behind. One cloud re-frays roughly every nine seconds,
+       staggered per cloud, and a hidden page waits rather than churning. */
+    const MORPH_MS = 1500;
+    function scheduleMorph(cl) {
+      if (REDUCED || !ASCII_CLOUDS) return;
+      const seq = buildSeq;
+      cl.timer = setTimeout(function () {
+        if (seq !== buildSeq) return;                     // a rebuild owns the sky now
+        if (typeof document !== "undefined" && document.hidden) { scheduleMorph(cl); return; }
+        cl.morph++;
+        cl.nextPlan = planCloud(cl.baseRow, generateCloud({
+          seed: cl.seed, morph: cl.morph, aspect: CLOUD_ASPECT
+        }));
+        cl.blend = 0;
+        cl.wPx = Math.max(cl.plan.wPx, cl.nextPlan.wPx);
+      }, 6000 + Math.random() * 7000);
     }
-    function drawClouds(t) {
+    for (const cl of clouds) scheduleMorph(cl);
+
+    // One cloud: the pre-rendered soft mass, then one fillText per row of the
+    // outline on top of it. Numbers only — nothing here allocates.
+    function paintCloudPlan(plan, x, alpha, driftX, wobbleY) {
+      const dx = x - plan.pad + driftX, dy = plan.y - plan.pad + wobbleY;
+      cctx.globalAlpha = alpha;
+      if (plan.fillSoft) cctx.drawImage(plan.fillSoft.canvas, dx, dy, plan.fillSoft.w, plan.fillSoft.h);
+      if (plan.fillIce) cctx.drawImage(plan.fillIce.canvas, dx, dy, plan.fillIce.w, plan.fillIce.h);
+      const lines = plan.shape.lines;
+      let ink = "";
+      for (let i = 0; i < lines.length; i++) {
+        if (!lines[i]) continue;
+        if (plan.inks[i] !== ink) { ink = plan.inks[i]; cctx.fillStyle = ink; }
+        cctx.fillText(lines[i], x, plan.y + (i + 0.5) * LINEH);
+      }
+    }
+
+    let cloudClock = -1, cloudStatic = false;
+    function drawAsciiClouds(t) {
+      // Reduced motion: the drawings are painted once and left alone. They are
+      // pictures on the grid, so a still sky is the honest static form of them.
+      if (REDUCED && cloudStatic) return;
+      const dt = cloudClock < 0 ? 0 : Math.min(0.05, Math.max(0, t - cloudClock));
+      cloudClock = t;
+      cctx.clearRect(0, 0, mapW, mapH);
+      for (const cl of clouds) {
+        if (!REDUCED) {
+          cl.x += cl.v;
+          if (cl.x - cl.wPx > mapW) cl.x = -cl.wPx;        // wrap across the seam
+          if (cl.nextPlan) {
+            cl.blend += dt * 1000 / MORPH_MS;
+            if (cl.blend >= 1) {
+              cl.plan = cl.nextPlan; cl.nextPlan = null;
+              cl.blend = 0; cl.wPx = cl.plan.wPx;
+              scheduleMorph(cl);
+            }
+          }
+        }
+        // Whole columns: the outline has to land on the map's own grid.
+        const x = Math.round(cl.x / CHARW) * CHARW;
+        cl.drawX = x;
+        // ...and the fill keeps the sub-cell remainder, so the mass inside
+        // slides on while the drawing waits for its next column.
+        const driftX = REDUCED ? 0 : (cl.x - x) * 0.6 + 2 * Math.sin(t * cl.sp * 1.7 + cl.ph);
+        const wobbleY = REDUCED ? 0 : 1.6 * Math.sin(t * cl.sp * 2.3 + cl.ph * 1.7);
+        const breath = REDUCED ? 0.86 : 0.72 + 0.28 * Math.sin(t * cl.sp + cl.ph);
+        if (cl.nextPlan) {
+          paintCloudPlan(cl.plan, x, breath * (1 - cl.blend), driftX, wobbleY);
+          paintCloudPlan(cl.nextPlan, x, breath * cl.blend, driftX, wobbleY);
+        } else {
+          paintCloudPlan(cl.plan, x, breath, driftX, wobbleY);
+        }
+      }
+      cctx.globalAlpha = 1;
+      if (REDUCED) cloudStatic = true;
+    }
+
+    function drawBlobClouds(t) {
       cctx.clearRect(0, 0, mapW, mapH);
       if (REDUCED) return; // static page for reduced motion
       for (const cl of clouds) {
@@ -2127,6 +2375,71 @@ import { createMapArtEngine, COUNTRY_MARKER } from "./map-art.js";
       }
       cctx.globalAlpha = 1;
     }
+
+    function drawClouds(t) {
+      if (ASCII_CLOUDS) drawAsciiClouds(t);
+      else drawBlobClouds(t);
+    }
+
+    /* Two levers for scripts/checks/clouds.mjs, which cannot wait nine seconds
+       for a morph or hope that the random sky put a cloud over Antarctica:
+       park a cloud on a given row, and re-fray one now. */
+    window.ATLAS_MAP_DEBUG.cloudTo = function (index, baseRow) {
+      const cl = ASCII_CLOUDS && clouds[index];
+      if (!cl) return null;
+      cl.baseRow = Math.max(cl.plan.shape.rows - 1, Math.min(ROWS - 1, baseRow | 0));
+      cl.plan = planCloud(cl.baseRow, cl.plan.shape);
+      cl.nextPlan = null; cl.blend = 0; cl.wPx = cl.plan.wPx;
+      cl.x = mapW * 0.5;
+      return {
+        baseRow: cl.baseRow, topRow: cl.plan.top,
+        ice: cl.plan.iceRuns > 0, soft: cl.plan.softRuns > 0, inks: cl.plan.inks.slice()
+      };
+    };
+    window.ATLAS_MAP_DEBUG.morphCloud = function (index) {
+      const cl = ASCII_CLOUDS && clouds[index];
+      if (!cl) return null;
+      const was = cl.plan.shape.key;
+      cl.morph++;
+      cl.nextPlan = planCloud(cl.baseRow, generateCloud({
+        seed: cl.seed, morph: cl.morph, aspect: CLOUD_ASPECT
+      }));
+      cl.blend = 0;
+      cl.wPx = Math.max(cl.plan.wPx, cl.nextPlan.wPx);
+      return { was: was, to: cl.nextPlan.shape.key, morph: cl.morph, ms: MORPH_MS };
+    };
+
+    /* The sky, for scripts/checks/clouds.mjs: which path is running, what the
+       shapes actually are, and how much ink landed on the canvas. Attached here
+       rather than in the debug object above so this phase stays inside its own
+       section of the file. */
+    window.ATLAS_MAP_DEBUG.clouds = function () {
+      const shapes = clouds.map(function (cl) {
+        return ASCII_CLOUDS ? {
+          seed: cl.seed, morph: cl.morph, source: cl.plan.shape.source,
+          cols: cl.plan.shape.cols, rows: cl.plan.shape.rows,
+          lines: cl.plan.shape.lines.slice(), key: cl.plan.shape.key,
+          baseRow: cl.baseRow, topRow: cl.plan.top,
+          interiorCells: cl.plan.shape.interiorCells,
+          ice: cl.plan.iceRuns > 0, morphing: !!cl.nextPlan,
+          inks: cl.plan.inks.slice(),
+          // Where the drawing was last painted, in cells: a whole number, or
+          // the outline is not on the map's grid.
+          drawCol: cl.drawX === undefined ? null : cl.drawX / CHARW
+        } : { cols: 0, rows: 0, lines: [], key: "", baseRow: 0, drawCol: null };
+      });
+      let ink = 0;
+      try {
+        const px = cctx.getImageData(0, 0, cloudsEl.width, cloudsEl.height).data;
+        for (let i = 3; i < px.length; i += 4) if (px[i] > 8) ink++;
+      } catch (e) { ink = -1; }
+      return {
+        ascii: ASCII_CLOUDS, count: clouds.length, reduced: REDUCED,
+        canvas: { width: cloudsEl.width, height: cloudsEl.height, dpr: cloudDPR, ink: ink },
+        font: cctx.font, cell: { charW: CHARW, lineH: LINEH, rows: ROWS, cols: COLS },
+        paleRows: Array.from(paleRow), shapes: shapes
+      };
+    };
 
     markersEl = document.createElement("div");
     markersEl.className = "map-markers";

@@ -95,6 +95,7 @@ import { startServer, launchChromium, INSTALL_HINT } from "./browser-harness.mjs
 import { runSeaChecks, reportSeaChecks } from "./checks/sea.mjs";
 import { runMapArtChecks } from "./checks/map-art.mjs";
 import { runReaderChecks } from "./checks/reader.mjs";
+import { runCloudChecks } from "./checks/clouds.mjs";
 
 const VIEWPORTS = [
   { name: "desktop", width: 1280, height: 800, heroLines: 2, expand: true },
@@ -1680,6 +1681,7 @@ async function main() {
     await runReaderChecks(browser, server.origin, fail);
     reportSeaChecks(await runSeaChecks(browser, server.origin), fail);
     await runMapArtChecks(browser, server.origin);
+    await runCloudChecks(browser, server.origin, fail);
   } catch (err) {
     console.error(`\nerror: ${err.stack || err.message}`);
     failed = true;

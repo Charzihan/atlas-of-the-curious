@@ -318,6 +318,71 @@ numbers are **unavailable**. The pnpm scripts used
 `--config.verifyDepsBeforeRun=false` with a local copy of the parent checkout's
 pinned dependencies after the automatic install failed on npm registry DNS.
 
+## Phase 8 addendum — The sky in ASCII
+
+The drifting clouds were blurred radial-gradient blobs. They are now drawings in
+the map's own alphabet: a closed outline of `.` `-` `_` `(` `)` `~` `,` `'` and a
+backtick on whole grid cells, with the soft white sprite poured into the blank
+interior.
+
+`js/clouds.js` is the generator, and it is pure — no DOM, no canvas, no
+`Math.random`, so Node and the browser produce byte-identical clouds from the
+same seed. Three stages:
+
+1. **A silhouette.** Either a hand-drawn template (four of them; the classic
+   three-line puff is the first) stretched, mirrored and edge-jittered, or 3..6
+   aspect-corrected ellipse lobes rasterised onto an 8..26 by 2..6 cell grid.
+   Cells are about twice as tall as they are wide, and the raster knows it.
+2. **Closure.** Rows and columns are each collapsed to one run, then every row is
+   nested inside the row below it and made one to three cells narrower. That
+   single rule is what makes the drawing a cloud: the bottom row is the widest
+   and becomes the flat `_` base line, every column runs unbroken down to it, and
+   the silhouette is orthogonally convex — so every interior cell has outline to
+   its left and right on its row and above and below in its column, which is
+   exactly the closure `scripts/checks/clouds.mjs` asserts.
+3. **Tracing.** Boundary cells pick their glyph from the local shape: `.` and `-`
+   along a top edge, `_` along the base, `(` and `)` down the sides and wherever
+   an edge turns into the white interior, `~` for a frayed west edge (the drift
+   runs west to east), `,` `'` and a backtick for the occasional curled corner.
+   `(` and `)` are emitted in pairs around each interior run, so a row can never
+   be off by more than one.
+
+A cloud's identity is its seed; `morph` only re-frays its edges, so every six to
+thirteen seconds a cloud regenerates from the same seed and cross-fades over
+1.5 s into the new outline. Regeneration happens on a timer between frames, never
+inside one, and pauses while the page is hidden. The frame loop allocates
+nothing: it walks a cross-fade, draws one pre-rendered fill per cloud and one
+`fillText` per outline row.
+
+Rendering notes:
+
+- **Snapped to whole cells, columns and rows.** An outline half a column off the
+  grid reads as a misprint next to the land glyphs, so the drift advances a
+  column at a time (about a second per step at this speed, unsynchronised
+  between clouds) and only the soft mass inside keeps the sub-cell remainder, so
+  it slides on while the drawing waits for its next column.
+- **The fill is feathered, not clipped.** Clipping the sprite straight to the
+  interior cells gives a staircase of hard rectangles. Instead the silhouette is
+  blurred into a mask and the sprite poured through it (`source-in`) into a small
+  per-outline canvas; the frame just draws that. A browser without canvas filters
+  gets the crisp version.
+- **No Antarctic fade on this path.** `cloudFade` withheld clouds from the polar
+  rows because a white blob dissolved into white ice. An ASCII outline does not,
+  so clouds now drift over the whole map and their rest rows are spread over its
+  full height. Over the rows the base canvas paints in the palest palette entry
+  the outline switches to slate blue and the fill to a cooler, firmer blue —
+  read off `cellColor`, so it follows the map rather than a hard-coded latitude.
+  `cloudFade` still governs the blob path behind `?noflags=asciiClouds`.
+- **The cloud canvas keeps its own monospace font.** The serif toggle repaints
+  the land and the sea; the sky is a drawing, not map ink.
+- **Reduced motion** paints the sky once and leaves it still. (The blob path
+  painted nothing at all; a still drawing is the honest static form of this one.)
+
+`scripts/checks/clouds.mjs` runs both halves — `node scripts/checks/clouds.mjs`
+for the geometry alone, `node scripts/checks/run-clouds.mjs` for the browser too,
+and `pnpm smoke` for both. Screenshots: `docs/screenshots/clouds-1280.png` and
+`docs/screenshots/clouds-zoom.png`.
+
 ## Flags and offline cache
 
 All default on, except serif rendering is opt-in through its toggle:
@@ -331,12 +396,13 @@ All default on, except serif rendering is opt-in through its toggle:
 | `countryStories` | Country-story layout and dialog button |
 | `routeText` | Route layout and dialog route controls |
 | `serifAtlas` | Serif-map control/rendering |
+| `asciiClouds` | ASCII cloud outlines; restores the blurred sprite blobs |
 
-Example: `/?noflags=worker` or
+Example: `/?noflags=worker`, `/?noflags=asciiClouds`, or
 `/?noflags=countryStories,routeText,serifAtlas`.
 
 `sw.js` uses `atlas-of-the-curious-v3`, invalidating the previous cache-first
-JavaScript cache. Its CORE list includes labels, sea, text-worker and map-art,
+JavaScript cache. Its CORE list includes labels, sea, clouds, text-worker and map-art,
 and retains the reader/notebook modules. The offline check also found that the
 pre-existing CORE list omitted `vendor/pretext/generated/bidi-data.js`; that
 transitive dependency is now precached too. The CORE list covers every direct
