@@ -689,6 +689,82 @@ Screenshots `phase7-story.png`, `phase8-serif.png`, `ocean-wide.png`,
 `ocean-1280.png`, `ocean-serif.png`, `ocean-phone.png` and the new
 `scale-1280.png` were retaken on this grid.
 
+## Cover fit (added after the larger atlas)
+
+The larger atlas raised the grid and lifted the pixel cap, but on a wide window
+the hero's *height* is what binds: `.atlas` is `calc(100vh - 58px - 52px)` and
+`computePX()` fitted the 1.97:1 grid inside it, so at 2000 x 870 the map was
+1393px wide in a 2000px hero. The reader's window is exactly that one.
+
+**What changed.** `computePX()` (js/map.js) now returns the largest cell size
+that fills the hero's width *and* crops no more than `CROP_MAX` — 18% of the
+map's height, 9% a side — of the world grid off the top and bottom. In one line:
+`max(contain, min(cover, byHeight / (1 - CROP_MAX)))`. 9% of 62 rows is 5.6 rows
+(16.2 degrees), so what leaves is the Arctic Ocean above about 74 N and the
+Antarctic ice below about 74 S; the northernmost of the 40 places is at 68.15 N,
+the southernmost at 50.49 S. Past 18% a sixth cropped row starts on Iceland, so
+the ceiling holds the scale rather than the scale breaking the ceiling.
+
+**Note on the brief.** The request asked for the map to be ~2000px wide at
+2000 x 870 *and* for the crop to stay under 18%. Those are incompatible: a full
+cover at 2000px needs a 1013px-tall map in a 707px hero, which is 30% cropped.
+The 18% ceiling was kept — it is the one with a reason behind it — and the fit
+grows to it rather than falling back to contain when it cannot reach a full
+cover. At 2000 x 870 that is 1698px, 85% of the hero and 22% wider than before,
+instead of the no-change a literal "fall back to contain" would have given at
+precisely the size that prompted the work.
+
+Rendered world grid, before → after (hero height in brackets):
+
+| hero | before | after | cropped |
+| --- | --- | --- | --- |
+| 1280 x 800 [637] | 1255 x 636 | 1278 x 648 | 1.9%, 1 row a side |
+| 1600 x 900 [737] | 1452 x 736 | 1598 x 810 | 9.1%, 3 rows |
+| 2000 x 870 [707] | 1393 x 706 | 1698 x 861 | 18.0%, 6 rows |
+| 2000 x 900 [737] | 1452 x 736 | 1770 x 898 | 18.0%, 6 rows |
+| 2560 x 1440 [1277] | 2520 x 1276 | 2558 x 1296 | 1.6%, 1 row |
+| 390 x 844 (phone) | 388 x 198 | unchanged | none |
+
+Phones (below 640px, the existing `isMobile` query) keep contain. There the
+width binds anyway, so the two fits agree to a fraction of a pixel and there was
+nothing to choose between.
+
+**The edits, all localised.** `computePX()`; `build()` records `cropY` (map px
+hidden above the hero) and `cropRows` (whole rows) right after `vpH`; the hover
+card's and the readout's vertical clamps add `cropY`, because the stage and the
+hero are no longer the same box; `placementRequest()` carries `cropRows`;
+`js/labels.js` `place()` claims those rows in the occupancy mask before routing,
+which is what keeps a name out of a strip and drops an ocean name whose only
+home is one (Arctic Ocean at 2000 x 870; Southern Ocean, at row 52, survives).
+`clampPan()`, `applyView()` and `zoomTo()` are unchanged — a pan is already
+clamped to the overhang, and under the cover fit at zoom 1 that overhang *is*
+the cropped strip, so dragging into the poles and "reset view" both work as they
+stand. `js/text-worker.js` forwards `cropRows`. Nothing inside `.map-zoom` moved
+in coordinates.
+
+**Cost.** The sea got slightly cheaper: a larger cell means fewer of them fill
+the same hero, so at 2000 x 900 the extended grid went 334 x 64 → 274 x 62 and
+the painted water 16,183 → 11,795 cells. At 4x CPU with the idle sea running,
+`ocean.mjs` measured avg 16.7ms / median 16.7ms at 1280 x 800 and avg 18.9ms /
+median 18.9ms at 2000 x 900, against a 34.3ms budget; `sea.mjs` 16.7ms at
+1280 x 800; `map-art-extra.mjs` serif fluid 16.8ms.
+
+**Flag and checks.** `coverFit` in `DEFAULT_FLAGS` (js/text.js), default on;
+`?noflags=coverFit` restores contain exactly. `scripts/checks/ocean.mjs` gained
+claim 7, at 2000 x 870: the width against the hero's (within 2%, or held at the
+crop ceiling), the crop against 18%, every marker and painted label inside the
+hero at 1x, no label line in a cropped row at 1x or 2.5x, a real pointer drag
+past the crop clamping at exactly the overhang with no gap, "reset view", and
+the flag. It was negative-tested by disabling the occupancy hook, which made it
+fail on `Arctic Ocean at row 2` and on the painted `ARCTIC OCEAN` sitting at
+y 25 above a hero that starts at y 74. Screenshots `ocean-wide.png` (2000 x 900),
+`cover-2000x870.png` and `cover-1280.png`.
+
+`sw.js` goes to `atlas-of-the-curious-v5`: the CORE list is unchanged, but
+`js/map.js`, `js/labels.js`, `js/text.js` and `js/text-worker.js` are, and
+scripts are served cache-first — a returning visitor would otherwise keep the
+contain fit.
+
 ## Reviewing or continuing
 
 1. Read the roadmap and this handoff, then `git diff` and `git status --short`.

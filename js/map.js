@@ -87,6 +87,15 @@ import {
   // Mobile floor is low so the whole grid fits the content width — at 8px a
   // 96-col grid would be ~770px and get clipped on a phone.
   const PX_MIN = isMobile ? 4 : 8;
+  /* How much of the world grid's height the cover fit may push off-screen, top
+     and bottom together — see computePX(). 18% is 9% a side: 9% of 62 rows is
+     5.6 rows, 16.2 degrees of latitude, so what leaves the hero is the Arctic
+     Ocean above about 74 N and the Antarctic ice below about 74 S. Both are
+     water and ice; the northernmost of the 40 places is at 68.15 N and the
+     southernmost at 50.49 S, so no marker is within six degrees of either
+     strip. Past 18% the crop would start eating inhabited latitudes, which is
+     why it is a ceiling on the scale and not merely a preference. */
+  const CROP_MAX = 0.18;
   // SPRING/DAMP/SPREAD/LIFT tune the interactive ripple field. SPREAD how fast
   // a splash's ring travels outward, DAMP how long it lasts (lower = longer),
   // LIFT how far crests visually bob the glyphs.
@@ -288,6 +297,10 @@ import {
   // The open ocean: the sea fills the whole viewport and flows as currents.
   // Off restores the world-grid-only sea and its three uniform sine trains.
   FLAGS.openOcean = FLAGS.openOcean !== false;
+  // Cover fit: the world grid fills the hero's width and the polar rows run off
+  // the top and bottom. Off restores the contain fit exactly (see computePX()).
+  FLAGS.coverFit = FLAGS.coverFit !== false;
+  const COVER_ON = !isMobile && FLAGS.coverFit;
 
   // Font roles, resolved straight out of the CSS registry so the canvas font
   // pretext measures with is the font the browser paints (see js/text.js).
@@ -633,7 +646,8 @@ import {
 
   // ---- One placement pass -------------------------------------------------
   // The request is plain data — the tier, the zoom, one cell in screen px, the
-  // radius the marker dots keep clear, and which places the filter is showing.
+  // radius the marker dots keep clear, the polar rows the hero is not showing,
+  // and which places the filter is showing.
   function placementRequest() {
     const z = view.zoom;
     const cellW = CHARW * z;                 // one grid cell, in screen px
@@ -644,6 +658,10 @@ import {
       // A dot is a constant 19px on screen, so the number of cells it covers
       // shrinks as you zoom in.
       dotCells: Math.max(0, Math.ceil((MARKER_PX / 2) / cellW) - 1),
+      // The rows the cover fit has pushed off each end of the hero. The engine
+      // occupies them before it routes anything, so no name is placed where
+      // nobody can read it (see computePX() and js/labels.js).
+      cropRows: cropRows,
       oceanOn: OCEAN_ON,
       nativeNames: FLAGS.nativeNames,
       visible: visibleIds ? Array.from(visibleIds) : null
@@ -1469,6 +1487,16 @@ import {
         cells: EXN, waterCells: waterLen, worldCells: COLS * ROWS,
         charW: CHARW, lineH: LINEH, px: PX,
         map: { width: mapW, height: mapH },
+        /* The fit: whether the map is filling the hero's width, and what that
+           costs in cropped polar rows. scripts/checks/ocean.mjs holds the crop
+           to CROP_MAX and the width to the hero's. */
+        fit: {
+          cover: COVER_ON, mode: cropY > 0.5 ? "cover" : "contain",
+          cropMax: CROP_MAX, cropPx: cropY, cropRows: cropRows,
+          cropFraction: mapH > 0 ? Math.max(0, mapH - vpH) / mapH : 0,
+          vpWidth: vpW, vpHeight: vpH,
+          panY: panY, overY: Math.max(0, (mapH * (view ? view.zoom : 1) - vpH) / 2)
+        },
         // The still floor rides on the base canvas; both have to reach the edge.
         sea: rectOf(seaEl), floor: rectOf(baseEl),
         viewport: { left: vp.left, top: vp.top, right: vp.right, bottom: vp.bottom },
@@ -1864,6 +1892,13 @@ import {
   // that we scale about its centre and translate in screen px. The stage itself
   // stays untransformed (just centred) so pointer→map math stays exact.
   let view, panX, panY, zoomEl, vpW = 0, vpH = 0;
+  /* How much of the world grid the hero hides above its top edge — and the same
+     again below its bottom one, because the stage is centred — in map px, and
+     the number of whole grid rows that covers. Both are zero under the contain
+     fit. Set in build(); read by the pan clamp (implicitly, through mapH), the
+     hover card's clamp, the readout's, and the label placer, which is told to
+     treat those rows as already occupied. */
+  let cropY = 0, cropRows = 0;
   const ZOOM_MIN = 1, ZOOM_MAX = 4;
   function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
   // Pointer (stage-local sx,sy) → map-local px,py under the current view.
@@ -1880,6 +1915,13 @@ import {
       y: (py - mapH / 2) * view.zoom + panY + mapH / 2
     };
   }
+  /* A pan may move the map by exactly as much of it as hangs outside the hero,
+     so the hero is never showing a gap beside it. Under the contain fit at zoom
+     1 that overhang is zero and the map does not move; under the cover fit the
+     vertical overhang at zoom 1 *is* the cropped strip (cropY), so a drag
+     downwards brings the Arctic rows in and an equal drag upwards brings the
+     Antarctic ones, and nothing else about this had to change. "Reset view"
+     sets panX/panY to 0, which is the centred crop. */
   function clampPan() {
     const overX = Math.max(0, (mapW * view.zoom - vpW) / 2);
     const overY = Math.max(0, (mapH * view.zoom - vpH) / 2);
@@ -1968,10 +2010,42 @@ import {
   // the grid instead of always showing every dot.
   let markerRefs = [];
 
+  /* How big one grid cell is, which is the whole question of "how large is the
+     map".
+
+     The contain fit takes whichever of width and height runs out first, so on
+     a wide window the hero's *height* binds and the map is centred with open
+     ocean down both sides: at 2000 x 870 the hero is 2000 x 707 and the
+     1.97:1 world grid lands at 1393 x 706, leaving 300px of empty sea on each
+     side of a map the reader wanted bigger.
+
+     The cover fit asks the other question — how large can the grid be if it
+     fills the hero's *width* and the rows that no longer fit simply run off the
+     top and bottom? `.map-viewport` is `overflow: hidden`, so they go quietly,
+     and at zoom 1 a drag reaches them because clampPan() clamps to the
+     overhang and the overhang is now real (see clampPan()).
+
+     What may be cropped is the constraint, not what would look biggest:
+     CROP_MAX is the budget, and the scale is the largest one that stays inside
+     it. So on a hero wide enough that a full cover crops less than that, the
+     map fills the width exactly; on a shorter one it grows as far as the
+     budget buys and stops, still centred, rather than pushing Scandinavia or
+     Patagonia off the screen. Contain is the floor — this never makes the map
+     smaller than it was.
+
+     Phones keep contain (below 640px the width binds anyway, so the two agree
+     to a fraction of a pixel), and `?noflags=coverFit` restores it at every
+     size: with COVER_ON false the line below is the one this function used to
+     be. */
   function computePX() {
     const vw = viewport.clientWidth || 1200;
     const vh = viewport.clientHeight || 700;
-    const px = Math.min(vw / (COLS * UNIT), vh / (ROWS * ROW_FACTOR));
+    const byWidth = vw / (COLS * UNIT);
+    const byHeight = vh / (ROWS * ROW_FACTOR);
+    let px = Math.min(byWidth, byHeight);
+    // byHeight / (1 - CROP_MAX) is the cell size at which the map is exactly
+    // 1/(1 - CROP_MAX) viewports tall — i.e. exactly CROP_MAX of it cropped.
+    if (COVER_ON) px = Math.max(px, Math.min(byWidth, byHeight / (1 - CROP_MAX)));
     return Math.max(PX_MIN, Math.min(PX_MAX, px));
   }
 
@@ -1986,6 +2060,7 @@ import {
     loopRunning = false;
     if (view) { view.zoom = 1; }
     panX = 0; panY = 0;
+    cropY = 0; cropRows = 0;
     // The label DOM went with the stage; drop the element cache (the prepared
     // pretext handles are keyed by text and deliberately survive a rebuild).
     markersEl = null;
@@ -2041,6 +2116,14 @@ import {
     panX = 0; panY = 0;
     vpW = viewport.clientWidth || mapW;
     vpH = viewport.clientHeight || mapH;
+    /* The cropped strips. `.map-stage` is centred in the hero, so a map taller
+       than the hero overhangs it by half the difference at each end — which is
+       exactly what clampPan() already calls the vertical overhang, so panning
+       into the strips needs nothing new. A row is only *shown* if its whole
+       line box is inside the hero, so the count rounds up: the partly-visible
+       boundary row is one no label may use. */
+    cropY = Math.max(0, (mapH - vpH) / 2);
+    cropRows = Math.min(ROWS >> 1, Math.ceil(cropY / LINEH));
 
     /* ---- The open ocean ------------------------------------------------
        The world grid is 240 × 62 cells of equirectangular Earth and it is
@@ -2892,7 +2975,9 @@ import {
         cross.style.top = readoutY + "px";
         cross.style.opacity = "1";
         readout.style.left = Math.min(readoutX + 14, mapW - 170) + "px";
-        readout.style.top = Math.max(6, readoutY - 34) + "px";
+        // cropY, like the hover card's clamp: the top of the hero is cropY
+        // down the stage, not 0, whenever the cover fit is cropping.
+        readout.style.top = Math.max(cropY + 6, readoutY - 34) + "px";
         readout.style.opacity = "1";
       });
     }
@@ -3185,7 +3270,12 @@ import {
       const flip = sp.x > vpW - cardW - 40;
       const left = Math.max(6, Math.min(vpW - cardW - 6,
         flip ? sp.x - 16 - cardW : sp.x + 16));
-      const top = Math.max(8, Math.min(Math.max(8, vpH - cardH - 8), sp.y - 60));
+      /* Vertically the clamp is against the *hero*, not the stage. Under the
+         cover fit the stage runs cropY px above the top of the hero and as far
+         below it, so stage y and screen y differ by cropY and a card clamped to
+         [8, vpH - cardH - 8] in stage px would sit off the top of the screen. */
+      const top = cropY + Math.max(8,
+        Math.min(Math.max(8, vpH - cardH - 8), sp.y - cropY - 60));
       card.style.left = left + "px";
       card.style.top = top + "px";
       card.dataset.side = flip ? "left" : "right";

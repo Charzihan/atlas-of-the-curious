@@ -96,6 +96,7 @@ self.onmessage = function (e) {
       const t0 = performance.now();
       const out = labels.place({
         tier: m.tier, zoom: m.zoom, cellW: m.cellW, dotCells: m.dotCells,
+        cropRows: m.cropRows,
         oceanOn: m.oceanOn, nativeNames: m.nativeNames, visible: m.visible
       });
       reply({

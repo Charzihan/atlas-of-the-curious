@@ -875,3 +875,77 @@ modules and the generated grid are not, and scripts are served cache-first.
 sized to the world grid, so opening a story dimmed the mapped ocean and left the
 open ocean around it at full brightness. It is now sized and offset like the
 base canvas, and the dimming rectangle with it.
+
+## Cover fit: the map fills the hero's width
+
+The section above scaled the map to whichever of the hero's width and height ran
+out first. On a wide window that is the *height*, and the map was left centred
+with open ocean down both sides: at 2000 x 870 the hero is 2000 x 707 and a
+1.97:1 world grid landed at 1393 x 706, with 300px of empty sea on each side of
+a map the reader wanted bigger.
+
+**Fill the width, crop the poles.** `computePX()` in `js/map.js` now asks the
+other question — how large can the grid be if it fills the hero's *width* and
+the rows that no longer fit run off the top and bottom? `.map-viewport` is
+`overflow: hidden`, so they go quietly. What may be cropped is the constraint:
+**18% of the map's height, 9% a side**. Nine per cent of 62 rows is 5.6 rows,
+16.2 degrees, so the strips that leave the hero are the Arctic Ocean above about
+74 N and the Antarctic ice below about 74 S — water and ice, and the
+northernmost of the 40 places is at 68.15 N, six degrees clear of the edge. Past
+18% the crop would start on inhabited latitudes, so it is a ceiling on the scale
+and not a preference: on a hero wide enough that a full cover costs less than
+that, the map fills the width exactly; on a shorter one it grows as far as the
+18% buys and stops there, still centred. Contain is the floor — this never makes
+the map smaller than it was.
+
+Rendered world grid, before → after:
+
+| hero | before | after | cropped |
+| --- | --- | --- | --- |
+| 1280 x 800 (hero 1280 x 637) | 1255 x 636 | **1278 x 648** | 1.9%, 1 row a side |
+| 1600 x 900 (hero 1600 x 737) | 1452 x 736 | **1598 x 810** | 9.1%, 3 rows |
+| 2000 x 870 (hero 2000 x 707) | 1393 x 706 | **1698 x 861** | 18.0%, 6 rows |
+| 2000 x 900 (hero 2000 x 737) | 1452 x 736 | **1770 x 898** | 18.0%, 6 rows |
+| 2560 x 1440 (hero 2560 x 1277) | 2520 x 1276 | **2558 x 1296** | 1.6%, 1 row |
+| 390 x 844 (phone) | 388 x 198 | 388 x 198 | none |
+
+At 1280 and 2560 the hero is tall enough for a full cover and the map fills the
+width to within two pixels. At 2000 x 870 and 2000 x 900 the 18% ceiling is what
+stops it, at 85% and 89% of the hero's width — 22% wider than before either way,
+which is the whole of the difference the reader was asking for. Phones keep the
+contain fit (below 640px the width binds anyway, so the two agree to a fraction
+of a pixel). The open-ocean margin still fills whatever is left, which after this
+is a cell or two horizontally and nothing at all vertically.
+
+**Panning reaches the strips.** Nothing new was needed: a pan is clamped to how
+much of the map hangs outside the hero, and under the cover fit that overhang at
+zoom 1 *is* the cropped strip. A drag downwards brings the Arctic rows in and
+stops with the map's top edge on the hero's — the clamp never opens a gap — and
+an equal drag upwards brings the Antarctic ones. "Reset view" returns to the
+centred crop.
+
+**Nothing readable is in the strips.** The placement request carries the number
+of cropped rows, and `js/labels.js` claims them in the occupancy mask before it
+routes anything, so no place name and no ocean name is set where nobody can read
+it. The one visible consequence is that at 2000 x 870 the Arctic Ocean's name is
+dropped — its only home is row 2 — while Southern Ocean, at row 52, still has
+its water. At 1280 x 800, where one row is cropped, both names stay. Markers are
+unaffected: no place in the dataset is within six degrees of either strip. The
+hover card's and the coordinate readout's vertical clamps are against the hero
+rather than the stage, which under the cover fit are no longer the same box.
+
+Everything inside `.map-zoom` is untouched in coordinates — country stories,
+routes, idle sentences, hover spills and the ripple are all still in world-grid
+px, and only the stage's placement in the hero changed. The sea in fact got
+slightly cheaper, because a larger cell means fewer of them fill the same hero:
+at 2000 x 900 the extended grid went from 334 x 64 to 274 x 62 and the painted
+water from 16,183 cells to 11,795. At a 4x CPU throttle with the idle sea
+running, 1280 x 800 averages 16.7ms and 2000 x 900 18.9ms against a 34.3ms
+budget.
+
+`?noflags=coverFit` restores the contain fit exactly, at every size, and
+`scripts/checks/ocean.mjs` holds all of the above at 2000 x 870: the width
+against the hero's, the crop against the 18% ceiling, every marker and painted
+label inside the hero, no label line in a cropped row at 1x or 2.5x, the drag
+and its clamp, and the flag. Screenshots: `docs/screenshots/cover-2000x870.png`
+and `docs/screenshots/cover-1280.png`.

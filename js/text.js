@@ -790,6 +790,11 @@ export const DEFAULT_FLAGS = {
   // The open ocean: the sea fills the whole viewport and flows as real
   // currents. Off is the world-grid-only sea with uniform sine trains.
   openOcean: true,
+  // Cover fit: the world grid fills the hero's width and the polar rows that
+  // no longer fit run off the top and bottom (js/map.js, computePX()). Off is
+  // the contain fit — the whole grid inside the hero, open ocean down the
+  // sides on a wide window.
+  coverFit: true,
   // Phases 7–8 — shapes, routes, and proportional map ink.
   countryStories: true, routeText: true, serifAtlas: true,
   asciiClouds: true,    // the sky is drawn in the map's own alphabet (js/clouds.js);

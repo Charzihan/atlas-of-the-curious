@@ -436,6 +436,7 @@ export function createLabelEngine(options) {
        zoom        the current view zoom
        cellW       one grid cell in screen px (CHARW * zoom)
        dotCells    radius, in cells, of the marker dot's keep-clear square
+       cropRows    rows off the top (and the bottom) of the viewport, 0 usually
        oceanOn     place the ocean and sea names
        nativeNames the label carries the name in its own script from tier 2
        visible     array of visible place ids, or null for "everything" */
@@ -449,6 +450,19 @@ export function createLabelEngine(options) {
     const oceanRecs = [];
 
     occupancy.fill(0);
+
+    /* Rows the viewport is not showing. Under js/map.js's cover fit the world
+       grid fills the hero's width and its polar rows run off the top and the
+       bottom, so those rows are claimed before anything routes into them: a
+       name placed there would be unreadable until the reader panned, and an
+       ocean name with nowhere else to go — the Arctic, the Southern Ocean — is
+       dropped rather than hidden. Zero under the contain fit, where this loop
+       does nothing at all. */
+    const crop = Math.max(0, Math.min(ROWS >> 1, p.cropRows | 0));
+    for (let r = 0; r < crop; r++) {
+      const top = r * COLS, bottom = (ROWS - 1 - r) * COLS;
+      for (let c = 0; c < COLS; c++) { occupancy[top + c] = 1; occupancy[bottom + c] = 1; }
+    }
 
     // The dots come first: no label may sit under one.
     for (const x of places) {

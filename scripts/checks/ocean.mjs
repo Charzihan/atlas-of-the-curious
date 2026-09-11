@@ -74,6 +74,39 @@ export const FRAME_REGRESSION = 1.4;
 export const MIN_MOVING = 0.8;
 const IDLE_WARMUP_MS = 3000;
 
+/* ---- 7. The cover fit ---------------------------------------------------
+   The window the reader actually complained about: 2000 x 870, where the hero
+   is 2000 x 707, the map's height binds under a contain fit and a 1.97:1 world
+   grid lands at 1393px with 300px of open sea down each side.
+
+   Five claims, all at that size:
+
+     a. The map is as wide as the hero lets it be. Either it fills the width to
+        within 2%, or the crop is at its ceiling — which is the honest form of
+        "fill the width" once the ceiling is a real constraint (see b). Either
+        way it must be wider than the contain fit it replaces.
+
+     b. The crop is inside the budget. CROP_MAX is 18% of the map's height, 9%
+        a side, which is the Arctic Ocean above about 74 N and the Antarctic
+        ice below about 74 S. A hero shorter than a full cover wants does not
+        get one: the scale stops at the budget. At 2000 x 870 that is exactly
+        where it stops, so the width lands at 1698 rather than 2000 — 18% of
+        62 rows is 5.6, and a sixth cropped row would start on Iceland.
+
+     c. Nothing readable is in the strips. No place label and no ocean name is
+        routed into a cropped row, and every marker and every painted label
+        sits inside the hero on screen.
+
+     d. The strips are reachable. A drag downwards at zoom 1 by the cropped
+        amount brings the top row into the hero and stops exactly there, with
+        the map's top edge on the hero's — panning must never open a gap — and
+        "reset view" puts the centred crop back.
+
+     e. `?noflags=coverFit` is the contain fit, to the pixel. */
+export const COVER_VIEWPORT = { width: 2000, height: 870 };
+// How close to the hero's width "fills the width" has to be.
+export const COVER_WIDTH_TOL = 0.02;
+
 const fmt = (n) => Math.round(n * 100) / 100;
 
 /* ---- 4. The table itself, sampled without a browser --------------------- */
@@ -391,8 +424,178 @@ function reportViewport(label, on, off, fail) {
   }
 }
 
+/* Everything claim 7 wants to know, read from inside the page: the fit numbers,
+   the hero and the pan/zoom wrapper on screen, and anything painted that is not
+   wholly inside the hero. A marker or a label line that leaves the hero at zoom
+   1 is the failure the crop could cause, so it is named rather than counted. */
+const FIT_GEOMETRY = () => {
+  const D = window.ATLAS_MAP_DEBUG;
+  const s = D.oceanState();
+  const vp = document.querySelector(".map-viewport").getBoundingClientRect();
+  const box = document.querySelector(".map-zoom").getBoundingClientRect();
+  const round = (n) => Math.round(n * 100) / 100;
+  const inside = (r) => r.top >= vp.top - 0.5 && r.bottom <= vp.bottom + 0.5 &&
+    r.left >= vp.left - 0.5 && r.right <= vp.right + 0.5;
+  const outside = [];
+  for (const el of document.querySelectorAll(".map-marker")) {
+    const r = el.getBoundingClientRect();
+    if (!r.width || !r.height || inside(r)) continue;
+    outside.push(`marker "${el.dataset.placeId || el.getAttribute("aria-label") || "?"}" ` +
+      `at ${Math.round(r.left)},${Math.round(r.top)}..${Math.round(r.right)},${Math.round(r.bottom)}`);
+  }
+  for (const el of document.querySelectorAll(".map-label.is-placed, .map-ocean-label.is-placed")) {
+    const r = el.getBoundingClientRect();
+    if (!r.width || !r.height || inside(r)) continue;
+    outside.push(`label "${el.textContent.replace(/\s+/g, " ").trim().slice(0, 30)}" ` +
+      `at ${Math.round(r.left)},${Math.round(r.top)}..${Math.round(r.right)},${Math.round(r.bottom)}`);
+  }
+  // What the placer did, against the rows it was told it could not use.
+  const crop = s.fit.cropRows;
+  const cropped = [];
+  for (const rec of D.labels()) {
+    for (const line of rec.lines) {
+      if (line.row < crop || line.row >= s.rows - crop) cropped.push(`${rec.id} line at row ${line.row}`);
+    }
+  }
+  for (const o of D.oceanLabels()) {
+    if (o.row < crop || o.row >= s.rows - crop) cropped.push(`${o.name} at row ${o.row}`);
+  }
+  return {
+    fit: s.fit, map: s.map, rows: s.rows, lineH: s.lineH,
+    vp: { left: round(vp.left), top: round(vp.top), right: round(vp.right),
+      bottom: round(vp.bottom), width: round(vp.width), height: round(vp.height) },
+    box: { left: round(box.left), top: round(box.top), width: round(box.width), height: round(box.height) },
+    topRow: D.cellToClient(120, 0), outside, cropped,
+    labels: D.labels().length, oceans: D.oceanLabels().length
+  };
+};
+
+/* Claim 7, at COVER_VIEWPORT, against the same page with ?noflags=coverFit. */
+async function checkCoverFit(browser, origin, fail) {
+  const label = `cover ${COVER_VIEWPORT.width}x${COVER_VIEWPORT.height}`;
+  const now = await openMap(browser, origin, COVER_VIEWPORT, {});
+  const was = await openMap(browser, origin, COVER_VIEWPORT, { query: "?noflags=coverFit" });
+  try {
+    // Place labels only appear from 1.4x, so the readability sweep is run at
+    // 2.5x as well — at 1x the "no label in a cropped row" claim would be a
+    // claim about the ocean names alone.
+    const fit = await now.page.evaluate(FIT_GEOMETRY);
+    const off = await was.page.evaluate(FIT_GEOMETRY);
+    const f = fit.fit;
+    console.log(
+      `${label.padEnd(22)} hero ${fit.vp.width}x${fit.vp.height}, map ` +
+      `${fmt(fit.map.width)}x${fmt(fit.map.height)}px (was ${fmt(off.map.width)}x${fmt(off.map.height)} ` +
+      `with ?noflags=coverFit), ${fmt(f.cropFraction * 100)}% cropped = ${f.cropRows} row(s) ` +
+      `a side, ${fmt(f.cropPx)}px`
+    );
+
+    /* ---- a. As wide as the hero lets it be --------------------------------- */
+    if (f.mode !== "cover") fail(`${label} the cover fit did not engage (mode "${f.mode}")`);
+    if (fit.map.width <= off.map.width + 0.5) {
+      fail(`${label} the map is ${fmt(fit.map.width)}px, no wider than the contain fit's ${fmt(off.map.width)}px`);
+    }
+    const shortBy = (fit.vp.width - fit.map.width) / fit.vp.width;
+    const atCap = f.cropFraction >= f.cropMax - 0.002;
+    if (shortBy > COVER_WIDTH_TOL && !atCap) {
+      fail(`${label} the map is ${fmt(shortBy * 100)}% narrower than the ${fit.vp.width}px hero ` +
+           `and the crop is only ${fmt(f.cropFraction * 100)}% of ${fmt(f.cropMax * 100)}% — ` +
+           `it could have grown further`);
+    }
+    console.log(
+      `  width: ${fmt(fit.map.width)}px of a ${fit.vp.width}px hero ` +
+      `(${fmt((1 - shortBy) * 100)}%)${atCap ? ", held there by the crop ceiling" : ", filling it"}`
+    );
+
+    /* ---- b. Inside the crop budget ---------------------------------------- */
+    if (f.cropFraction > f.cropMax + 0.005) {
+      fail(`${label} ${fmt(f.cropFraction * 100)}% of the map is cropped, over the ` +
+           `${fmt(f.cropMax * 100)}% ceiling`);
+    }
+    if (f.cropRows < 1) fail(`${label} nothing was cropped — this size is the one that needed it`);
+
+    /* ---- c. Nothing readable in the strips -------------------------------- */
+    for (const zoom of [1, 2.5]) {
+      if (zoom !== 1) {
+        await now.page.evaluate((z) => window.ATLAS_MAP_DEBUG.setZoom(z), zoom);
+        await now.page.evaluate(() => window.ATLAS_MAP_DEBUG.settle());
+        await now.page.waitForTimeout(250);
+      }
+      const at = zoom === 1 ? fit : await now.page.evaluate(FIT_GEOMETRY);
+      console.log(
+        `  at ${zoom}x: ${at.labels} place label(s), ${at.oceans} ocean name(s), ` +
+        `${at.cropped.length} in a cropped row` + (zoom === 1 ? `, ${at.outside.length} outside the hero` : "")
+      );
+      for (const c of at.cropped.slice(0, 6)) fail(`${label} at ${zoom}x ${c} is in a cropped row`);
+      // Off-screen at 2.5x is the zoom's own doing, not the crop's, so the
+      // on-screen sweep is the 1x one.
+      if (zoom === 1) for (const o of at.outside.slice(0, 6)) fail(`${label} ${o} is outside the hero`);
+    }
+    await now.page.evaluate(() => window.ATLAS_MAP_DEBUG.setZoom(1));
+    await now.page.evaluate(() => window.ATLAS_MAP_DEBUG.settle());
+    await now.page.waitForTimeout(200);
+
+    /* ---- d. The strips are reachable -------------------------------------- */
+    const start = { x: Math.round(fit.vp.left + fit.vp.width / 2), y: Math.round(fit.vp.top + fit.vp.height / 2) };
+    await now.page.mouse.move(start.x, start.y);
+    await now.page.mouse.down();
+    // Overshoot: the clamp, not the drag, has to be what stops it.
+    for (let i = 1; i <= 6; i++) {
+      await now.page.mouse.move(start.x, start.y + Math.round((f.cropPx + 60) * i / 6));
+    }
+    await now.page.mouse.up();
+    await now.page.waitForTimeout(200);
+    const panned = await now.page.evaluate(FIT_GEOMETRY);
+    const gapTop = panned.box.top - panned.vp.top;
+    const gapBottom = (panned.vp.top + panned.vp.height) - (panned.box.top + panned.box.height);
+    console.log(
+      `  dragged down ${fmt(f.cropPx + 60)}px: pan clamped at ${fmt(panned.fit.panY)}px of ` +
+      `${fmt(panned.fit.overY)}px, map top ${fmt(gapTop)}px from the hero's, row 0 at ` +
+      `y ${panned.topRow ? Math.round(panned.topRow.y) : "?"}`
+    );
+    if (Math.abs(panned.fit.panY - f.cropPx) > 1) {
+      fail(`${label} a drag past the crop left the pan at ${fmt(panned.fit.panY)}px, not the ` +
+           `${fmt(f.cropPx)}px of overhang`);
+    }
+    if (Math.abs(gapTop) > 1) fail(`${label} panned to the top, the map starts ${fmt(gapTop)}px from the hero's edge`);
+    if (gapBottom > 1) fail(`${label} panning down opened a ${fmt(gapBottom)}px gap below the map`);
+    if (!panned.topRow || panned.topRow.y < panned.vp.top || panned.topRow.y > panned.vp.bottom) {
+      fail(`${label} the top row is still off the hero after panning to it`);
+    }
+    // "Reset view" is the centred crop again.
+    await now.page.click("#map-zoom-reset");
+    await now.page.waitForTimeout(200);
+    const reset = await now.page.evaluate(FIT_GEOMETRY);
+    if (Math.abs(reset.fit.panY) > 0.5 || Math.abs(reset.box.top - fit.box.top) > 1) {
+      fail(`${label} reset view left the map at panY ${fmt(reset.fit.panY)}px, top ` +
+           `${fmt(reset.box.top)} (centred crop is ${fmt(fit.box.top)})`);
+    }
+
+    /* ---- e. The flag restores the contain fit ------------------------------ */
+    console.log(
+      `  with ?noflags=coverFit: map ${fmt(off.map.width)}x${fmt(off.map.height)}px, ` +
+      `${off.fit.cropRows} row(s) cropped, ${off.outside.length} thing(s) outside the hero`
+    );
+    if (off.fit.cover) fail(`${label} ?noflags=coverFit did not turn the cover fit off`);
+    if (off.fit.mode !== "contain" || off.fit.cropRows) {
+      fail(`${label} ?noflags=coverFit still cropped ${off.fit.cropRows} row(s)`);
+    }
+    if (off.map.height > off.vp.height + 0.5 || off.map.width > off.vp.width + 0.5) {
+      fail(`${label} ?noflags=coverFit built a ${fmt(off.map.width)}x${fmt(off.map.height)} map ` +
+           `in a ${off.vp.width}x${off.vp.height} hero — that is not a contain fit`);
+    }
+    for (const e of now.errors.concat(was.errors)) console.error(`  error: ${e}`);
+    if (now.errors.length + was.errors.length) {
+      fail(`${label} logged ${now.errors.length + was.errors.length} console/page error(s)`);
+    }
+  } finally {
+    await now.context.close();
+    await was.context.close();
+  }
+}
+
 export async function runOceanChecks(browser, origin, fail) {
   checkCurrentTable(fail);
+  await checkCoverFit(browser, origin, fail);
   for (const viewport of VIEWPORTS) {
     const label = `ocean ${viewport.width}x${viewport.height}`;
     const on = await visit(browser, origin, viewport, { timed: true });
