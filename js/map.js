@@ -9,15 +9,25 @@
        shows a pretext-wrapped hover card and lights the matching grid card.
      - Labels: place names routed into free sea cells around each dot, plus
        ocean and sea names set in spaced capitals (see "Labels on the map").
-   CSP-safe: same-origin module import, no eval, textContent for all data. */
+     - Sea text: the hovered place's tagline spilled into the water beside it,
+       and — once the page has been left alone — sentences from the field notes
+       drifting along the ocean rows. See "The living sea" below.
+   Layout for all of that happens in js/text-worker.js when the browser has
+   workers, and in the very same pure modules on this thread when it does not.
+   CSP-safe: same-origin module import (worker included), no eval, textContent
+   for all data. */
 import {
   prepareWithSegments,
   layoutWithLines,
-  measureLineStats,
-  measureNaturalWidth
+  measureLineStats
 } from "../vendor/pretext/layout.js";
-import { readFontRoles, directionFromLevels, dirForLang } from "./text.js";
-import { routeText } from "./text-route.js";
+import { readFontRoles, dirForLang } from "./text.js";
+import {
+  createLabelEngine, cellsOf, tierFor,
+  TIER_NAME_Z, TIER_TAG_Z, TAG_MAX_LINES
+} from "./labels.js";
+import { createSeaEngine, IDLE_MAX_SENTENCES } from "./sea.js";
+import { createMapArtEngine } from "./map-art.js";
 
 (function () {
   "use strict";
@@ -207,10 +217,16 @@ import { routeText } from "./text-route.js";
    *    "no label overlaps land or another label" a testable claim.
    *
    * Preparation (the expensive pretext pass) happens once per string; a zoom
-   * change only re-runs routing, never `prepareWithSegments()`. */
+   * change only re-runs routing, never `prepareWithSegments()`.
+   *
+   * Phase 5 moved all of that into js/labels.js — the same code, with the DOM
+   * left behind — so it can run inside js/text-worker.js. What stays here is
+   * the thin client: build a request, post it, and render whatever comes back
+   * (dropping a reply a newer request has overtaken). When there is no worker
+   * the very same pure module is called synchronously instead. */
 
   // Feature flags. js/text.js owns DEFAULT_FLAGS and this phase must not edit
-  // it, so the defaults for the three Phase 1 flags live here, read with
+  // it, so the defaults for the map's own flags live here, read with
   // "on unless explicitly false" semantics. `?flags=` / `?noflags=` still work:
   // js/text.js has already merged the query string into window.ATLAS_FLAGS by
   // the time this module runs (both are deferred, so document order holds).
@@ -219,6 +235,11 @@ import { routeText } from "./text-route.js";
   FLAGS.oceanLabels = FLAGS.oceanLabels !== false;
   FLAGS.hoverFit = FLAGS.hoverFit !== false;
   FLAGS.nativeNames = FLAGS.nativeNames !== false;
+  // Phase 5 — the living sea.
+  FLAGS.worker = FLAGS.worker !== false;      // layout runs off the main thread
+  FLAGS.seaStories = FLAGS.seaStories !== false; // taglines spill into the water
+  FLAGS.idleSea = FLAGS.idleSea !== false;    // sentences drift when nothing moves
+  FLAGS.seaClick = FLAGS.seaClick !== false;  // a drifting word opens its place
 
   // Font roles, resolved straight out of the CSS registry so the canvas font
   // pretext measures with is the font the browser paints (see js/text.js).
@@ -231,156 +252,26 @@ import { routeText } from "./text-route.js";
   })();
   const ROLE_LABEL = ROLES["map-label"] || null;
   const ROLE_OCEAN = ROLES["ocean-label"] || null;
-  const ROLE_TAG = ROLES["hover-card"] || null;
   const ROLE_NATIVE = ROLES["map-label-native"] || null;
-  function fontPxOf(role) {
-    const m = role && /(\d*\.?\d+)px/.exec(role.font);
-    return m ? parseFloat(m[1]) : 0;
-  }
 
   // Labels are a desktop affordance: below 640px the hover card carries the
   // name and the grid is far too small to route into.
   const LABELS_ON = !isMobile && FLAGS.labels && !!ROLE_LABEL;
   const OCEAN_ON = !isMobile && FLAGS.oceanLabels && !!ROLE_OCEAN;
 
-  // Zoom tiers. Below NAME the map is a picture, not a gazetteer; from NAME
-  // each dot gets its name; from TAG the name is joined by its tagline.
-  const TIER_NAME_Z = 1.4;
-  const TIER_TAG_Z = 2.4;
-  const NAME_MAX_LINES = 3;
-  const TAG_MAX_LINES = 3;
-  // The native name sits between the two. Two rows is plenty for every name in
-  // the dataset; a name that will not fit in them is simply left off this
-  // label rather than pushing the tagline out of the water.
-  const NATIVE_MAX_LINES = 2;
-  // How far from the dot an anchor may sit, in cells. Nothing in the dataset
-  // is further than 3 cells from water on the 150×39 grid (deserts and inland
-  // forests are the far ones), so 4 covers every marker.
-  const LABEL_MAX_OFFSET = 4;
-  const LABEL_RUN_LIMIT = 44;       // longest free run worth scanning, in cells
+  // Zoom tiers, the routing budgets and the anchor search live in js/labels.js
+  // now (TIER_NAME_Z / TIER_TAG_Z / TAG_MAX_LINES are imported above).
   const MARKER_PX = 19;             // .map-marker { width: 19px } — kept clear
   const ZOOM_STEP = 0.05;           // re-place once the zoom moves this much
 
-  // Ocean and sea names. Anchors are the point the name wants to be centred
-  // on; placement slides left/right along the row to find a free run, and any
-  // name that cannot find one at the current zoom is simply not drawn — the
-  // Mediterranean, for instance, is barely five cells of water on this grid,
-  // so it only appears once the zoom has made those five cells wide enough.
-  const OCEANS = [
-    { name: "Pacific Ocean", lat: 0, lon: -132 },
-    { name: "Pacific Ocean", lat: 2, lon: 172 },
-    { name: "Atlantic Ocean", lat: 33, lon: -42 },
-    { name: "Atlantic Ocean", lat: -28, lon: -18 },
-    { name: "Indian Ocean", lat: -22, lon: 78 },
-    { name: "Southern Ocean", lat: -60, lon: 26 },
-    { name: "Arctic Ocean", lat: 84, lon: 10 },
-    { name: "Mediterranean", lat: 37, lon: 15 },
-    { name: "Caribbean Sea", lat: 15, lon: -74 },
-    { name: "Arabian Sea", lat: 15, lon: 63 },
-    { name: "South China Sea", lat: 14, lon: 114 },
-    { name: "Tasman Sea", lat: -38, lon: 161 }
-  ];
-  // Ocean names breathe: the tracking opens up as you zoom in. pretext takes
-  // letter-spacing as a px number at prepare() time, so the value is quantized
-  // to four steps and each (name, step) is prepared at most once for the life
-  // of the page — a zoom never triggers a new prepare().
-  const OCEAN_LS_EM = [0.18, 0.22, 0.26, 0.30];
-
-  // Prepared-handle caches. Keyed by content, so they survive a rebuild
-  // (resize) untouched — the label fonts are fixed px sizes, independent of
-  // the map's cell size.
-  const nameHandles = new Map();    // place id -> handle (name, uppercased)
-  const nativeHandles = new Map();  // place id -> handle (native name) or null
-  const tagHandles = new Map();     // place id -> handle (tagline)
-  const oceanHandles = new Map();   // name + "|" + step -> handle
-  function makeHandle(text, role) {
-    const str = String(text == null ? "" : text).replace(/\s+/g, " ").trim();
-    return {
-      text: str,
-      // CSS paints a letter-space after the last grapheme too; pretext counts
-      // only the gaps between them. Carrying the difference as `ls` keeps the
-      // routed width and the painted width the same number.
-      ls: role.letterSpacing || 0,
-      pre: prepareWithSegments(str, role.font,
-        role.letterSpacing ? { letterSpacing: role.letterSpacing } : undefined)
-    };
-  }
-  function nameHandleFor(x) {
-    let h = nameHandles.get(x.p.id);
-    // .map-label is `text-transform: uppercase` and pretext does not model
-    // text-transform, so the string is uppercased before it is measured.
-    if (!h) { h = makeHandle(String(x.p.name).toUpperCase(), ROLE_LABEL); nameHandles.set(x.p.id, h); }
-    return h;
-  }
-  // The name in its own script, for the label's middle line. Only a genuinely
-  // different name earns a line; the handle comes from js/text.js when it is
-  // there, because that is the one prepared under the place's own locale (and
-  // with word-break: keep-all for CJK). Never uppercased.
+  // The name in its own script. Only a genuinely different name earns a line;
+  // the hover card's own measurement (nativeFit) still asks js/text.js for it.
   function nativeTextFor(p) {
     if (!FLAGS.nativeNames) return "";
     const s = String(p.nativeName || "");
     return !s || s === p.name ? "" : s;
   }
-  function nativeHandleFor(x) {
-    if (!ROLE_NATIVE) return null;
-    if (nativeHandles.has(x.p.id)) return nativeHandles.get(x.p.id);
-    const text = nativeTextFor(x.p);
-    let h = null;
-    if (text) {
-      const T = window.ATLAS_TEXT;
-      if (T && typeof T.handleFor === "function") {
-        try {
-          h = { text: text, ls: ROLE_NATIVE.letterSpacing || 0,
-                pre: T.handleFor("map-label-native", x.p.id) };
-        } catch (e) { h = null; }
-      }
-      if (!h) h = makeHandle(text, ROLE_NATIVE);
-    }
-    nativeHandles.set(x.p.id, h);
-    return h;
-  }
-  // Which way the native name runs. pretext's richer handle carries an
-  // approximate bidi level per segment; the first strong (text) segment
-  // decides, and the BCP 47 tag is only the fallback for a string with no
-  // strong RTL character at all.
-  function nativeDirFor(x) {
-    const h = nativeHandleFor(x);
-    const fallback = dirForLang(x.p.nativeLang);
-    return h ? directionFromLevels(h.pre, fallback) : fallback;
-  }
-  function tagHandleFor(x) {
-    if (!ROLE_TAG) return null;
-    let h = tagHandles.get(x.p.id);
-    if (!h) { h = makeHandle(x.p.tagline, ROLE_TAG); tagHandles.set(x.p.id, h); }
-    return h;
-  }
-  function oceanHandleFor(name, step) {
-    const key = name + "|" + step;
-    let h = oceanHandles.get(key);
-    if (!h) {
-      const ls = OCEAN_LS_EM[step] * fontPxOf(ROLE_OCEAN);
-      h = makeHandle(name.toUpperCase(), { font: ROLE_OCEAN.font, letterSpacing: ls });
-      oceanHandles.set(key, h);
-    }
-    return h;
-  }
 
-  // Anchor directions, tried in this order at each offset. `dir` is the
-  // direction the text runs (+1 east, −1 west); `pen` biases the score so a
-  // label prefers to sit beside its dot rather than above or below it.
-  const LABEL_DIRS = [
-    { dc: 1, dr: 0, dir: 1, pen: 0 },    // E
-    { dc: -1, dr: 0, dir: -1, pen: 1 },  // W
-    { dc: 0, dr: -1, dir: 1, pen: 4 },   // N
-    { dc: 0, dr: 1, dir: 1, pen: 4 },    // S
-    { dc: 1, dr: -1, dir: 1, pen: 6 },   // NE
-    { dc: 1, dr: 1, dir: 1, pen: 6 },    // SE
-    { dc: -1, dr: -1, dir: -1, pen: 7 }, // NW
-    { dc: -1, dr: 1, dir: -1, pen: 7 }   // SW
-  ];
-
-  // One byte per grid cell, cleared on every placement.
-  const occupancy = new Uint8Array(COLS * ROWS);
   let labelRecords = [];
   let oceanRecords = [];
   const labelEls = new Map();   // place id -> { el, lines: [span] }
@@ -398,112 +289,171 @@ import { routeText } from "./text-route.js";
     } catch (e) { return false; }
   })();
 
-  function tierFor(z) { return z >= TIER_TAG_Z ? 2 : (z >= TIER_NAME_Z ? 1 : 0); }
-  const toGridCol = (lon) => Math.max(0, Math.min(COLS - 1, Math.round(((lon + 180) / 360) * COLS)));
-  const toGridRow = (lat) => Math.max(0, Math.min(ROWS - 1, Math.round(((90 - lat) / 180) * ROWS)));
+  /* ==================================================================== *
+   * The layout backend                                                    *
+   * ==================================================================== *
+   *
+   * Two hosts run the very same pure modules:
+   *
+   *   - js/text-worker.js, a same-origin ES module worker. pretext measures
+   *     through `OffscreenCanvas` when there is no DOM and segments through
+   *     `Intl.Segmenter`, both of which workers have, so the routing there is
+   *     the routing here — same font strings, same answers.
+   *   - this thread, when `Worker` or `OffscreenCanvas` is missing or the
+   *     `worker` flag is off. Every pretext call made on this path (and every
+   *     one the hover card makes, which was always on this thread) is counted,
+   *     so ATLAS_MAP_DEBUG.mainThreadLayoutCalls() can say what the page did
+   *     to itself.
+   *
+   * Nothing ever waits on the worker. A request carries a sequence number and a
+   * build number; a reply that a newer request has overtaken, or that belongs to
+   * a map that has since been rebuilt, is dropped on the floor. A placement
+   * arriving a frame late is invisible. */
 
-  // Free water cells on `row`, starting at `col` and walking in `dir`.
-  function freeRun(row, col, dir, limit) {
-    if (row < 0 || row >= ROWS) return 0;
-    let n = 0, c = col;
-    while (n < limit && c >= 0 && c < COLS) {
-      const i = row * COLS + c;
-      if (kind[i] || occupancy[i]) break;
-      n++; c += dir;
-    }
-    return n;
+  let mainThreadLayouts = 0;
+  function countLayout(n) { mainThreadLayouts += n || 1; }
+
+  // The place records the pure engines want, built once.
+  const placeById = new Map(places.map((x) => [x.p.id, x]));
+  function enginePlaces() {
+    return places.map(function (x) {
+      const keepAll = window.ATLAS_TEXT && typeof window.ATLAS_TEXT.keepAllFor === "function"
+        ? window.ATLAS_TEXT.keepAllFor(x.p.nativeLang) : false;
+      const localeOff = window.ATLAS_FLAGS && window.ATLAS_FLAGS.localeText === false;
+      return {
+        id: x.p.id, name: x.p.name, native: String(x.p.nativeName || ""),
+        nativeLang: x.p.nativeLang || "",
+        locale: localeOff ? "" : (x.p.nativeLang || ""),
+        wordBreak: keepAll ? "keep-all" : "normal",
+        tagline: x.p.tagline, col: 0, row: 0
+      };
+    });
   }
-
-  // The cells a rendered label covers, derived from the geometry that also
-  // positions it: the anchor cell, the run direction, and each line's painted
-  // width. Placement marks these; checkLabels() re-walks them.
-  function cellsOf(rec) {
-    const out = [];
-    for (const line of rec.lines) {
-      const cells = Math.max(1, Math.ceil((line.width - 0.001) / rec.cellW));
-      const c0 = rec.dir > 0 ? rec.col : rec.col - cells + 1;
-      out.push({ row: line.row, c0: c0, c1: c0 + cells - 1 });
-    }
+  function engineStories() {
+    return places.map(function (x) {
+      return { id: x.p.id, tagline: x.p.tagline, story: x.p.story };
+    });
+  }
+  function markerCells() {
+    const out = Object.create(null);
+    for (const x of places) if (x.pos) out[x.p.id] = [x.gcol, x.grow];
     return out;
   }
-  function markCells(cells) {
-    for (const s of cells) {
-      if (s.row < 0 || s.row >= ROWS) continue;
-      const base = s.row * COLS;
-      for (let c = Math.max(0, s.c0); c <= Math.min(COLS - 1, s.c1); c++) occupancy[base + c] = 1;
+
+  // ---- This thread's copy of the engines ---------------------------------
+  let mainLabels = null, mainSea = null, mainGeom = -1;
+  function localEngines() {
+    if (mainLabels) {
+      // A rebuild changed the cell size and moved every marker cell.
+      if (mainGeom !== buildSeq && CHARW) {
+        mainGeom = buildSeq;
+        mainLabels.setMarkerCells(markerCells());
+        mainSea.setFont({ font: PX + "px " + MONO, charW: CHARW });
+      }
+      return { labels: mainLabels, sea: mainSea };
+    }
+    mainLabels = createLabelEngine({
+      onLayout: countLayout,
+      // The native names were already prepared by js/text.js under each place's
+      // own locale. Reusing those handles is not just cheaper — calling
+      // setLocale() on this thread would throw away pretext's shared caches for
+      // the whole page, which is exactly what js/text.js exists to avoid.
+      handleProvider: function (role, id) {
+        const T = window.ATLAS_TEXT;
+        if (!T || typeof T.handleFor !== "function") return null;
+        try { return T.handleFor(role, id); } catch (e) { return null; }
+      }
+    });
+    mainLabels.setGrid({ cols: COLS, rows: ROWS, land: kind });
+    mainLabels.setRoles(ROLES);
+    mainLabels.setPlaces(enginePlaces());
+    mainSea = createSeaEngine({ onLayout: countLayout });
+    mainSea.setGrid({
+      cols: COLS, rows: ROWS, land: kind, occupancy: mainLabels.occupancy()
+    });
+    mainSea.setStories(engineStories());
+    if (CHARW) {
+      mainGeom = buildSeq;
+      mainLabels.setMarkerCells(markerCells());
+      mainSea.setFont({ font: PX + "px " + MONO, charW: CHARW });
+    }
+    return { labels: mainLabels, sea: mainSea };
+  }
+
+  // ---- The worker --------------------------------------------------------
+  const CAN_WORKER = FLAGS.worker &&
+    typeof Worker === "function" && typeof OffscreenCanvas !== "undefined";
+  let worker = null, workerReady = false;
+  let placeSeq = 0, placeApplied = -1;
+  let seaSeq = 0, seaApplied = -1;
+  let idleSeq = 0, idleApplied = -1, idleInFlight = false;
+  let buildSeq = 0;
+
+  function startWorker() {
+    if (!CAN_WORKER) return;
+    try {
+      worker = new Worker("js/text-worker.js", { type: "module" });
+    } catch (e) { worker = null; return; }
+    worker.onerror = function (event) {
+      event.preventDefault();
+      // A worker that will not start is not a page error: fall back silently.
+      workerReady = false;
+      if (worker) { worker.terminate(); worker = null; }
+      idleInFlight = false;
+      requestPlacement();
+      if (idleRunning) localEngines().sea.startIdle(performance.now());
+      requestArt();
+    };
+    worker.onmessage = function (e) { onWorkerMessage(e.data); };
+    const land = new Uint8Array(kind);   // a copy, so `kind` stays ours
+    worker.postMessage({
+      type: "init", cols: COLS, rows: ROWS, land: land.buffer,
+      roles: ROLES, places: enginePlaces(), stories: engineStories()
+    }, [land.buffer]);
+  }
+
+  function onWorkerMessage(m) {
+    if (!m) return;
+    if (m.type === "art") { acceptArt(m); return; }
+    if (m.type === "ready") {
+      workerReady = true;
+      sendGeometry();
+      requestPlacement();
+      requestArt();
+      return;
+    }
+    // The idle pump is one request at a time; release it even when the reply is
+    // about to be dropped, or the pump would stall for good.
+    if (m.type === "idle") idleInFlight = false;
+    if (m.build !== undefined && m.build !== buildSeq) return;  // a stale build
+    if (m.type === "placed") {
+      if (m.seq !== placeSeq || m.seq <= placeApplied) return;                        // overtaken
+      placeApplied = m.seq;
+      applyPlacement(m, null, m.ms);
+    } else if (m.type === "sea-text") {
+      if (m.seq !== seaSeq || m.seq <= seaApplied) return;
+      seaApplied = m.seq;
+      applySeaText(m.id, m.text);
+    } else if (m.type === "idle") {
+      if (m.seq <= idleApplied) return;
+      idleApplied = m.seq;
+      applyIdleFrame(m);
     }
   }
 
-  // ---- Routing one candidate ---------------------------------------------
-  // Read the free run on each row the label would use, hand those widths to
-  // the pure router one row at a time, and let it say whether the whole string
-  // survived. A candidate that would have to break a word mid-word comes back
-  // incomplete and is discarded.
-  function routeAt(handle, anchorRow, anchorCol, dir, cellW, maxLines, startRow) {
-    const widths = [];
-    for (let i = 0; i < maxLines; i++) {
-      widths.push(freeRun(startRow + i, anchorCol, dir, LABEL_RUN_LIMIT) * cellW);
-    }
-    return routeText(handle.pre, widths, 1, {
-      maxLines: maxLines,
-      text: handle.text,
-      startRow: startRow,
-      extraWidth: handle.ls,
-      minWidth: cellW,         // a single free cell is not worth a line
-      // The lines are painted as one stacked block, so they must live on
-      // consecutive rows: a blocked row ends this candidate rather than being
-      // skipped over. (Without this the next line renders one row higher than
-      // it was routed for, straight onto its neighbour's name.)
-      contiguous: true
+  function workerActive() { return !!(worker && workerReady); }
+
+  function sendGeometry() {
+    if (!workerActive() || !CHARW) return;
+    worker.postMessage({
+      type: "geom", build: buildSeq, font: PX + "px " + MONO, charW: CHARW,
+      markers: markerCells()
     });
   }
 
-  // Best anchor for one marker, or null when the name cannot be fitted into
-  // the sea anywhere near it at this zoom.
-  function findAnchor(x, tier, cellW) {
-    const nameH = nameHandleFor(x);
-    const nativeH = tier >= 2 ? nativeHandleFor(x) : null;
-    const tagH = tier >= 2 ? tagHandleFor(x) : null;
-    let best = null;
-    for (let off = 1; off <= LABEL_MAX_OFFSET; off++) {
-      for (const d of LABEL_DIRS) {
-        const col = x.gcol + d.dc * off;
-        const row = x.grow + d.dr * off;
-        if (col < 0 || col >= COLS || row < 0 || row >= ROWS) continue;
-        if (kind[row * COLS + col] || occupancy[row * COLS + col]) continue;
-        const name = routeAt(nameH, row, col, d.dir, cellW, NAME_MAX_LINES, row);
-        if (!name.complete || !name.lines.length) continue;
-        let from = name.lines[name.lines.length - 1].row + 1;
-        // The native name takes the rows straight under the Latin one; if the
-        // water there is too narrow for it the label falls back to name +
-        // tagline rather than losing the anchor altogether.
-        let nativeLines = [];
-        if (nativeH) {
-          const nat = routeAt(nativeH, row, col, d.dir, cellW, NATIVE_MAX_LINES, from);
-          if (nat.complete && nat.lines.length) {
-            nativeLines = nat.lines;
-            from = nat.lines[nat.lines.length - 1].row + 1;
-          }
-        }
-        let tagLines = [];
-        if (tagH) {
-          const tag = routeAt(tagH, row, col, d.dir, cellW, TAG_MAX_LINES, from);
-          if (tag.complete) tagLines = tag.lines;
-        }
-        const score = name.lines.length * 100 + off * 12 + d.pen +
-          (tagH && !tagLines.length ? 40 : 0) +
-          (nativeH && !nativeLines.length ? 20 : 0);
-        if (!best || score < best.score) {
-          best = {
-            score: score, row: row, col: col, dir: d.dir,
-            nameLines: name.lines, nativeLines: nativeLines, tagLines: tagLines
-          };
-        }
-      }
-      if (best) break;   // nearest offset that works wins; distance matters
-    }
-    return best;
-  }
+  // Start it now, not at the first build: preparing 120-odd strings takes the
+  // worker a moment and the first placement is only two frames away.
+  startWorker();
 
   // ---- Rendering ----------------------------------------------------------
   // The label is a child of the marker layer, so it pans and zooms with the
@@ -595,110 +545,66 @@ import { routeText } from "./text-route.js";
   }
 
   // ---- Ocean and sea names ------------------------------------------------
-  // One row of free water, centred on the anchor and allowed to slide along
-  // the row to find it. Marked into the occupancy mask before any place label
-  // is routed, so place names flow around the ocean names rather than over
-  // them.
-  const OCEAN_SLIDE = 16;
-  function placeOceanLabels(cellW, z) {
-    const t = Math.max(0, Math.min(1, (z - 1) / (TIER_TAG_Z - 1)));
-    const step = Math.round(t * (OCEAN_LS_EM.length - 1));
-    const lsPx = OCEAN_LS_EM[step] * fontPxOf(ROLE_OCEAN);
+  // The placement itself (one row of free water, centred on the anchor and
+  // allowed to slide along the row to find it) lives in js/labels.js and runs
+  // in the worker. This is only the painting: the records come back with the
+  // cell the name starts at and the tracking that zoom earned it.
+  function renderOceanLabels(recs) {
     let used = 0;
-    for (const ocean of OCEANS) {
-      const handle = oceanHandleFor(ocean.name, step);
-      const width = measureNaturalWidth(handle.pre) + handle.ls;
-      const need = Math.max(1, Math.ceil((width - 0.001) / cellW));
-      const row = toGridRow(ocean.lat);
-      const centre = toGridCol(ocean.lon) - Math.floor(need / 2);
-      let start = -1;
-      for (let slide = 0; slide <= OCEAN_SLIDE && start < 0; slide++) {
-        const tries = slide === 0 ? [0] : [-slide, slide];
-        for (const delta of tries) {
-          const c0 = centre + delta;
-          if (c0 < 0 || c0 + need > COLS) continue;
-          let ok = true;
-          for (let k = 0; k < need; k++) {
-            const i = row * COLS + c0 + k;
-            if (kind[i] || occupancy[i]) { ok = false; break; }
-          }
-          if (ok) { start = c0; break; }
-        }
-      }
-      if (start < 0) continue;   // no room on this grid at this zoom
-      const rec = {
-        id: ocean.name, row: row, col: start, dir: 1, cellW: cellW,
-        nameCount: 1, lines: [{ text: handle.text, width: width, row: row }]
-      };
-      rec.cells = cellsOf(rec);
-      markCells(rec.cells);
-      oceanRecords.push(rec);
+    for (const rec of recs) {
+      const text = rec.lines[0].text;
       const el = oceanEl(used++);
-      if (el.textContent !== handle.text) el.textContent = handle.text;
-      el.style.setProperty("letter-spacing", (Math.round(lsPx * 100) / 100) + "px");
-      el.style.setProperty("left", (start * CHARW) + "px");
-      el.style.setProperty("top", (row * LINEH) + "px");
+      if (el.textContent !== text) el.textContent = text;
+      el.style.setProperty("letter-spacing", (Math.round(rec.lsPx * 100) / 100) + "px");
+      el.style.setProperty("left", (rec.col * CHARW) + "px");
+      el.style.setProperty("top", (rec.row * LINEH) + "px");
       if (!el.classList.contains("is-placed")) el.classList.add("is-placed");
     }
     for (let i = used; i < oceanEls.length; i++) oceanEls[i].classList.remove("is-placed");
   }
-  function hideOceanLabels() {
-    for (const el of oceanEls) el.classList.remove("is-placed");
-  }
 
   // ---- One placement pass -------------------------------------------------
-  function placeLabels() {
-    if (!markersEl || !view) return;
-    const started = performance.now();
+  // The request is plain data — the tier, the zoom, one cell in screen px, the
+  // radius the marker dots keep clear, and which places the filter is showing.
+  function placementRequest() {
     const z = view.zoom;
     const cellW = CHARW * z;                 // one grid cell, in screen px
-    const tier = LABELS_ON ? tierFor(z) : 0;
-    occupancy.fill(0);
-    labelRecords = [];
-    oceanRecords = [];
+    return {
+      tier: LABELS_ON ? tierFor(z) : 0,
+      zoom: z,
+      cellW: cellW,
+      // A dot is a constant 19px on screen, so the number of cells it covers
+      // shrinks as you zoom in.
+      dotCells: Math.max(0, Math.ceil((MARKER_PX / 2) / cellW) - 1),
+      oceanOn: OCEAN_ON,
+      nativeNames: FLAGS.nativeNames,
+      visible: visibleIds ? Array.from(visibleIds) : null
+    };
+  }
 
-    // The dots come first: no label may sit under one. A dot is a constant
-    // 19px on screen, so the number of cells it covers shrinks as you zoom in.
-    const dotCells = Math.max(0, Math.ceil((MARKER_PX / 2) / cellW) - 1);
-    for (const x of places) {
-      if (!x.pos) continue;
-      if (visibleIds && !visibleIds.has(x.p.id)) continue;
-      for (let dr = -dotCells; dr <= dotCells; dr++) {
-        const rr = x.grow + dr;
-        if (rr < 0 || rr >= ROWS) continue;
-        for (let dc = -dotCells; dc <= dotCells; dc++) {
-          const cc = x.gcol + dc;
-          if (cc < 0 || cc >= COLS) continue;
-          occupancy[rr * COLS + cc] = 1;
-        }
-      }
-    }
-
-    if (OCEAN_ON) placeOceanLabels(cellW, z);
-    else hideOceanLabels();
-
-    for (const x of places) {
-      if (tier === 0 || !x.pos || (visibleIds && !visibleIds.has(x.p.id))) { hideLabel(x); continue; }
-      const best = findAnchor(x, tier, cellW);
-      if (!best) { hideLabel(x); continue; }
-      const rec = {
-        id: x.p.id, row: best.row, col: best.col, dir: best.dir, cellW: cellW,
-        nameCount: best.nameLines.length,
-        nativeCount: best.nativeLines.length,
-        nativeLang: best.nativeLines.length ? (x.p.nativeLang || "") : "",
-        nativeDir: best.nativeLines.length ? nativeDirFor(x) : "ltr",
-        lines: best.nameLines.concat(best.nativeLines, best.tagLines)
-      };
-      rec.cells = cellsOf(rec);
-      markCells(rec.cells);
-      labelRecords.push(rec);
+  // Paint whatever the engine decided — from either host, they agree.
+  function applyPlacement(out, startedMs, costMs) {
+    if (!markersEl || !view) return;
+    labelRecords = out.labels || [];
+    oceanRecords = out.oceans || [];
+    renderOceanLabels(oceanRecords);
+    const painted = new Set();
+    for (const rec of labelRecords) {
+      const x = placeById.get(rec.id);
+      if (!x) continue;
       renderLabel(x, rec);
+      painted.add(rec.id);
     }
+    for (const x of places) if (!painted.has(x.p.id)) hideLabel(x);
 
-    lastTier = tier;
-    lastPlaceZoom = z;
+    lastTier = out.tier;
+    lastPlaceZoom = out.zoom;
     placeStats.placements++;
-    placeStats.lastMs = performance.now() - started;
+    // The pass's own cost — measured where it ran, so "how expensive is one
+    // placement" means the same thing whether the worker did it or this thread.
+    placeStats.lastMs = costMs != null
+      ? costMs
+      : (startedMs ? performance.now() - startedMs : placeStats.lastMs);
     placeStats.totalMs += placeStats.lastMs;
 
     if (DEBUG_MAP) {
@@ -708,6 +614,18 @@ import { routeText } from "./text-route.js";
         console.warn("[atlas:map] " + report.overlaps + " label cell(s) overlap land or another label", report);
       }
     }
+    // The water the sea text was routed into may have just changed hands.
+    rerouteSeaText();
+    requestArt();
+  }
+
+  // Synchronous placement on this thread. ATLAS_MAP_DEBUG.place() and the
+  // no-worker fallback both come through here.
+  function placeLabels() {
+    if (!markersEl || !view) return;
+    const started = performance.now();
+    const engines = localEngines();
+    applyPlacement(engines.labels.place(placementRequest()), started);
   }
 
   // At most one placement per frame, whatever asks for it.
@@ -717,8 +635,409 @@ import { routeText } from "./text-route.js";
     placementQueued = true;
     requestAnimationFrame(function () {
       placementQueued = false;
-      placeLabels();
+      if (!markersEl || !view) return;
+      if (workerActive()) {
+        const req = placementRequest();
+        req.type = "place";
+        req.seq = ++placeSeq;
+        req.build = buildSeq;
+        // Debounce against what has been *asked for*, not against what has come
+        // back: otherwise a zoom sweep queues a fresh placement every frame
+        // while the replies for the last few are still in flight.
+        lastTier = req.tier;
+        lastPlaceZoom = req.zoom;
+        worker.postMessage(req);
+      } else {
+        placeLabels();
+      }
     });
+  }
+
+  /* ==================================================================== *
+   * The living sea                                                        *
+   * ==================================================================== *
+   *
+   * Three things happen on the water now, and all three are the same idea: text
+   * poured into free sea cells and painted straight onto the sea canvas, so the
+   * ripple field lifts a word the way it lifts a wave glyph.
+   *
+   * Unlike a label, sea text is *not* counter-scaled. It is set in the map's own
+   * grid font, so one glyph is exactly one cell at any zoom. That is what makes
+   * "no glyph is ever drawn on a land cell" something checkSeaText() can settle
+   * by walking cells rather than by reading boxes back out of the DOM.
+   *
+   *   - Hover a marker and its tagline spills into the water beside the dot,
+   *     routed around the coast, in the category's accent at a low alpha.
+   *   - Open the place and the spill extends with the opening sentences of the
+   *     field note, up to a cell budget.
+   *   - Leave the page alone for twelve seconds and sentences lifted out of
+   *     random field notes start drifting along the ocean rows, one cell a
+   *     second, alternating direction by row. Hovering one brightens it and
+   *     holds it still; clicking one opens the place it came from. Any other
+   *     pointer movement, or any key, dissolves them inside half a second.
+   *
+   * Everything above the painting - the routing, the corridors, the drift -
+   * happens in js/sea.js, in the worker when there is one. This thread paints
+   * the positions it was given and does the hit testing. */
+
+  const SEA_ON = !isMobile && FLAGS.seaStories;
+  // Phones never run the idle sea (the grid is a 96x25 band; there is no room),
+  // and neither does a reader who asked for less motion.
+  const IDLE_ON = !isMobile && !REDUCED && FLAGS.idleSea;
+  const IDLE_DELAY_MS = 12000;      // silence before the sea starts telling stories
+  const SEA_FADE_MS = 300;          // hover-out dissolve
+  const IDLE_DISSOLVE_MS = 500;     // "you moved" dissolve
+
+  // The hovered / opened place's story on the water.
+  let seaText = null;               // the routed lines, as the engine returned them
+  let seaTextId = null, seaTextMode = "";
+  let seaAlpha = 0, seaTarget = 0, seaAccent = "#e8b45a";
+
+  // The drifting sentences.
+  let idleRunning = false, idleForced = false;
+  let idleAlpha = 0, idleTarget = 0, lastInputAt = 0;
+  const idleInfo = new Map();       // key -> { id, text, row, rows, lines }
+  let idleFrameState = [];          // [{ key, col, alpha, paused }] - this frame
+  let idleHoverKey = 0;
+  let seaClock = 0;
+  let stageRect = { left: 0, top: 0 };
+  let refreshStageRect = null;   // set by build(); re-reads the stage's box
+
+  // "#e8b45a" -> "rgba(232, 180, 90, a)". The accents are all six-digit hex.
+  const rgbaCache = new Map();
+  function rgbaOf(hex, alpha) {
+    let base = rgbaCache.get(hex);
+    if (!base) {
+      const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(hex || ""));
+      base = m
+        ? parseInt(m[1], 16) + ", " + parseInt(m[2], 16) + ", " + parseInt(m[3], 16)
+        : "232, 180, 90";
+      rgbaCache.set(hex, base);
+    }
+    return "rgba(" + base + ", " + (Math.round(alpha * 1000) / 1000) + ")";
+  }
+
+  // ---- Stories on the water ----------------------------------------------
+  function requestSeaText(x, extend) {
+    if (!SEA_ON || !x || !x.pos) return;
+    noteInput();
+    seaTextId = x.p.id;
+    seaTextMode = extend ? "open" : "hover";
+    seaAccent = x.accent;
+    seaTarget = 1;
+    const req = {
+      type: "sea-hover", seq: ++seaSeq, build: buildSeq,
+      id: x.p.id, col: x.gcol, row: x.grow, extend: !!extend
+    };
+    if (workerActive()) {
+      worker.postMessage(req);
+    } else {
+      const engines = localEngines();
+      seaApplied = req.seq;
+      applySeaText(req.id, engines.sea.hover(req));
+    }
+  }
+  function applySeaText(id, text) {
+    if (id !== seaTextId) return;   // a hover we have already moved on from
+    seaText = text && text.lines && text.lines.length ? text : null;
+    startLoop();
+  }
+  function dissolveSeaText() {
+    seaTarget = 0;
+    seaTextMode = "";
+    startLoop();
+  }
+  // A placement just re-drew the occupancy mask the sea text was routed around,
+  // so ask for the same text again against the new water.
+  function rerouteSeaText() {
+    if (!SEA_ON || !seaTextId || seaTarget <= 0) return;
+    const x = placeById.get(seaTextId);
+    if (x) requestSeaText(x, seaTextMode === "open");
+  }
+
+  // ---- The idle sea -------------------------------------------------------
+  function noteInput() {
+    lastInputAt = performance.now();
+    if (idleRunning) endIdle();
+  }
+
+  function beginIdle() {
+    if (!IDLE_ON || idleRunning) return idleRunning;
+    // Starting again while the last lot are still dissolving would leave the
+    // engine's sentences alive with no text on this side to paint them with.
+    releaseIdle();
+    idleRunning = true;
+    idleTarget = 1;
+    idleAlpha = 0;
+    idleHoverKey = 0;
+    idleInfo.clear();
+    idleFrameState = [];
+    idleApplied = -1;
+    idleInFlight = false;
+    const now = performance.now();
+    if (workerActive()) worker.postMessage({ type: "idle-start", build: buildSeq, now: now });
+    else localEngines().sea.startIdle(now);
+    startLoop();
+    return true;
+  }
+
+  function endIdle() {
+    if (!idleRunning) return;
+    idleRunning = false;
+    idleForced = false;
+    idleTarget = 0;     // fade where they stand, then release the engine
+    idleHoverKey = 0;
+    setIdlePaused(0);
+    if (stage) stage.removeAttribute("data-sea-hover");
+    startLoop();
+  }
+
+  function releaseIdle() {
+    if (workerActive()) worker.postMessage({ type: "idle-stop" });
+    else if (mainSea) mainSea.stopIdle();
+    idleInfo.clear();
+    idleFrameState = [];
+  }
+
+  function setIdlePaused(key) {
+    if (workerActive()) worker.postMessage({ type: "idle-pause", key: key });
+    else if (mainSea) mainSea.setPaused(key);
+  }
+
+  let lastLocalIdle = 0;
+  function pumpIdle(now) {
+    if (!idleRunning) return;
+    if (workerActive()) {
+      if (idleInFlight) return;     // never block: paint the last frame instead
+      idleInFlight = true;
+      worker.postMessage({ type: "idle-frame", seq: ++idleSeq, build: buildSeq, now: now });
+    } else {
+      // No worker, so this costs the frame it runs in. The current moves one
+      // cell a second; laying it out thirty times a second is already far more
+      // often than anything visibly changes.
+      if (now - lastLocalIdle < 30) return;
+      lastLocalIdle = now;
+      applyIdleFrame(localEngines().sea.idleFrame(now));
+    }
+  }
+
+  function applyIdleFrame(m) {
+    if (!m) return;
+    if (m.fresh) for (const f of m.fresh) idleInfo.set(f.key, f);
+    if (m.retired) for (const k of m.retired) idleInfo.delete(k);
+    if (m.frame) {
+      // [n, (key, col, alpha, paused) x n], transferred rather than copied.
+      const f = m.frame;
+      const n = f[0] | 0;
+      const out = [];
+      for (let i = 0, at = 1; i < n; i++) {
+        out.push({ key: f[at++], col: f[at++], alpha: f[at++], paused: f[at++] });
+      }
+      idleFrameState = out;
+    } else {
+      idleFrameState = m.sentences || [];
+    }
+  }
+
+  // ---- Hit testing --------------------------------------------------------
+  // A pointer position -> a sentence -> a line -> a word. The word extents come
+  // from the prepared handle's own per-segment widths (js/sea.js reads them back
+  // out of the routed line), so this is the same geometry that was painted.
+  function seaHitTest(clientX, clientY) {
+    if (!view || !CHARW || idleAlpha <= 0.05 || !idleFrameState.length) return null;
+    // Read the stage's box here rather than trusting the cached one. Opening
+    // and closing the modal dialog takes the page's scrollbar away and puts it
+    // back, which moves the stage sideways without firing a scroll event — and
+    // a rect that is a scrollbar's width out mis-reads a one-cell word. This
+    // only runs while the sea is telling stories and the pointer is moving.
+    if (refreshStageRect) refreshStageRect();
+    const m = toMap(clientX - stageRect.left, clientY - stageRect.top);
+    const col = Math.floor(m.x / CHARW), row = Math.floor(m.y / LINEH);
+    if (col < 0 || col >= COLS || row < 0 || row >= ROWS) return null;
+    for (const s of idleFrameState) {
+      const info = idleInfo.get(s.key);
+      if (!info) continue;
+      if (row < info.row || row >= info.row + info.rows) continue;
+      const base = Math.round(s.col);
+      for (const line of info.lines) {
+        if (line.row !== row) continue;
+        for (const w of line.words) {
+          const c0 = base + w.dcol;
+          if (col >= c0 && col < c0 + w.cells) {
+            return { key: s.key, id: info.id, text: info.text, word: w.text, col: c0, row: row };
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  // ---- Painting -----------------------------------------------------------
+  // Every word is one fillText at its own cell, lifted by the ripple field the
+  // same way a wave glyph is - averaged over the cells the word covers, so a
+  // splash rolls through a sentence word by word.
+  function wordLift(row, col, cells) {
+    let sum = 0, n = 0;
+    for (let c = col; c < col + cells; c++) {
+      if (c < 0 || c >= COLS) continue;
+      sum += disp[row * COLS + c];
+      n++;
+    }
+    const d = n ? sum / n : 0;
+    const gutter = Math.max(0, (LINEH - PX) / 2);
+    return REDUCED ? 0 : Math.max(-gutter, Math.min(gutter, d * LIFT));
+  }
+
+  function drawSeaText(ctx) {
+    if (idleAlpha > 0.02 && idleFrameState.length) {
+      for (const s of idleFrameState) {
+        const info = idleInfo.get(s.key);
+        if (!info) continue;
+        const hot = s.key === idleHoverKey;
+        const a = idleAlpha * s.alpha * (hot ? 0.95 : 0.5);
+        if (a <= 0.02) continue;
+        const base = Math.round(s.col);
+        ctx.fillStyle = hot
+          ? rgbaOf("#e8b45a", a)
+          : "rgba(206, 232, 252, " + (Math.round(a * 1000) / 1000) + ")";
+        for (const line of info.lines) {
+          const y0 = (line.row + 0.5) * LINEH;
+          for (const w of line.words) {
+            const col = base + w.dcol;
+            ctx.fillText(w.text, col * CHARW, y0 + wordLift(line.row, col, w.cells));
+          }
+        }
+      }
+    }
+    if (seaAlpha > 0.02 && idleAlpha <= 0.02 && seaText) {
+      for (const line of seaText.lines) {
+        const y0 = (line.row + 0.5) * LINEH;
+        const a = seaAlpha * (line.kind === "tagline" ? 0.8 : 0.55);
+        ctx.fillStyle = rgbaOf(seaAccent, a);
+        for (const w of line.words) {
+          const col = line.col + w.dcol;
+          ctx.fillText(w.text, col * CHARW, y0 + wordLift(line.row, col, w.cells));
+        }
+      }
+    }
+  }
+
+  // Advance the two dissolve clocks and decide whether the sea should start
+  // telling stories. Called once per animation frame.
+  function stepSea(now) {
+    const dt = seaClock ? Math.max(0, Math.min(120, now - seaClock)) : 16;
+    seaClock = now;
+    if (REDUCED) {
+      seaAlpha = seaTarget;
+    } else {
+      const step = dt / SEA_FADE_MS;
+      seaAlpha = seaTarget > seaAlpha
+        ? Math.min(seaTarget, seaAlpha + step) : Math.max(seaTarget, seaAlpha - step);
+    }
+    if (seaAlpha <= 0 && seaTarget === 0 && seaText) { seaText = null; seaTextId = null; }
+
+    const istep = dt / IDLE_DISSOLVE_MS;
+    idleAlpha = idleTarget > idleAlpha
+      ? Math.min(idleTarget, idleAlpha + istep) : Math.max(idleTarget, idleAlpha - istep);
+    if (!idleRunning && idleAlpha <= 0 && idleInfo.size) releaseIdle();
+
+    if (IDLE_ON && !idleRunning && idleAlpha <= 0 &&
+        now - lastInputAt >= IDLE_DELAY_MS && !cardVisibleId && seaTarget <= 0) {
+      beginIdle();
+    }
+    pumpIdle(now);
+  }
+
+  // ---- The assertion the smoke test drives --------------------------------
+  // Every cell every sea glyph occupies, walked against the land mask and
+  // against the mask the labels and ocean names claimed this placement. The
+  // routing is supposed to make this impossible; this is the proof.
+  function checkSeaText() {
+    const mask = new Uint8Array(COLS * ROWS);
+    for (const rec of oceanRecords) {
+      for (const s of cellsOf(rec)) {
+        if (s.row < 0 || s.row >= ROWS) continue;
+        for (let c = Math.max(0, s.c0); c <= Math.min(COLS - 1, s.c1); c++) mask[s.row * COLS + c] = 1;
+      }
+    }
+    for (const rec of labelRecords) {
+      for (const s of cellsOf(rec)) {
+        if (s.row < 0 || s.row >= ROWS) continue;
+        for (let c = Math.max(0, s.c0); c <= Math.min(COLS - 1, s.c1); c++) mask[s.row * COLS + c] = 2;
+      }
+    }
+    const seen = new Uint8Array(COLS * ROWS);
+    const problems = [];
+    let cells = 0, violations = 0, selfOverlaps = 0;
+    const walk = function (what, id, row, col, n) {
+      for (let c = col; c < col + n; c++) {
+        cells++;
+        if (row < 0 || row >= ROWS || c < 0 || c >= COLS) {
+          violations++; problems.push({ what: what, id: id, row: row, col: c, why: "off-grid" });
+          continue;
+        }
+        const i = row * COLS + c;
+        if (kind[i]) {
+          violations++; problems.push({ what: what, id: id, row: row, col: c, why: "land" });
+        } else if (mask[i] === 1) {
+          violations++; problems.push({ what: what, id: id, row: row, col: c, why: "ocean name" });
+        } else if (mask[i] === 2) {
+          violations++; problems.push({ what: what, id: id, row: row, col: c, why: "label" });
+        } else if (seen[i]) {
+          selfOverlaps++;
+        }
+        seen[i] = 1;
+      }
+    };
+    let seaLines = 0, idleLines = 0;
+    if (seaText && seaAlpha > 0.02 && idleAlpha <= 0.02) {
+      for (const line of seaText.lines) {
+        seaLines++;
+        for (const w of line.words) walk("sea-text", seaText.id, line.row, line.col + w.dcol, w.cells);
+      }
+    }
+    if (idleAlpha > 0.02) {
+      for (const s of idleFrameState) {
+        const info = idleInfo.get(s.key);
+        if (!info) continue;
+        const base = Math.round(s.col);
+        for (const line of info.lines) {
+          idleLines++;
+          for (const w of line.words) walk("idle", info.id, line.row, base + w.dcol, w.cells);
+        }
+      }
+    }
+    return {
+      cells: cells, violations: violations, selfOverlaps: selfOverlaps,
+      seaLines: seaLines, idleLines: idleLines,
+      sentences: idleFrameState.length, hovered: seaText ? seaText.id : null,
+      extended: !!(seaText && seaText.extended),
+      problems: problems.slice(0, 20)
+    };
+  }
+
+  // The drifting sentences as data, for the click check in scripts/smoke.mjs.
+  function idleSentences() {
+    const out = [];
+    for (const s of idleFrameState) {
+      const info = idleInfo.get(s.key);
+      if (!info) continue;
+      const base = Math.round(s.col);
+      const cells = [];
+      const words = [];
+      for (const line of info.lines) {
+        for (const w of line.words) {
+          const c0 = base + w.dcol;
+          words.push({ text: w.text, col: c0, row: line.row, width: w.width, cells: w.cells });
+          for (let c = c0; c < c0 + w.cells; c++) cells.push([c, line.row]);
+        }
+      }
+      out.push({
+        id: info.id, key: s.key, text: info.text, alpha: s.alpha,
+        paused: !!s.paused, cells: cells, words: words
+      });
+    }
+    return out;
   }
 
   // ---- Dev assertion ------------------------------------------------------
@@ -811,7 +1130,9 @@ import { routeText } from "./text-route.js";
     enabled: DEBUG_MAP,
     flags: {
       labels: LABELS_ON, oceanLabels: OCEAN_ON, hoverFit: FLAGS.hoverFit,
-      nativeNames: FLAGS.nativeNames && !!ROLE_NATIVE
+      nativeNames: FLAGS.nativeNames && !!ROLE_NATIVE,
+      worker: FLAGS.worker, seaStories: SEA_ON, idleSea: IDLE_ON,
+      seaClick: FLAGS.seaClick
     },
     tiers: { name: TIER_NAME_Z, tagline: TIER_TAG_Z },
     getZoom: function () { return view ? view.zoom : 1; },
@@ -876,12 +1197,214 @@ import { routeText } from "./text-route.js";
           };
         });
     },
-    hideCard: function () { if (hideCardRef) hideCardRef(); }
+    hideCard: function () { if (hideCardRef) hideCardRef(); },
+
+    /* ---- Phase 5: the living sea ------------------------------------- */
+    // Is the layout actually happening off this thread?
+    workerActive: workerActive,
+    // Every pretext layout/route call this thread has made since the last
+    // reset: the no-worker fallback, and the hover card (which has always been
+    // measured here, because the card's own elements are the source of truth
+    // for its fonts). With the worker running and nothing hovered this stays 0.
+    mainThreadLayoutCalls: function () { return mainThreadLayouts; },
+    resetCounters: function () { mainThreadLayouts = 0; },
+
+    // Drive the idle sea without waiting twelve seconds. The guards are not
+    // bypassed: on a phone, or under prefers-reduced-motion, this does nothing.
+    startIdle: function () {
+      idleForced = true;
+      const ok = beginIdle();
+      if (!ok) idleForced = false;
+      return ok;
+    },
+    stopIdle: function () { endIdle(); return idleRunning; },
+    idleState: function () {
+      return {
+        on: idleRunning, forced: idleForced, alpha: idleAlpha,
+        sentences: idleFrameState.length, prepared: idleInfo.size,
+        maxSentences: IDLE_MAX_SENTENCES, hoveredKey: idleHoverKey,
+        delayMs: IDLE_DELAY_MS, idleFor: performance.now() - lastInputAt,
+        enabled: IDLE_ON, reduced: REDUCED, mobile: isMobile
+      };
+    },
+    idleSentences: idleSentences,
+    // The tagline (and, once opened, the story) spilled into the water.
+    seaText: function () {
+      return seaText
+        ? { id: seaText.id, extended: !!seaText.extended, alpha: seaAlpha,
+            lines: seaText.lines.map(function (l) {
+              return { row: l.row, col: l.col, text: l.text, kind: l.kind };
+            }) }
+        : null;
+    },
+    showSeaText: function (id, extend) {
+      const x = placeById.get(id);
+      if (!x) return null;
+      requestSeaText(x, !!extend);
+      return window.ATLAS_MAP_DEBUG.seaText();
+    },
+    hideSeaText: dissolveSeaText,
+    checkSeaText: checkSeaText,
+    // A grid cell -> a point on screen, so a test can click a drifting word.
+    cellToClient: function (col, row) {
+      if (!stage || !view) return null;
+      const sp = toStage((col + 0.5) * CHARW, (row + 0.5) * LINEH);
+      const r = stage.getBoundingClientRect();
+      return { x: r.left + sp.x, y: r.top + sp.y };
+    },
+    /* Resolve once every placement the last zoom or filter asked for has come
+       back and been painted. A placement is allowed to arrive a frame or two
+       late — that is the whole point of moving it off this thread — so a test
+       that wants to look at the labels has to have somewhere to wait. With no
+       worker there is nothing in flight and this is just the next frame. */
+    settle: function () {
+      return new Promise(function (resolve) {
+        let frames = 0;
+        const check = function () {
+          const busy = placementQueued || (workerActive() && placeSeq > placeApplied);
+          // 40 frames is two thirds of a second: long enough for any real
+          // round trip, short enough that a wedged worker cannot hang a test.
+          if (!busy || ++frames > 40) { resolve(placeStats.placements); return; }
+          requestAnimationFrame(check);
+        };
+        requestAnimationFrame(check);
+      });
+    }
   };
+
+  // Phases 7–8: event-driven worker requests; the animation loop only paints.
+  const artEngine = createMapArtEngine();
+  const serifFamily = getComputedStyle(document.documentElement).getPropertyValue('--font-serif').trim() || 'Georgia, serif';
+  let artPinned = false;
+  let artSeq = 0, artResult = null, artRequest = null, artCanvas = null, artInset = null;
+  let serifMode = false, serifPalette = null, repaintBase = null;
+  const artLatest = { country: 0, route: 0, palette: 0 };
+  function artGeometry() {
+    return { cols: COLS, rows: ROWS, charW: CHARW, lineH: LINEH, family: serifFamily };
+  }
+  function askArt(action, request) {
+    const seq = ++artSeq;
+    artLatest[action] = seq;
+    const message = { type: 'art', action, request, seq, build: buildSeq };
+    if (workerActive()) worker.postMessage(message);
+    else { countLayout(); acceptArt({ ...message, result: artEngine[action](request) }); }
+  }
+  function acceptArt(m) {
+    if (m.build !== buildSeq || m.seq !== artLatest[m.action]) return;
+    if (m.action === 'palette') {
+      serifPalette = m.result;
+      if (repaintBase) repaintBase();
+      return;
+    }
+    if (!artRequest || artRequest.action !== m.action) return;
+    artResult = m.result;
+    paintArt();
+    const status = $('map-story-status');
+    if (status) {
+      const place = placeById.get(artRequest.id)?.p;
+      status.textContent = m.action === 'country'
+        ? place.name + (artResult.mode !== 'country' ? ' · regional reading inset' : ' · story in ' + place.country)
+        : artRequest.label;
+      status.hidden = false;
+    }
+    const copy = $('map-story-copy');
+    if (copy) { copy.hidden = m.action !== 'country' || artResult.mode === 'caption'; copy.textContent = copy.hidden ? '' : placeById.get(artRequest.id).p.story; }
+    const note = $('map-route-note');
+    if (note) { note.hidden = artResult.mode !== 'caption' && (m.action !== 'route' || artResult.complete); note.textContent = note.hidden ? '' : (artResult.text || artRequest.text); }
+    const clear = $('map-art-clear');
+    if (clear) clear.hidden = false;
+  }
+  function requestArt() {
+    if (!CHARW || !artRequest) return;
+    const geometry = artGeometry();
+    if (artRequest.action === 'country') {
+      const x = placeById.get(artRequest.id);
+      const aliases = { 'Türkiye': 'Turkey', 'Malaysia (Borneo)': 'Malaysia', 'United States': 'United States of America' };
+      const names = x.p.country.split(' / ').map(name => aliases[name] || name);
+      const codes = names.map(name => MAPS.countryCodes.indexOf(MAPS.countryNames[name]) + 1).filter(n => n > 0);
+      askArt('country', { ...geometry, id: x.p.id, text: x.p.story, col: x.gcol, row: x.grow, countries: MAP.countries, codes });
+    } else {
+      // Hide geometry from the previous label mask while the worker reroutes.
+      artResult = null; paintArt();
+      const occupancy = new Uint8Array(COLS * ROWS);
+      for (const rec of [...labelRecords, ...oceanRecords]) for (const run of cellsOf(rec)) {
+        for (let c = run.c0; c <= run.c1; c++) occupancy[run.row * COLS + c] = 1;
+      }
+      for (const x of places) if (x.pos) for (let r = x.grow - 1; r <= x.grow + 1; r++) for (let c = x.gcol - 1; c <= x.gcol + 1; c++) {
+        if (r >= 0 && r < ROWS && c >= 0 && c < COLS) occupancy[r * COLS + c] = 1;
+      }
+      askArt('route', { ...geometry, ...artRequest, occupancy });
+    }
+  }
+  function paintArt() {
+    if (!artCanvas) return;
+    const ctx = artCanvas.getContext('2d');
+    ctx.clearRect(0, 0, mapW, mapH);
+    if (artInset) artInset.hidden = !artResult?.box;
+    if (!artResult) return;
+    const out = artResult;
+    if (out.box && artInset) {
+      for (const [key, value] of Object.entries({ left: out.box.x, top: out.box.y, width: out.box.width, height: out.box.height })) artInset.style.setProperty(key, value + 'px');
+    }
+    ctx.save();
+    if (out.box) {
+      ctx.fillStyle = 'rgba(9, 20, 35, 0.96)';
+      ctx.fillRect(out.box.x, out.box.y, out.box.width, out.box.height);
+      ctx.strokeStyle = '#7494a5'; ctx.strokeRect(out.box.x, out.box.y, out.box.width, out.box.height);
+    }
+    if (out.segments) {
+      ctx.strokeStyle = 'rgba(232,180,90,.45)'; ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (const s of out.segments) { ctx.moveTo(s.a.x, s.a.y); ctx.lineTo(s.b.x, s.b.y); }
+      ctx.stroke();
+    }
+    ctx.font = out.font; ctx.textBaseline = 'top'; ctx.fillStyle = '#f5e4c3';
+    for (const l of out.lines) {
+      ctx.save(); ctx.translate(l.x, l.y); ctx.rotate(l.angle || 0);
+      ctx.fillText(l.text, 0, 0); ctx.restore();
+    }
+    ctx.restore();
+  }
+  function showCountry(id, pin = true) {
+    if (!FLAGS.countryStories || !placeById.has(id)) return;
+    artPinned = pin;
+    artRequest = { action: 'country', id }; artResult = null; paintArt(); requestArt();
+  }
+  function showRoute(from, toId, label) {
+    const x = placeById.get(toId);
+    if (!FLAGS.routeText || !x || !from) return;
+    artPinned = true;
+    artRequest = { action: 'route', id: toId, from, to: parseCoords(x.p.coordinates), text: x.p.fact, label: label || 'Your location → ' + x.p.name };
+    artResult = null; paintArt(); requestArt();
+  }
+  function clearArt() {
+    artRequest = null; artResult = null; paintArt();
+    for (const id of ['map-story-status', 'map-route-note', 'map-story-copy', 'map-art-clear']) if ($(id)) $(id).hidden = true;
+  }
+  function setSerif(on) {
+    serifMode = !!on && FLAGS.serifAtlas !== false;
+    $('map-serif')?.setAttribute('aria-pressed', String(serifMode));
+    if (serifMode && !serifPalette) askArt('palette', { ...artGeometry(), size: PX });
+    if (repaintBase) repaintBase();
+    return serifMode;
+  }
+  window.ATLAS_MAP_ART = {
+    country: showCountry, route: showRoute, clear: clearArt, setSerif,
+    debug: () => ({ result: artResult, request: artRequest, serif: serifMode, palette: serifPalette, geometry: artGeometry(), countries: MAP.countries })
+  };
+  window.addEventListener('atlas:highlight', e => showCountry(e.detail, false));
+  window.addEventListener('hashchange', () => { if (!artPinned && !location.hash.startsWith('#/place/')) clearArt(); });
+  window.addEventListener('atlas:map-country', e => showCountry(e.detail));
+  window.addEventListener('atlas:map-route', e => {
+    const from = placeById.get(e.detail.from)?.p;
+    const to = placeById.get(e.detail.to)?.p;
+    if (from && to) showRoute(parseCoords(from.coordinates), to.id, from.name + ' → ' + to.name);
+  });
 
   // ---- Mutable per-build state -------------------------------------------
   let PX, LINEH, CHARW, mapW, mapH;
   let disp, vel, animId = 0, ambientTimer = null, hoverTimer = null, hoveredX = null;
+  let buildListeners = null;
   let stage, card, cardVisibleId = null;
   // Off-screen pause: when the map scrolls out of view we stop the animation
   // loop and ambient timer (they otherwise run for the page's whole life).
@@ -958,6 +1481,7 @@ import { routeText } from "./text-route.js";
   }
 
   function clearBuild() {
+    if (buildListeners) buildListeners.abort();
     if (animId) cancelAnimationFrame(animId);
     if (ambientTimer) { clearInterval(ambientTimer); ambientTimer = null; }
     if (hoverTimer) { clearInterval(hoverTimer); hoverTimer = null; }
@@ -975,10 +1499,19 @@ import { routeText } from "./text-route.js";
     labelRecords = [];
     oceanRecords = [];
     lastTier = -1; lastPlaceZoom = -1;
+    // The sea text was routed for the cell size that is going away.
+    releaseIdle();
+    idleRunning = false; idleForced = false; idleAlpha = 0; idleTarget = 0;
+    idleInfo.clear(); idleFrameState = []; idleHoverKey = 0;
+    seaText = null; seaTextId = null; seaTextMode = ""; seaAlpha = 0; seaTarget = 0;
+    seaClock = 0;
   }
 
   function build() {
     clearBuild();
+    buildListeners = new AbortController();
+    const listen = (type, callback, options = {}) => window.addEventListener(type, callback, { ...options, signal: buildListeners.signal });
+    buildSeq++;
     PX = computePX();
     LINEH = PX * ROW_FACTOR;
     const probe = document.createElement("canvas").getContext("2d");
@@ -987,6 +1520,7 @@ import { routeText } from "./text-route.js";
     mapW = COLS * CHARW;
     mapH = ROWS * LINEH;
     const FONT = PX + "px " + MONO;
+    serifPalette = null;
     view = { zoom: 1 };
     panX = 0; panY = 0;
     vpW = viewport.clientWidth || mapW;
@@ -1065,7 +1599,10 @@ import { routeText } from "./text-route.js";
     zoomEl.appendChild(base);
     const bctx = base.getContext("2d");
     bctx.scale(DPR, DPR);
-    bctx.font = FONT;
+    repaintBase = function () {
+    bctx.clearRect(0, 0, mapW, mapH);
+    const palette = serifMode && serifPalette;
+    bctx.font = palette ? palette.font : FONT;
     bctx.textBaseline = "middle";
     bctx.textAlign = "left";
     for (let r = 0; r < ROWS; r++) {
@@ -1076,13 +1613,18 @@ import { routeText } from "./text-route.js";
         const x = c * CHARW;
         if (kind[i]) {
           bctx.fillStyle = PALETTE[cellColor[i]];
-          bctx.fillText(String.fromCharCode(cellGlyph[i]), x, y);
+          const ink = palette && palette.ramp[3 + cellColor[i] % 5];
+          bctx.fillText(ink ? ink.glyph : String.fromCharCode(cellGlyph[i]), x + (ink ? (CHARW - ink.width) / 2 : 0), y);
         } else {
           bctx.fillStyle = "rgba(80, 130, 170, 0.10)";
           bctx.fillText("·", x, y);
         }
       }
     }
+
+    };
+    repaintBase();
+    if (serifMode) askArt("palette", { ...artGeometry(), size: PX });
 
     const sea = document.createElement("canvas");
     sea.width = Math.round(mapW * DPR);
@@ -1096,6 +1638,19 @@ import { routeText } from "./text-route.js";
     sctx.font = FONT;
     sctx.textBaseline = "middle";
     sctx.textAlign = "left";
+
+    artCanvas = document.createElement('canvas');
+    artCanvas.className = 'map-art';
+    artCanvas.width = Math.round(mapW * DPR); artCanvas.height = Math.round(mapH * DPR);
+    artCanvas.style.width = mapW + 'px'; artCanvas.style.height = mapH + 'px';
+    artCanvas.setAttribute('aria-hidden', 'true');
+    zoomEl.appendChild(artCanvas);
+    artCanvas.getContext('2d').scale(DPR, DPR);
+    artInset = document.createElement('div');
+    artInset.className = 'map-art-inset'; artInset.hidden = true;
+    artInset.setAttribute('aria-hidden', 'true');
+    zoomEl.appendChild(artInset);
+    artResult = null;
 
     // ---- Cloud layer --------------------------------------------------------
     // A handful of drifting white clouds crossing the map (land and sea).
@@ -1377,14 +1932,22 @@ import { routeText } from "./text-route.js";
       }
       return { pre: pre, f: f, str: str };
     }
+    /* The card is the one place text still has to be measured on this thread:
+       its fonts are read off its own live elements, which only exist here. So
+       every call below is counted, and ATLAS_MAP_DEBUG.mainThreadLayoutCalls()
+       reports it — a hovered card costs a handful of pretext calls, and that is
+       the honest number, worker or no worker. Each card is measured once and
+       cached (cardFits), so hovering the same dot again costs nothing. */
     function runWidth(role, text) {
       const h = runHandle(role, text);
       const room = Math.max(20, CARD_TEXT_W - h.f.chrome);
+      countLayout(1);
       // + ls: CSS paints a letter-space after the final grapheme too.
       return measureLineStats(h.pre, room).maxLineWidth + (h.str ? h.f.ls : 0) + h.f.chrome;
     }
     function runLines(role, text, textW) {
       const h = runHandle(role, text);
+      countLayout(1);
       return Math.max(1, measureLineStats(h.pre, Math.max(20, textW - h.f.chrome)).lineCount);
     }
 
@@ -1393,6 +1956,7 @@ import { routeText } from "./text-route.js";
     // (role "hover-card" == the .map-card-tag rule). If js/text.js is absent
     // or its `metrics` flag is off, fall back to the local pretext call.
     function tagLines(text, width) {
+      countLayout(1);
       const T = window.ATLAS_TEXT;
       if (T && typeof T.linesOfText === "function") {
         try {
@@ -1430,6 +1994,7 @@ import { routeText } from "./text-route.js";
         tagFits.set(p.id, fit);
         return fit;
       }
+      countLayout(1);
       let width = T.tightWidthOfText("hover-card", text, CARD_TEXT_W);
       let lines = tagLines(text, width);
       if (isWidow(lines)) {
@@ -1471,6 +2036,7 @@ import { routeText } from "./text-route.js";
       const T = window.ATLAS_TEXT;
       if (text && T && typeof T.tightWidthOfText === "function") {
         const room = Math.max(20, CARD_TEXT_W - f.chrome);
+        countLayout(2);
         try {
           fit.width = T.tightWidthOfText("native-name", text, room) + f.chrome;
           fit.dir = T.directionOf("native-name", p.id, p.nativeLang);
@@ -1487,6 +2053,7 @@ import { routeText } from "./text-route.js";
       const T = window.ATLAS_TEXT;
       const room = Math.max(20, textW - CARD_FONTS.native.chrome);
       if (T && typeof T.lineCountOfText === "function") {
+        countLayout(1);
         try { return Math.max(1, T.lineCountOfText("native-name", fit.text, room)); }
         catch (e) { return 1; }
       }
@@ -1682,6 +2249,8 @@ import { routeText } from "./text-route.js";
         const le = labelEl();
         if (le) le.classList.add("is-hot");
         hoveredX = x;
+        // …and the tagline spills into the water beside the dot.
+        requestSeaText(x, false);
         const tick = () => { if (hoveredX === x) stir(x.pos.col, x.pos.row, 0.85); };
         tick();
         if (hoverTimer) clearInterval(hoverTimer);
@@ -1695,6 +2264,9 @@ import { routeText } from "./text-route.js";
         m.classList.remove("is-hot");
         const le = labelEl();
         if (le) le.classList.remove("is-hot");
+        // The story on the water stays while the place is open; a plain hover
+        // dissolves over ~300ms.
+        if (seaTextMode !== "open" || seaTextId !== p.id) dissolveSeaText();
       };
       // The name label hovers like its dot (js/map.js's label layer calls
       // these), and both light the same grid card.
@@ -1721,17 +2293,32 @@ import { routeText } from "./text-route.js";
       const fit = cardFit(x);
       return fit.nativeLines || 0;
     };
+
+    // The sea text is set in the grid's own font, so both hosts have to be told
+    // the new cell size (and the new marker cells) after every rebuild.
+    lastInputAt = performance.now();
+    sendGeometry();
+
     applyView();
     requestPlacement();   // ocean names at tier 0, place names from 1.4×
 
     // ---- Pulse a marker when its place is opened from the grid/dialog (#4) ----
-    window.addEventListener("atlas:highlight", (e) => {
+    listen("atlas:highlight", (e) => {
       const id = e.detail;
+      // Opening the place extends the tagline on the water with the opening
+      // sentences of its field note.
+      const x = placeById.get(id);
+      if (x) requestSeaText(x, true);
       const ref = markerRefs.find((r) => r.id === id);
       if (!ref) return;
       ref.el.classList.add("is-pulsing");
       clearTimeout(ref.pulseT);
       ref.pulseT = setTimeout(() => ref.el.classList.remove("is-pulsing"), 1600);
+    });
+    // Leaving the place route takes the extended story back off the water.
+    listen("hashchange", () => {
+      if (seaTextMode !== "open") return;
+      if (!/^#\/place\//.test(location.hash || "")) dissolveSeaText();
     });
 
     // ---- "You are here" marker + nearest wonder (#3) -----------------------
@@ -1753,7 +2340,7 @@ import { routeText } from "./text-route.js";
         userLabel.style.top = y + "px";
       }
     }
-    window.addEventListener("atlas:locate", (e) => {
+    listen("atlas:locate", (e) => {
       const { lat, lon } = e.detail;
       userLoc = { lat, lon };
       if (!userMarker) {
@@ -1778,13 +2365,14 @@ import { routeText } from "./text-route.js";
         if (d < bestD) { bestD = d; best = p; }
       }
       if (best) {
+        showRoute({ lat, lon }, best.id);
         userLabel.textContent = "You are here · nearest: " + best.name + " (" + fmtKm(bestD) + ")";
         userLabel.classList.add("is-visible");
       }
       placeUserMarker();
       // If reduced motion, keep it static (no CSS animation is fine).
     });
-    window.addEventListener("atlas:locate-error", () => {
+    listen("atlas:locate-error", () => {
       if (userLabel) {
         userLabel.textContent = "Couldn't get your location — allow it and try again";
         userLabel.classList.add("is-visible", "is-error");
@@ -1797,9 +2385,38 @@ import { routeText } from "./text-route.js";
     const refreshRect = () => {
       const r = stage.getBoundingClientRect();
       rect = { left: r.left, top: r.top };
+      stageRect = rect;   // the sea hit test starts from the same box
     };
+    refreshStageRect = refreshRect;
     refreshRect();
-    window.addEventListener("scroll", refreshRect, { passive: true, once: false });
+    listen("scroll", refreshRect, { passive: true, once: false });
+
+    /* ---- The idle sea's own pointer contract --------------------------
+       Any pointer movement dissolves the drifting sentences — except a movement
+       that lands on one of them, which is a reader following a line rather than
+       reaching for something else. That hover brightens the sentence, holds its
+       drift, and leaves the idle clock alone, so the sentence can be read (and
+       clicked) without the sea evaporating under the cursor. */
+    listen("pointermove", (e) => {
+      if (!idleRunning) { noteInput(); return; }
+      const hit = FLAGS.seaClick ? seaHitTest(e.clientX, e.clientY) : null;
+      if (hit) {
+        if (idleHoverKey !== hit.key) {
+          idleHoverKey = hit.key;
+          setIdlePaused(hit.key);
+          stage.dataset.seaHover = "true";   // the word is a link; say so
+        }
+        return;
+      }
+      if (idleHoverKey) {
+        idleHoverKey = 0;
+        setIdlePaused(0);
+        stage.removeAttribute("data-sea-hover");
+      }
+      noteInput();
+    }, { passive: true });
+    listen("keydown", noteInput, { passive: true });
+    listen("wheel", noteInput, { passive: true });
 
     // Pan: drag on the stage (pointer events cover mouse + touch).
     stage.addEventListener("pointermove", (e) => {
@@ -1853,7 +2470,7 @@ import { routeText } from "./text-route.js";
       drag.lastX = sx; drag.lastY = sy;
       drag.active = true; drag.moved = false;
     });
-    window.addEventListener("pointerup", (e) => {
+    listen("pointerup", (e) => {
       const wasTap = drag.active && !drag.moved;
       drag.active = false;
       if (!wasTap) return;
@@ -1899,10 +2516,24 @@ import { routeText } from "./text-route.js";
     // Tap empty sea also dismisses an open card (but a pan shouldn't).
     stage.addEventListener("click", (e) => {
       if (drag.moved) return;
+      // A drifting word is a link: it opens the field note it was lifted from.
+      // The sentences stay on the water behind the dialog. The gate is the
+      // painted alpha rather than `idleRunning`, so a word that is still on
+      // screen still answers the click that the pointer's own arrival started
+      // dissolving.
+      if (FLAGS.seaClick && idleAlpha > 0.05) {
+        const hit = seaHitTest(e.clientX, e.clientY);
+        if (hit) {
+          e.stopPropagation();
+          const hash = "#/place/" + encodeURIComponent(hit.id);
+          if (location.hash !== hash) location.hash = hash;
+          return;
+        }
+      }
       if (e.target === base || e.target === sea) hideCard();
     });
 
-    ambientTimer = setInterval(() => {
+    if (!REDUCED) ambientTimer = setInterval(() => {
       const i = waterCells[(Math.random() * waterCells.length) | 0];
       disp[i] += 0.75;
       if (Math.random() < 0.5) {
@@ -1947,6 +2578,8 @@ import { routeText } from "./text-route.js";
       }
 
       sctx.clearRect(0, 0, mapW, mapH);
+      const inkPalette = serifMode && serifPalette;
+      sctx.font = inkPalette ? inkPalette.font : FONT;
       const N = waterLen;
       for (let w = 0; w < N; w++) {
         const i = waterList[w];
@@ -1978,7 +2611,8 @@ import { routeText } from "./text-route.js";
         if (densityRaw <= 0.08) continue;            // static floor shows through
         const lvl = Math.max(1, Math.min(5, (densityRaw * 6) | 0));
         sctx.fillStyle = OCEAN_COLORS[lvl];
-        sctx.fillText(OCEAN_GLYPHS[lvl], c * CHARW, y);
+        const ink = inkPalette && inkPalette.ramp[Math.min(7, lvl + 1)];
+        sctx.fillText(ink ? ink.glyph : OCEAN_GLYPHS[lvl], c * CHARW + (ink ? (CHARW - ink.width) / 2 : 0), REDUCED ? y0 : y);
         // Troughs dip below the baseline in a dimmer tone, so a splash has a
         // visible leading and trailing edge, not just a bright crest.
         if (d < -0.5) {
@@ -1986,6 +2620,13 @@ import { routeText } from "./text-route.js";
           sctx.fillText("·", c * CHARW, y);
         }
       }
+      // The sea's own text, on the same canvas and lifted by the same field:
+      // the hovered place's story, and the sentences drifting on the currents.
+      // stepSea() advances the two dissolve clocks and asks the layout host for
+      // the next idle frame; nothing here ever waits for the answer.
+      stepSea(now);
+      sctx.font = FONT;
+      drawSeaText(sctx);
       // Drifting white clouds on top of the waves (fades out over Antarctica).
       drawClouds(t);
       animId = requestAnimationFrame(frame);
@@ -2087,6 +2728,11 @@ import { routeText } from "./text-route.js";
 
     // ---- Map controls: zoom in/out, reset (#16). The "Locate me" button is
     // owned by app.js (it runs geolocation); map.js only reacts to its events.
+    if ($("map-serif")) {
+      $("map-serif").hidden = FLAGS.serifAtlas === false;
+      $("map-serif").addEventListener("click", () => setSerif(!serifMode));
+    }
+    $("map-art-clear")?.addEventListener("click", clearArt);
     const zin = $("map-zoom-in");
     const zout = $("map-zoom-out");
     const zreset = $("map-zoom-reset");

@@ -891,6 +891,13 @@ dialog::backdrop {
   white-space: nowrap;
 }
 
+/* The sentences drifting on the sea are painted into the sea canvas, not into
+   the DOM, so there is no element to carry `cursor: pointer`. js/map.js's hit
+   test sets this attribute while a drifting word is under the pointer — the
+   same test that decides what a click opens — so the word reads as the link it
+   is. (The glyphs themselves live on the canvas; see "The living sea".) */
+.map-stage[data-sea-hover="true"] { cursor: pointer; }
+
 /* The pan/zoom unit. Sized mapW×mapH by map.js and transformed as one (scale
    about centre + translate). The base/sea/cloud/marker layers are absolute
    children that fill it, so they all move together. --zoom (set inline) is
@@ -1841,3 +1848,20 @@ dialog::backdrop {
   body.is-reading .book-meta,
   body.is-reading .book-label { color: #6b4d13; }
 }
+
+/* Phases 7–8: map reading and alternate ink. */
+.map-art { position: absolute; inset: 0; z-index: 6; pointer-events: none; }
+.map-story-status, .map-route-note { margin: 0; padding: .7rem 1.5rem; background: #0c1928; color: #f5e4c3; }
+.map-route-note { font: 1rem/1.6 Georgia, serif; }
+.map-btn[aria-pressed="true"] { background: #e8b45a; color: #101a28; }
+.dialog-map-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; padding: 1rem 1.5rem; border-top: 1px solid var(--border); }
+.dialog-map-actions select { min-width: 0; max-width: 100%; padding: .5rem; background: #152333; color: #f5e4c3; border: 1px solid #627487; border-radius: .25rem; }
+@media (max-width: 640px) { .map-controls { flex-wrap: wrap; max-width: calc(100% - 2rem); } }
+
+/* Reading captions sit below the map without resizing its coordinate space. */
+.atlas:has(.map-story-status:not([hidden])) { height: auto; min-height: calc(100vh - 110px); }
+.atlas:has(.map-story-status:not([hidden])) .map-viewport { flex: none; height: calc(100vh - 162px); min-height: 430px; }
+
+.map-art-inset { position: absolute; z-index: 7; }
+
+.dialog-map-actions[hidden], .map-art-inset[hidden] { display: none; }

@@ -92,9 +92,14 @@ function countryAt(lon, lat) {
   return null;
 }
 
+const countryCodes = [...countryRings.keys()];
+const countryIndex = new Map(countryCodes.map((code, i) => [code, i + 1]));
+const countryNames = Object.fromEntries(geo.features.map(f => [f.properties.ADMIN, f.properties.ADM0_A3]));
+
 function buildGrid(cols, rows) {
   const glyphs = new Array(rows);
   const colors = new Array(rows);
+  const countries = new Array(cols * rows).fill(0);
   const t0 = Date.now();
   for (let r = 0; r < rows; r++) {
     let gRow = "";
@@ -113,6 +118,7 @@ function buildGrid(cols, rows) {
         }
       }
       if (hits >= THRESH && code) {
+        countries[r * cols + c] = countryIndex.get(code);
         // One char per cell: 'A' + palette index. Uniform per continent —
         // every country in the continent shares one color + one glyph.
         const cont = countryContinent.get(code) || "Asia";
@@ -128,10 +134,11 @@ function buildGrid(cols, rows) {
     colors[r] = cRow;
   }
   console.log(`grid ${cols}x${rows}: ${Date.now() - t0}ms`);
-  return { cols, rows, glyphs, colors };
+  return { cols, rows, glyphs, colors, countries };
 }
 
 const out = {
+  countryCodes, countryNames,
   palette: PALETTE,
   paletteSteps: PALETTE_STEPS,
   continents: Object.fromEntries(continentIdx),

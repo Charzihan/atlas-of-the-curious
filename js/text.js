@@ -772,6 +772,9 @@ export const DEFAULT_FLAGS = {
   searchHighlight: true,// matched tokens in a card tagline are set bold
   localeText: true,     // native strings are prepared under their own locale
   // Phase 5 — the map in a worker (js/map.js).
+  worker: true, seaStories: true, idleSea: true, seaClick: true,
+  // Phases 7–8 — shapes, routes, and proportional map ink.
+  countryStories: true, routeText: true, serifAtlas: true,
   // Phase 6 — ways to read.
   bookMode: true,       // "Read as a book": the paginated field guide
   notebook: true        // the visitor's notebook in the dialog and the reader

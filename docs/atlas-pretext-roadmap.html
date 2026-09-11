@@ -1,0 +1,971 @@
+<title>Atlas Pretext Roadmap</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: #0b1020;
+    --bg-soft: #0f1630;
+    --panel: #121a38;
+    --panel-2: #1a2450;
+    --ink: #e8ecf8;
+    --ink-dim: #9aa4c8;
+    --ink-faint: #6d769a;
+    --line: rgba(154, 164, 200, 0.2);
+    --gold: #e8b45a;
+    --gold-soft: rgba(232, 180, 90, 0.14);
+    --p0: #9aa4c8;
+    --p1: #e8b45a;
+    --p2: #66bb6a;
+    --p3: #ce93d8;
+    --p4: #f0975a;
+    --p5: #4fc3f7;
+    --p6: #90caf9;
+    --p7: #ef5350;
+    --p8: #d9c9a3;
+    --serif: Georgia, "Times New Roman", Times, serif;
+    --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "DejaVu Sans Mono", monospace;
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #f3f5fb;
+      --bg-soft: #eaeef8;
+      --panel: #ffffff;
+      --panel-2: #e6ebf7;
+      --ink: #151b36;
+      --ink-dim: #5b6484;
+      --ink-faint: #8089a8;
+      --line: rgba(21, 27, 54, 0.14);
+      --gold: #9a6a17;
+      --gold-soft: rgba(154, 106, 23, 0.12);
+      --p0: #5b6484;
+      --p1: #9a6a17;
+      --p2: #2e7d32;
+      --p3: #7b3fa0;
+      --p4: #b8561c;
+      --p5: #0b6f9e;
+      --p6: #1f5f8b;
+      --p7: #b3261e;
+      --p8: #6b5a2e;
+      color-scheme: light;
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #f3f5fb;
+    --bg-soft: #eaeef8;
+    --panel: #ffffff;
+    --panel-2: #e6ebf7;
+    --ink: #151b36;
+    --ink-dim: #5b6484;
+    --ink-faint: #8089a8;
+    --line: rgba(21, 27, 54, 0.14);
+    --gold: #9a6a17;
+    --gold-soft: rgba(154, 106, 23, 0.12);
+    --p0: #5b6484;
+    --p1: #9a6a17;
+    --p2: #2e7d32;
+    --p3: #7b3fa0;
+    --p4: #b8561c;
+    --p5: #0b6f9e;
+    --p6: #1f5f8b;
+    --p7: #b3261e;
+    --p8: #6b5a2e;
+    color-scheme: light;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 17px;
+    line-height: 1.6;
+    padding-block: 0 80px;
+    padding-inline: 20px;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; }
+
+  a { color: var(--gold); }
+  code, .mono { font-family: var(--mono); }
+  code {
+    font-size: 0.86em;
+    background: var(--panel-2);
+    padding: 1px 5px;
+    border-radius: 3px;
+    color: var(--ink);
+  }
+  h1, h2, h3, h4 { font-weight: normal; text-wrap: balance; margin: 0; }
+  p { margin: 0; }
+  .visually-hidden {
+    position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+
+  /* ---------- masthead ---------- */
+  .mast {
+    padding-block: 44px 28px;
+    border-bottom: 1px solid var(--line);
+  }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--gold);
+    margin-bottom: 14px;
+  }
+  .eyebrow .glyph { margin-right: 8px; }
+  .mast h1 {
+    font-size: clamp(1.9rem, 4.6vw, 2.6rem);
+    line-height: 1.15;
+    letter-spacing: -0.005em;
+    margin-bottom: 14px;
+  }
+  .deck {
+    font-size: 1.12rem;
+    color: var(--ink-dim);
+    max-width: 62ch;
+    margin-bottom: 22px;
+  }
+  .meta {
+    display: flex; flex-wrap: wrap; gap: 8px 22px;
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    color: var(--ink-faint);
+  }
+  .meta b { color: var(--ink-dim); font-weight: 500; }
+
+  /* ---------- baseline ---------- */
+  .baseline {
+    padding-block: 26px;
+    border-bottom: 1px solid var(--line);
+    display: grid;
+    grid-template-columns: 180px 1fr;
+    gap: 6px 28px;
+  }
+  .baseline .label {
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    padding-top: 5px;
+  }
+  .baseline p { max-width: 62ch; }
+  .baseline p + p { margin-top: 8px; }
+
+  /* ---------- sequence strip ---------- */
+  .strip-head {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 16px; flex-wrap: wrap;
+    padding-block: 30px 12px;
+  }
+  .strip-head h2 { font-size: 1.35rem; }
+  .strip-head .note { font-family: var(--mono); font-size: 0.76rem; color: var(--ink-faint); }
+  .strip {
+    list-style: none; margin: 0; padding: 0;
+    display: flex; gap: 3px;
+  }
+  .strip li {
+    --accent: var(--p0);
+    flex: var(--days) 1 0;
+    min-width: 16px;
+    height: 36px;
+    border-top: 3px solid var(--accent);
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+    display: flex; align-items: center;
+    padding-inline: 7px;
+    font-family: var(--mono); font-size: 0.74rem; color: var(--accent);
+    overflow: hidden;
+  }
+  .strip .p1 { --accent: var(--p1); }
+  .strip .p2 { --accent: var(--p2); }
+  .strip .p3 { --accent: var(--p3); }
+  .strip .p4 { --accent: var(--p4); }
+  .strip .p5 { --accent: var(--p5); }
+  .strip .p6 { --accent: var(--p6); }
+  .strip .p7 { --accent: var(--p7); }
+  .strip .p8 { --accent: var(--p8); }
+  @media (max-width: 640px) {
+    .strip li { padding-inline: 4px; font-size: 0.66rem; }
+  }
+
+  /* ---------- summary table ---------- */
+  .tablewrap { overflow-x: auto; margin-block: 22px 8px; }
+  table {
+    border-collapse: collapse; width: 100%;
+    font-size: 0.94rem;
+  }
+  th, td {
+    text-align: left; vertical-align: top;
+    padding: 9px 12px 9px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  th {
+    font-family: var(--mono); font-weight: 500; font-size: 0.72rem;
+    letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-faint);
+  }
+  td.num { font-family: var(--mono); font-size: 0.82rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  td.name { white-space: nowrap; }
+  td.eff, td.dep { font-family: var(--mono); font-size: 0.82rem; white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--ink-dim); }
+  td.what { min-width: 22ch; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 8px; vertical-align: 0; background: var(--accent, var(--p0)); }
+
+  /* ---------- phases ---------- */
+  .phase {
+    --accent: var(--p0);
+    padding-block: 40px 30px;
+    border-top: 1px solid var(--line);
+  }
+  .phase.p1 { --accent: var(--p1); }
+  .phase.p2 { --accent: var(--p2); }
+  .phase.p3 { --accent: var(--p3); }
+  .phase.p4 { --accent: var(--p4); }
+  .phase.p5 { --accent: var(--p5); }
+  .phase.p6 { --accent: var(--p6); }
+  .phase.p7 { --accent: var(--p7); }
+  .phase.p8 { --accent: var(--p8); }
+  .phase-head {
+    display: grid;
+    grid-template-columns: 64px 1fr;
+    gap: 6px 22px;
+    align-items: start;
+    margin-bottom: 24px;
+  }
+  .phase-num {
+    font-family: var(--mono);
+    font-size: 2.1rem;
+    line-height: 1;
+    color: var(--accent);
+    padding-top: 4px;
+  }
+  .phase-head h2 { font-size: 1.55rem; line-height: 1.2; }
+  .phase-head .why { color: var(--ink-dim); max-width: 62ch; margin-top: 8px; }
+  .phase-facts {
+    grid-column: 2;
+    display: flex; flex-wrap: wrap; gap: 6px 24px;
+    font-family: var(--mono); font-size: 0.78rem; color: var(--ink-faint);
+    margin-top: 10px;
+  }
+  .phase-facts b { color: var(--ink-dim); font-weight: 500; }
+
+  .feature {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 6px 22px;
+    padding-block: 18px;
+    border-top: 1px dashed var(--line);
+  }
+  .feature h3 {
+    font-size: 1.05rem; line-height: 1.3;
+  }
+  .feature .lede { max-width: 66ch; }
+  .feature .how { max-width: 66ch; color: var(--ink-dim); margin-top: 8px; }
+  .kv {
+    display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px;
+    margin-top: 12px;
+    font-size: 0.9rem;
+  }
+  .kv .k {
+    font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--accent); padding-top: 4px;
+  }
+  .kv .v { color: var(--ink-dim); }
+  .kv .v code { font-size: 0.8rem; }
+
+  .done {
+    margin-top: 22px;
+    padding: 14px 18px;
+    background: var(--panel);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 6px 6px 0;
+    max-width: 70ch;
+  }
+  .done .k {
+    font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--accent); margin-bottom: 6px;
+  }
+  .done ul { margin: 0; padding-left: 18px; }
+  .done li + li { margin-top: 4px; }
+
+  /* ---------- rails ---------- */
+  .rails {
+    border-top: 1px solid var(--line);
+    padding-block: 40px 10px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 28px 40px;
+  }
+  .rails h2 { font-size: 1.35rem; margin-bottom: 12px; }
+  .rails ul { margin: 0; padding-left: 18px; }
+  .rails li { margin-bottom: 8px; max-width: 48ch; color: var(--ink-dim); }
+  .rails li b { font-weight: normal; color: var(--ink); }
+
+  .foot {
+    margin-top: 44px; padding-top: 18px; border-top: 1px solid var(--line);
+    font-family: var(--mono); font-size: 0.74rem; color: var(--ink-faint);
+    display: flex; flex-wrap: wrap; gap: 6px 20px;
+  }
+
+  @media (max-width: 700px) {
+    .baseline { grid-template-columns: 1fr; gap: 4px; }
+    .phase-head { grid-template-columns: 48px 1fr; }
+    .phase-num { font-size: 1.6rem; }
+    .phase-facts { grid-column: 1 / -1; }
+    .feature { grid-template-columns: 1fr; gap: 4px; }
+    .rails { grid-template-columns: 1fr; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    html { scroll-behavior: smooth; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="mast">
+    <p class="eyebrow"><span class="glyph" aria-hidden="true">✦</span>Atlas of the Curious · engineering roadmap</p>
+    <h1>Pretext, past the hover card</h1>
+    <p class="deck">Nine phases that move text layout off the DOM and onto the map, the grid, and the field notes. Ordered so the most visible change ships first and every later phase reuses what came before.</p>
+    <div class="meta">
+      <span><b>Drafted</b> 10 Sep 2026</span>
+      <span><b>Library</b> @chenglou/pretext 0.0.9, vendored</span>
+      <span><b>Estimates</b> working days, one developer</span>
+      <span><b>Total</b> about 40 to 54 days</span>
+    </div>
+  </header>
+
+  <section class="baseline" aria-label="Where the site stands today">
+    <span class="label">Today</span>
+    <div>
+      <p>Pretext does one job on the site: it wraps a tagline at 30 characters inside the map hover card. The masonry grid still reads every card's height from the DOM on each filter change, the map draws markers as plain dots with no names, and the dialog renders the story as a single paragraph.</p>
+      <p>Everything below keeps the site's constraints: strict Content-Security-Policy, no inline styles, no external requests, and a service worker that expects the same file set.</p>
+    </div>
+  </section>
+
+  <div class="strip-head">
+    <h2>Sequence</h2>
+    <span class="note">segment width ∝ estimated days</span>
+  </div>
+  <ol class="strip" aria-label="Phase sequence, sized by effort">
+    <li class="p0" style="--days: 2">0<span class="visually-hidden"> Foundation, 2 days</span></li>
+    <li class="p1" style="--days: 5.5">1<span class="visually-hidden"> Labels on the map, 5 to 6 days</span></li>
+    <li class="p2" style="--days: 4.5">2<span class="visually-hidden"> The predictive grid, 4 to 5 days</span></li>
+    <li class="p3" style="--days: 7">3<span class="visually-hidden"> The editorial field note, 6 to 8 days</span></li>
+    <li class="p4" style="--days: 2.5">4<span class="visually-hidden"> Names in their own script, 2 to 3 days</span></li>
+    <li class="p5" style="--days: 9.5">5<span class="visually-hidden"> The living sea, 8 to 11 days</span></li>
+    <li class="p6" style="--days: 5">6<span class="visually-hidden"> Ways to read, 4 to 6 days</span></li>
+    <li class="p7" style="--days: 6">7<span class="visually-hidden"> Shapes and paths, 5 to 7 days</span></li>
+    <li class="p8" style="--days: 5">8<span class="visually-hidden"> A serif atlas, 4 to 6 days</span></li>
+  </ol>
+
+  <div class="tablewrap">
+    <table>
+      <thead>
+        <tr><th>Phase</th><th>Name</th><th>What a visitor notices</th><th>Needs</th><th>Days</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="num"><span class="dot" style="--accent: var(--p0)"></span>0</td><td class="name">Foundation</td><td class="what">Nothing yet. One measurement module, one font registry, and two automated checks.</td><td class="dep">—</td><td class="eff">2</td></tr>
+        <tr><td class="num"><span class="dot" style="--accent: var(--p1)"></span>1</td><td class="name">Labels on the map</td><td class="what">Place names appear as you zoom, set into open water. Ocean names in spaced capitals. The hover card hugs its text.</td><td class="dep">0</td><td class="eff">5–6</td></tr>
+        <tr><td class="num"><span class="dot" style="--accent: var(--p2)"></span>2</td><td class="name">The predictive grid</td><td class="what">Filtering feels like sorting a deck: cards glide, the one under your cursor stays put, and a card can open right in the grid.</td><td class="dep">0</td><td class="eff">4–5</td></tr>
+        <tr><td class="num"><span class="dot" style="--accent: var(--p3)"></span>3</td><td class="name">The editorial field note</td><td class="what">A field note reads like a printed spread: drop cap, a pulled quote the text flows around, justified columns on wide screens, lines that arrive one at a time.</td><td class="dep">0, 2</td><td class="eff">6–8</td></tr>
+        <tr><td class="num"><span class="dot" style="--accent: var(--p4)"></span>4</td><td class="name">Names in their own script</td><td class="what">Every place also carries its name in its own script. Search matches are highlighted without breaking the wrap.</td><td class="dep">1</td><td class="eff">2–3</td></tr>
+        <tr><td class="num"><span class="dot" style="--accent: var(--p5)"></span>5</td><td class="name">The living sea</td><td class="what">Taglines spill into the water on hover, stories drift as currents when the page is idle, and a drifting sentence can be clicked.</td><td class="dep">1, 4</td><td class="eff">8–11</td></tr>
+        <tr><td class="num"><span class="dot" style="--accent: var(--p6)"></span>6</td><td class="name">Ways to read</td><td class="what">A book mode with true page numbers, and a private notebook under each place.</td><td class="dep">2, 3</td><td class="eff">4–6</td></tr>
+        <tr><td class="num"><span class="dot" style="--accent: var(--p7)"></span>7</td><td class="name">Shapes and paths</td><td class="what">A story fills the outline of its country. After Locate me, a field note reads along the route to the nearest wonder.</td><td class="dep">1, 5</td><td class="eff">5–7</td></tr>
+        <tr><td class="num"><span class="dot" style="--accent: var(--p8)"></span>8</td><td class="name">A serif atlas</td><td class="what">A toggle redraws the coastlines and the water in the site's serif face.</td><td class="dep">5</td><td class="eff">4–6</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ================= PHASE 0 ================= -->
+  <section class="phase p0" id="phase-0">
+    <div class="phase-head">
+      <span class="phase-num" aria-hidden="true">0</span>
+      <div>
+        <h2>Foundation</h2>
+        <p class="why">One place that prepares text once and answers layout questions cheaply, plus the checks that keep predictions honest. Every later phase calls into it, so it is worth two days before anything visible.</p>
+      </div>
+      <div class="phase-facts">
+        <span><b>Effort</b> 2 days</span>
+        <span><b>Depends on</b> nothing</span>
+        <span><b>Touches</b> js/text.js (new), css/style.css, index.html, js/map.js, scripts/validate-data.mjs, package.json</span>
+      </div>
+    </div>
+
+    <div class="feature">
+      <h3>Text metrics module</h3>
+      <div>
+        <p class="lede">A small module that prepares every place's name, tagline, and story in each font role at boot and keeps the prepared handles. It answers "how tall is this text at this width", "which lines does it break into", and "what is the tightest width that keeps the same line count".</p>
+        <p class="how">The tight-width answer is a binary search over widths, checking the line count at each step, the same approach as pretext's bubbles demo. Its interface is plain data in, plain data out, so in phase 5 the same module runs unchanged inside a worker.</p>
+        <div class="kv">
+          <span class="k">Uses</span><span class="v"><code>prepare</code> · <code>prepareWithSegments</code> · <code>layout</code> · <code>walkLineRanges</code> · <code>measureLineStats</code></span>
+          <span class="k">Exposes</span><span class="v"><code>heightOf(role, id, width)</code> · <code>linesOf(role, id, width)</code> · <code>tightWidth(role, id, maxWidth)</code></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="feature">
+      <h3>Font role registry</h3>
+      <div>
+        <p class="lede">Each text role the site measures gets one canonical entry: family, size, weight, letter-spacing, and line-height. CSS custom properties hold the values; the module reads them once from computed style, so CSS stays the single source of truth.</p>
+        <p class="how">Roles to register: card name, card tagline, dialog story, dialog quote, map label, ocean label, hover card, notebook. Replace the generic <code>ui-monospace</code> keyword with a named monospace face in both places, because a generic keyword can resolve to a different font in canvas than in CSS.</p>
+      </div>
+    </div>
+
+    <div class="feature">
+      <h3>Agreement check in development</h3>
+      <div>
+        <p class="lede">On localhost only, compare the predicted height of five cards against the DOM's measured height and warn in the console when they differ by more than a line. Font drift between CSS and the registry shows up here before it ships.</p>
+      </div>
+    </div>
+
+    <div class="feature">
+      <h3>Automated overflow checks</h3>
+      <div>
+        <p class="lede">A headless-browser test, run by the validate script, prepares every name, tagline, and chip label at 320, 768, and 1280 pixels and fails when a name needs more than two lines in a card, a chip breaks across lines, or a hover card passes three lines. A bad dataset entry is caught before it ships, without anyone opening the site.</p>
+        <p class="how">This is the development-time verification the pretext README describes. Playwright joins the dev dependencies; the test takes a few seconds for 40 places.</p>
+        <div class="kv">
+          <span class="k">Uses</span><span class="v"><code>layout</code> · <code>measureLineStats</code></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="done">
+      <div class="k">Done when</div>
+      <ul>
+        <li>The map hover card wraps through the module instead of its own probe canvas.</li>
+        <li>The agreement check passes in Chrome, Firefox, and Safari.</li>
+        <li>The overflow test runs with <code>pnpm validate</code> and passes for the current 40 places.</li>
+        <li>The service worker's file list includes the new module.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ================= PHASE 1 ================= -->
+  <section class="phase p1" id="phase-1">
+    <div class="phase-head">
+      <span class="phase-num" aria-hidden="true">1</span>
+      <div>
+        <h2>Labels on the map</h2>
+        <p class="why">The Text Atlas is the site's signature, and it is mute. Names set into open water, appearing as you zoom, turn a diagram of dots into a map you can read.</p>
+      </div>
+      <div class="phase-facts">
+        <span><b>Effort</b> 5–6 days</span>
+        <span><b>Depends on</b> phase 0</span>
+        <span><b>Touches</b> js/map.js, css/style.css</span>
+      </div>
+    </div>
+
+    <div class="feature">
+      <h3>Coastline-aware labels</h3>
+      <div>
+        <p class="lede">Each marker's name is placed into sea cells only. The layout tries eight anchor directions around the dot; for each candidate it reads the run of free water cells per row from the land grid and feeds those widths, one row at a time, to pretext's variable-width line routine. A label is scored by line count, distance from the dot, and overlap with an occupancy mask of cells other labels already use. The best candidate wins.</p>
+        <p class="how">This is the obstacle-routing pattern from pretext's dynamic-layout demo, with continents as the obstacles. The occupancy mask is a byte array the size of the grid, cleared on each rebuild.</p>
+        <div class="kv">
+          <span class="k">Uses</span><span class="v"><code>layoutNextLineRange</code> · <code>materializeLineRange</code> · <code>measureLineStats</code></span>
+          <span class="k">Renders</span><span class="v">positioned spans in the marker layer, so labels stay hoverable and readable by assistive tech</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="feature">
+      <h3>Zoom-level typography</h3>
+      <div>
+        <p class="lede">Three tiers keyed to the zoom factor: nothing at the base view, the name from about 1.4×, name and tagline from about 2.4×. Each name is prepared once; only the cheap layout step runs on zoom frames, so the labels re-flow live inside the existing animation loop.</p>
+        <p class="how">The available width in characters changes with zoom, which is exactly the case pretext's separation of prepare and layout is built for.</p>
+        <div class="kv">
+          <span class="k">Uses</span><span class="v"><code>layoutWithLines</code> on the tier's prepared handle</span>
+          <span class="k">Mobile</span><span class="v">labels off below 640px; the hover card carries the name instead</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="feature">
+      <h3>Ocean names in spaced capitals</h3>
+      <div>
+        <p class="lede">PACIFIC OCEAN, INDIAN OCEAN, and the named seas set in letter-spaced capitals across open water, the convention printed atlases use. Letter-spacing is an input to pretext's prepare step, so each label's width is exact before placement, and ocean names share the occupancy mask with the place labels so the two never collide.</p>
+        <p class="how">A short list of ocean and sea names with anchor coordinates lives in the map module. Tracking widens slightly with zoom, and the width stays known at every step.</p>
+        <div class="kv">
+          <span class="k">Uses</span><span class="v"><code>prepareWithSegments</code> with <code>letterSpacing</code> · <code>measureNaturalWidth</code></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="feature">
+      <h3>Hover card that hugs its text</h3>
+      <div>
+        <p class="lede">The card currently wraps at a fixed 30 characters and often leaves one word on the last line. Ask the metrics module for the tightest width that keeps the line count, size the card to the widest line plus padding, and measure before deciding which side of the marker the card opens on.</p>
+        <div class="kv">
+          <span class="k">Uses</span><span class="v"><code>tightWidth</code> from phase 0</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="done">
+      <div class="k">Done when</div>
+      <ul>
+        <li>No label cell overlaps land, another place label, or an ocean name at any zoom. A dev assertion walks the occupancy mask against the land mask after every rebuild.</li>
+        <li>None of the 40 taglines shows a one-word last line in the hover card.</li>
+        <li>Zooming with labels visible stays at frame rate on the laptop that runs the ripple sim today.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ================= PHASE 2 ================= -->
+  <section class="phase p2" id="phase-2">
+    <div class="phase-head">
+      <span class="phase-num" aria-hidden="true">2</span>
+      <div>
+        <h2>The predictive grid</h2>
+        <p class="why">Card heights become arithmetic instead of measurement. That removes forty forced layouts per filter change and unlocks transitions the current code cannot do: cards that move to their new slot, and a card that opens in place.</p>
+      </div>
+      <div class="phase-facts">
+        <span><b>Effort</b> 4–5 days</span>
+        <span><b>Depends on</b> phase 0</span>
+        <span><b>Touches</b> js/app.js, css/style.css</span>
+      </div>
+    </div>
+
+    <div class="feature">
+      <h3>Predictive masonry</h3>
+      <div>
+        <p class="lede">A card's height is fixed chrome plus name lines times line-height plus tagline lines times line-height, all from prepared handles. The masonry pass becomes writes only: set width, left, top, and the grid's height, with no reads in between.</p>
+        <p class="how">This is pretext's masonry demo applied to the existing shortest-column layout in <code>layoutMasonry</code>. The pooled card elements stay as they are.</p>
+        <div class="kv">
+          <span class="k">Uses</span><span class="v"><code>heightOf("card-name")</code> · <code>heightOf("card-tagline")</code></span>
+          <span class="k">Removes</span><span class="v">the per-card <code>offsetHeight</code> read</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="feature">
+      <h3>Cards that glide on filter</h3>
+      <div>
+        <p class="lede">Because the new positions are known before the DOM changes, each card can animate from its old slot to its new one with a transform. Cards leaving the filter fade in place; cards entering rise into their slot. Reduced-motion turns it into a plain swap.</p>
+        <div class="kv">
+          <span class="k">Technique</span><span class="v">record old position, apply new, invert with a transform, play to identity</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="feature">
+      <h3>The card under your cursor stays put</h3>
+      <div>
+        <p class="lede">When a filter reflows the grid, the card under the pointer, or the one holding keyboard focus, keeps its place on screen. The page scroll is adjusted by the difference between that card's old and new top before the frame paints. Positions are known before render, so there is nothing to measure and no flash.</p>
+        <div class="kv">
+          <span class="k">Uses</span><span class="v">the predicted tops from the masonry pass</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="feature">
+      <h3>Balanced taglines, fitted names, a fitted headline</h3>
+      <div>
+        <p class="lede">Each tagline gets a max-width equal to its tight width, so the last line carries its share of words. Long names such as the Vatnajökull ice caves step down in font size until they fit one line, with a floor, and otherwise take two lines cleanly. The hero headline is fitted the same way at every viewport width, so it always lands on two lines with whole words, the technique pretext's dynamic-layout demo uses for its title.</p>
+        <div class="kv">
+          <span class="k">Uses</span><span class="v"><code>tightWidth</code> · <code>measureNaturalWidth</code> · <code>measureLineStats</code> at candidate sizes</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="feature">
+      <h3>Expand a card in place</h3>
+      <div>
+        <p class="lede">On desktop, a card can open in the grid instead of the modal. Its expanded height is known from the story's prepared handle at the card's width, so the card grows and its neighbours slide down at the same time, with no measurement and no second reflow. The modal stays for phones and for deep links.</p>
+        <p class="how">This is pretext's accordion demo inside a masonry. The expanded card keeps the plain paragraph; the editorial treatment in phase 3 is for the modal.</p>
+        <div class="kv">
+          <span class="k">Uses</span><span class="v"><code>heightOf("story", id, cardWidth)</code></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="done">
+      <div class="k">Done when</div>
+      <ul>
+        <li>The Performance panel shows zero forced synchronous layouts during a filter change or a card expansion.</li>
+        <li>Predicted card tops match rendered tops within one pixel for all 40 cards in the dev check.</li>
+        <li>The hovered card stays under the cursor after a filter change, and switching categories animates rather than reflows.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ================= PHASE 3 ================= -->
+  <section class="phase p3" id="phase-3">
+    <div class="phase-head">
+      <span class="phase-num" aria-hidden="true">3</span>
+      <div>
+        <h2>The editorial field note</h2>
+        <p class="why">The stories are the best writing on the site and they are shown as a grey paragraph in a modal. Manual line layout lets the dialog read like a printed spread without giving up the strict CSP.</p>
+      </div>
+      <div class="phase-facts">
+        <span><b>Effort</b> 6–8 days</span>
+        <span><b>Depends on</b> phases 0 and 2</span>
+        <span><b>Touches</b> js/dialog.js (new, split from app.js), css/style.css, js/data.js</span>
+      </div>
+    </div>
+
+    <div class="feature">
+      <h3>The story as a spread</h3>
+      <div>
+        <p class="lede">Three devices from print. A drop cap: the first grapheme set large, with the first few lines laid out at a narrower width to route around it. A pulled quote: the field note sits in a box partway down, and body lines beside it shrink to flow around. Two columns from 900px: the left column consumes lines until it is full, and the right column resumes from the same cursor, so the story is one continuous stream.</p>
+        <p class="how">Lines render as absolutely positioned spans built with DOM APIs, which the CSP allows. The original paragraph stays in the DOM, visually hidden, so screen readers and find-in-page still see one paragraph.</p>
+        <div class="kv">
+          <span class="k">Uses</span><span class="v"><code>layoutNextLine</code> with a per-line width · <code>walkLineRanges</code> to size the columns</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="feature">
+      <h3>Justified columns, with rivers watched</h3>
+      <div>
+        <p class="lede">On wide screens the two columns are justified. Pretext's justification demo carries a model that finds the best set of line breaks for a whole paragraph, the Knuth-Plass approach, and flags rivers, the white channels that run down justified text. The dialog tries three column widths and keeps the one with the fewest rivers. Ragged-right stays the default on narrow screens.</p>
+        <p class="how">The model is userland code built on pretext's per-segment widths, so it ports as a module of its own. Soft hyphens from the feature below feed it extra break points.</p>
+        <div class="kv">
+          <span class="k">Uses</span><span class="v">per-segment <code>widths</code> from <code>prepareWithSegments</code> · <code>walkLineRanges</code></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="feature">
+      <h3>Smooth previous and next</h3>
+      <div>
+        <p class="lede">The incoming story's height is computed before it renders, and the dialog animates from the current height to the new one while the content swaps at the midpoint. Today the dialog jumps between a short story and a long one.</p>
+        <div class="kv">
+          <span class="k">Uses</span><span class="v"><code>heightOf("story")</code> at the dialog's inner width</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="feature">
+      <h3>Lines that arrive one at a time</h3>
+      <div>
+        <p class="lede">Since the line breaks are known up front, the container is set to its final height first and lines fade in with a short stagger. It reads as the field note being written, and nothing below it moves. Reduced-motion shows everything at once.</p>
+      </div>
+    </div>
+
+    <div class="feature">
+      <h3>Soft hyphens for long names</h3>
+      <div>
+        <p class="lede">A small dictionary of break points for the names that misbehave in narrow columns: Białowieża, Zhangjiajie, Jökulsárlón, Sossusvlei. Soft hyphens are inserted at render time, never stored in the dataset, so search keeps matching. Pretext shows the hyphen only when the break is taken.</p>
+      </div>
+    </div>
+
+    <div class="feature">
+      <h3>Metadata as inline chips</h3>
+      <div>
+        <p class="lede">"Best time to visit" and "Nearest major city" become rich inline flows where months and distances are chips that never break in the middle but still wrap with the sentence around them.</p>
+        <div class="kv">
+          <span class="k">Uses</span><span class="v"><code>prepareRichInline</code> with <code>break: "never"</code> and <code>extraWidth</code> for chip padding</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="done">
+      <div class="k">Done when</div>
+      <ul>
+        <li>All 40 stories render without overflow at 360px, 768px, and 1280px.</li>
+        <li>Justified columns show no river longer than three lines in any of the 40 stories at 1280px.</li>
+        <li>Keyboard previous and next animate the height; Escape still closes.</li>
+        <li>A screen reader reads the story as one paragraph, and browser find-in-page still finds words in it.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ================= PHASE 4 ================= -->
+  <section class="phase p4" id="phase-4">
+    <div class="phase-head">
+      <span class="phase-num" aria-hidden="true">4</span>
+      <div>
+        <h2>Names in their own script</h2>
+        <p class="why">An atlas that only speaks Latin script is missing half of each name. Pretext handles Arabic, Thai, CJK, and mixed-direction wrapping, which makes this cheap to add and honest to the subject.</p>
+      </div>
+      <div class="phase-facts">
+        <span><b>Effort</b> 2–3 days</span>
+        <span><b>Depends on</b> phase 1 for map display</span>
+        <span><b>Touches</b> js/data.js, scripts/validate-data.mjs, scripts/build-place-pages.mjs, js/app.js, js/map.js</span>
+      </div>
+    </div>
+
+    <div class="feature">
+      <h3>A native-name field</h3>
+      <div>
+        <p class="lede">Every place gains a name in its local script and a language tag: 張家界 for Zhangjiajie, البتراء for Petra, Jökulsárlón as written in Iceland. The validator requires it, and the generated share pages print it under the title.</p>
+      </div>
+    </div>
+
+    <div class="feature">
+      <h3>Shown wherever the name is</h3>
+      <div>
+        <p class="lede">The hover card and the dialog show the native name under the Latin one. The third map label tier shows both. Direction comes from pretext's per-segment bidi levels, so a right-to-left name gets the right <code>dir</code> and wraps correctly next to Latin text.</p>
+        <div class="kv">
+          <span class="k">Uses</span><span class="v"><code>prepareWithSegments</code> and its <code>segLevels</code></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="feature">
+      <h3>Search matches, highlighted</h3>
+      <div>
+        <p class="lede">Matched search tokens in card taglines render as bolder fragments through the rich inline helper, so the wrap stays correct even though bold glyphs are wider.</p>
+        <div class="kv">
+          <span class="k">Uses</span><span class="v"><code>prepareRichInline</code> with two font strings</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="feature">
+      <h3>Ready for native-language blurbs</h3>
+      <div>
+        <p class="lede">The language tag sets pretext's segmentation locale per place, Korean and Chinese text uses keep-all breaking, and Japanese text relies on the line-start and line-end prohibitions pretext already implements. Nothing changes on screen yet; it means a future native-language tagline wraps correctly the day it is added, including Thai, which has no spaces between words.</p>
+        <div class="kv">
+          <span class="k">Uses</span><span class="v"><code>setLocale</code> · <code>wordBreak: "keep-all"</code> · built-in kinsoku rules</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="done">
+      <div class="k">Done when</div>
+      <ul>
+        <li>40 of 40 places have a native name, and the build fails if one is missing.</li>
+        <li>Arabic, Thai, and CJK names wrap inside the hover card without breaking mid-word.</li>
+        <li>A test fixture with a Japanese and a Thai tagline breaks at correct boundaries in all three browsers.</li>
+        <li>Highlighted taglines have the same line count as unhighlighted ones for every query in a short fixture list.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ================= PHASE 5 ================= -->
+  <section class="phase p5" id="phase-5">
+    <div class="phase-head">
+      <span class="phase-num" aria-hidden="true">5</span>
+      <div>
+        <h2>The living sea</h2>
+        <p class="why">The showpiece. Every earlier phase makes text cheap to re-lay; this one spends that budget on the ocean, where the ripple simulation already lives, and moves the layout work off the main thread so the ripples never wait.</p>
+      </div>
+      <div class="phase-facts">
+        <span><b>Effort</b> 8–11 days</span>
+        <span><b>Depends on</b> phases 1 and 4</span>
+        <span><b>Touches</b> js/map.js, js/text-worker.js (new), css/style.css, sw.js</span>
+      </div>
+    </div>
+
+    <div class="feature">
+      <h3>Layout off the main thread</h3>
+      <div>
+        <p class="lede">The metrics module from phase 0 is loaded a second time inside a Web Worker. Pretext measures through OffscreenCanvas and segments through Intl.Segmenter, both available in workers, so label placement and idle-mode layout run there and post cell positions back as typed arrays. The ripple loop on the main thread never blocks on text.</p>
+        <p class="how">The worker is a same-origin module, which the CSP already allows. Fonts must be loaded in the worker too; the registry from phase 0 ships the same font strings to both sides.</p>
+        <div class="kv">
+          <span class="k">Uses</span><span class="v">the phase 0 module unchanged · <code>postMessage</code> with transferable buffers</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="feature">
+      <h3>Stories on the water</h3>
+      <div>
+        <p class="lede">On hover, the tagline spills into the sea cells around the marker, routed around land row by row, and is drawn into the sea layer so the ripples displace the glyphs. Open the place and the first sentences of the story follow.</p>
+        <div class="kv">
+          <span class="k">Uses</span><span class="v">the phase 1 routing, with the sea canvas as the target instead of spans</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="feature">
+      <h3>Sea of stories, when idle</h3>
+      <div>
+        <p class="lede">After twelve seconds without pointer movement, sentences from random field notes drift along ocean rows as slow currents, each row's usable width bounded by the coastlines on either side. Any pointer movement dissolves them. Off under reduced-motion and on phones.</p>
+        <p class="how">Each sentence is prepared once and re-laid every frame as its row's free width changes with its position. That per-frame layout is the case pretext exists for; the DOM never measures anything.</p>
+        <div class="kv">
+          <span class="k">Uses</span><span class="v"><code>layoutNextLineRange</code> per row per frame, in the worker</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="feature">
+      <h3>Drifting words you can click</h3>
+      <div>
+        <p class="lede">Each drifting sentence keeps its per-segment widths, so a pointer position maps to a line and then to a word. Hovering a sentence brightens it, and clicking it opens the place it came from. Because every word has its own position, a ripple can also nudge words individually rather than shifting a whole line.</p>
+        <p class="how">Hit-testing on canvas text without any DOM, using the same segment widths that placed the words.</p>
+        <div class="kv">
+          <span class="k">Uses</span><span class="v"><code>segments</code> and <code>widths</code> on the prepared handle · <code>materializeLineRange</code></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="done">
+      <div class="k">Done when</div>
+      <ul>
+        <li>Idle mode holds frame rate with DevTools CPU throttling at 4× on a mid-range laptop, and no layout call runs on the main thread while it plays.</li>
+        <li>No glyph is ever drawn on a land cell in either text feature; the dev assertion from phase 1 covers this too.</li>
+        <li>Clicking a drifting sentence opens the right place in a test of twenty random picks.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ================= PHASE 6 ================= -->
+  <section class="phase p6" id="phase-6">
+    <div class="phase-head">
+      <span class="phase-num" aria-hidden="true">6</span>
+      <div>
+        <h2>Ways to read</h2>
+        <p class="why">Two features for people who come to read rather than browse. Both rest on the same idea: when the height of any text is known in advance, pages and text boxes can be honest about their size.</p>
+      </div>
+      <div class="phase-facts">
+        <span><b>Effort</b> 4–6 days</span>
+        <span><b>Depends on</b> phases 2 and 3</span>
+        <span><b>Touches</b> js/reader.js (new), js/app.js, css/style.css, index.html, sw.js</span>
+      </div>
+    </div>
+
+    <div class="feature">
+      <h3>A paginated field guide</h3>
+      <div>
+        <p class="lede">A book mode that lays all 40 field notes into pages of a fixed height, in the current filter's order. The layout consumes lines through the cursor until a page is full and continues on the next, so the page count is exact the moment the mode opens and "page 12 of 37" is true. Arrow keys turn pages, a place's page is deep-linkable, and a print stylesheet uses the same page geometry so what prints matches what is on screen.</p>
+        <p class="how">Pagination is the multi-column flow from phase 3 with pages instead of columns. Widows and orphans are avoided by looking one line ahead before closing a page.</p>
+        <div class="kv">
+          <span class="k">Uses</span><span class="v"><code>layoutNextLineRange</code> · <code>materializeLineRange</code> · <code>heightOf</code> for the headings</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="feature">
+      <h3>A visitor's notebook</h3>
+      <div>
+        <p class="lede">Each place gets a notes box for the visitor's own thoughts, saved in local storage and never sent anywhere. The box grows with the text from a predicted height, so typing never causes a reflow, and a "copy as postcard" button exports the note with the visitor's line breaks intact.</p>
+        <p class="how">Pretext's pre-wrap mode keeps tabs and hard breaks, which is what a textarea needs. Notes never enter the URL or the generated share pages.</p>
+        <div class="kv">
+          <span class="k">Uses</span><span class="v"><code>prepare</code> with <code>whiteSpace: "pre-wrap"</code> · <code>layout</code></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="done">
+      <div class="k">Done when</div>
+      <ul>
+        <li>The page count is correct for every window height from 600 to 1200 pixels, checked against a DOM-measured render in the dev build.</li>
+        <li>Printing the field guide produces the same page breaks as the screen.</li>
+        <li>Notes survive a reload, are absent from the URL and share pages, and typing into one triggers no forced layout in the Performance panel.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ================= PHASE 7 ================= -->
+  <section class="phase p7" id="phase-7">
+    <div class="phase-head">
+      <span class="phase-num" aria-hidden="true">7</span>
+      <div>
+        <h2>Shapes and paths</h2>
+        <p class="why">Text set into a shape only this atlas has. The land grid knows which country each cell belongs to, and a route between two places is a line like any other, so both become widths fed to the same variable-width layout used since phase 1.</p>
+      </div>
+      <div class="phase-facts">
+        <span><b>Effort</b> 5–7 days</span>
+        <span><b>Depends on</b> phases 1 and 5</span>
+        <span><b>Touches</b> scripts/build-map.mjs, js/landmap.js, js/map.js, js/dialog.js</span>
+      </div>
+    </div>
+
+    <div class="feature">
+      <h3>A story in the shape of its country</h3>
+      <div>
+        <p class="lede">Open a place and its story fills the silhouette of its country on the map. Per row, the run of that country's cells becomes the line width, and the story flows into the shape from the top row down, with a minimum run so a one-cell sliver never holds a word. Bolivia's outline filled with the story of Salar de Uyuni; Jordan's with Wadi Rum.</p>
+        <p class="how">The build script adds a country index per cell to the land grid. The palette already encodes a country hue, so this is a small change to the generator and a rebuild of the grid file. Small countries and islands, Rapa Nui or Komodo, fall back to a bounding region around the marker.</p>
+        <div class="kv">
+          <span class="k">Uses</span><span class="v"><code>layoutNextLineRange</code> with a width per row · <code>materializeLineRange</code></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="feature">
+      <h3>A field note along the route</h3>
+      <div>
+        <p class="lede">After Locate me, the great-circle path to the nearest wonder is drawn and cut into short segments. Each segment's length becomes a line width, and the field note reads along the journey, each run of glyphs rotated to its segment's heading. The dialog offers the same between any two places.</p>
+        <p class="how">Variable width per line is the same call as the coastline routing; the only new work is the rotation when drawing.</p>
+        <div class="kv">
+          <span class="k">Uses</span><span class="v"><code>layoutNextLineRange</code> · canvas rotation per segment</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="done">
+      <div class="k">Done when</div>
+      <ul>
+        <li>Every one of the 40 stories fits its country's silhouette at the desktop grid size, or falls back cleanly where the country is too small.</li>
+        <li>Route text never crosses a place label or an ocean name.</li>
+        <li>Both features render in one frame from the worker's output.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ================= PHASE 8 ================= -->
+  <section class="phase p8" id="phase-8">
+    <div class="phase-head">
+      <span class="phase-num" aria-hidden="true">8</span>
+      <div>
+        <h2>A serif atlas</h2>
+        <p class="why">The map is a monospace grid because that is what makes ASCII art easy. Pretext knows the width of every glyph in a proportional face, which removes the reason to stay monospace.</p>
+      </div>
+      <div class="phase-facts">
+        <span><b>Effort</b> 4–6 days</span>
+        <span><b>Depends on</b> phase 5</span>
+        <span><b>Touches</b> js/map.js, css/style.css, index.html (mode toggle)</span>
+      </div>
+    </div>
+
+    <div class="feature">
+      <h3>A serif map mode</h3>
+      <div>
+        <p class="lede">A toggle in the map controls redraws the coastlines in the site's Georgia face. The glyph palette is scored by both brightness and how close each glyph's measured advance is to the target cell, so the continents keep their shape in a proportional font.</p>
+        <p class="how">This is pretext's variable-typographic-ascii demo applied to the land mask. Markers keep their grid positions in both modes.</p>
+        <div class="kv">
+          <span class="k">Uses</span><span class="v"><code>prepareWithSegments</code> for its per-segment <code>widths</code></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="feature">
+      <h3>The sea as a typographic fluid</h3>
+      <div>
+        <p class="lede">In serif mode the ripple field renders the way the community fluid-smoke demo renders smoke: each cell picks a glyph by both brightness and measured advance, so crests and troughs read as tone rather than as a fixed set of ocean glyphs. Same simulation, different ink.</p>
+        <div class="kv">
+          <span class="k">Uses</span><span class="v">the serif glyph palette from the feature above, sampled per cell per frame</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="done">
+      <div class="k">Done when</div>
+      <ul>
+        <li>Toggling serif mode leaves every marker at the same pixel and the land mask unchanged.</li>
+        <li>The fluid rendering holds frame rate under the same throttle as idle mode.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="rails" aria-label="Guardrails and deferred work">
+    <div>
+      <h2>Guardrails for every phase</h2>
+      <ul>
+        <li><b>Font strings mirror CSS exactly.</b> Family, size, weight, and letter-spacing at prepare time; line-height at layout time. The phase 0 registry is the only place these live, and the worker receives the same strings.</li>
+        <li><b>Prepare once, lay out often.</b> Preparing inside a frame loop throws away the precomputation that makes layout cheap.</li>
+        <li><b>Predictions match the browser</b> because pretext mirrors each engine's line-breaking quirks for Safari, Chromium, and Gecko. Re-run the agreement and overflow checks whenever the vendored version is bumped.</li>
+        <li><b>The CSP does not loosen.</b> DOM APIs and CSSOM only, no inline style attributes, canvas and the worker stay same-origin.</li>
+        <li><b>Reduced-motion is respected</b> by the reveal, the gliding cards, idle mode, and the fluid sea.</li>
+        <li><b>Each phase ships behind a flag</b> in the metrics module so a regression can be switched off without a revert.</li>
+        <li><b>The service worker's file list</b> is updated whenever a file is added, or the offline cache silently misses it.</li>
+      </ul>
+    </div>
+    <div>
+      <h2>Deliberately later</h2>
+      <ul>
+        <li><b>Per-place share images</b> with wrapped titles. Pretext has no Node path yet, so this needs a headless browser step in the build. The overflow test from phase 0 sets that step up, which makes this cheaper afterwards.</li>
+        <li><b>Grid virtualization.</b> Phase 2 makes it possible, but 40 cards do not need it. Revisit past about 200 places.</li>
+        <li><b>A translated interface.</b> Native names are one field; a full second language is a different project.</li>
+      </ul>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <span>✦ Atlas of the Curious</span>
+    <span>Estimates assume the existing code and dataset; they are not commitments.</span>
+  </footer>
+
+</div>

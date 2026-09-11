@@ -8,7 +8,7 @@
    - Navigations: network-first (fresh content wins), cache as offline fallback.
    - Everything else: cache-first, falling back to network and caching the
      result so repeated visits are instant. */
-const CACHE = "atlas-of-the-curious-v1";
+const CACHE = "atlas-of-the-curious-v2";
 const CORE = [
   "/",
   "/index.html",
@@ -18,6 +18,10 @@ const CORE = [
   "/js/landmap.js",
   "/js/text.js",
   "/js/text-route.js",
+  "/js/labels.js",
+  "/js/sea.js",
+  "/js/map-art.js",
+  "/js/text-worker.js",
   "/js/justify.js",
   "/js/dialog.js",
   "/js/notebook.js",
@@ -28,6 +32,7 @@ const CORE = [
   "/vendor/pretext/layout.js",
   "/vendor/pretext/analysis.js",
   "/vendor/pretext/bidi.js",
+  "/vendor/pretext/generated/bidi-data.js",
   "/vendor/pretext/line-break.js",
   "/vendor/pretext/line-text.js",
   "/vendor/pretext/measurement.js",

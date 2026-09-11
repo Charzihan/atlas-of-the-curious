@@ -618,3 +618,29 @@ package.json     — scripts + devDependencies (@chenglou/pretext, playwright)
 .node-version    — pinned Node version for fnm
 .gitignore       — ignores node_modules, places/, data/*.geojson, logs
 ```
+
+## Roadmap continuation: the living sea, shapes, and serif ink
+
+The original nine-phase [development roadmap](docs/atlas-pretext-roadmap.html)
+is now preserved in this repository. The [Claude handoff](docs/claude-phase8-handoff.md)
+describes the recovered Phase 5 work, the Phase 7–8 additions, verification,
+flags, and the exact fallback behavior.
+
+The desktop map now routes labels and sea text in a same-origin Web Worker
+(with a synchronous fallback). Hover a marker for a tagline on the water;
+after twelve idle seconds, clickable field-note sentences drift in the sea.
+Idle animation is disabled on phones and under reduced motion.
+
+A place dialog offers **Read on the map** and **Journey to / Show route**.
+Stories flow into country cells when they fit, otherwise into a regional
+reading inset or a full-story caption. **Locate me** also draws a great-circle
+journey to the nearest place. Route text avoids map labels; notes too long for
+a route remain readable in a caption. **Clear story** removes the reading view.
+**Serif map** switches land and fluid glyphs to measured Georgia ink while
+keeping marker positions fixed.
+
+New modules: `js/labels.js`, `js/sea.js`, `js/text-worker.js`, `js/map-art.js`.
+The service-worker cache is bumped to v2 and includes these modules.
+`pnpm smoke` includes the recovered sea checks and new map-art checks.
+For the additional serif performance, offline, geolocation, mobile and
+screenshot checks, run `node scripts/checks/run-map-art.mjs`.

@@ -1244,6 +1244,36 @@ function boot(win, doc) {
     }, 140);
   });
 
+  // Map reading is an explicit way out of the modal, keeping the map usable.
+  const mapActions = doc.getElementById('dialog-map-actions');
+  if (mapActions) mapActions.hidden = !flag('countryStories') && !flag('routeText');
+  const countryButton = doc.getElementById('dialog-map-country');
+  const routeButton = doc.getElementById('dialog-map-route');
+  const routeSelect = doc.getElementById('dialog-route-to');
+  if (routeSelect) for (const p of DATA.places) {
+    const option = doc.createElement('option'); option.value = p.id; option.textContent = p.name;
+    routeSelect.appendChild(option);
+  }
+  function revealMap(event, detail) {
+    close();
+    win.location.hash = '#/';
+    win.dispatchEvent(new win.CustomEvent(event, { detail }));
+    doc.getElementById('text-atlas')?.scrollIntoView({ behavior: 'instant' });
+    doc.getElementById('map-art-clear')?.focus({ preventScroll: true });
+  }
+  if (countryButton) {
+    countryButton.hidden = !flag('countryStories');
+    countryButton.addEventListener('click', () => { if (currentId) revealMap('atlas:map-country', currentId); });
+  }
+  if (routeButton) {
+    routeButton.hidden = !flag('routeText');
+    routeSelect.hidden = !flag('routeText');
+    mapActions.querySelector('label').hidden = !flag('routeText');
+    routeButton.addEventListener('click', () => {
+      if (currentId && routeSelect.value) revealMap('atlas:map-route', { from: currentId, to: routeSelect.value });
+    });
+  }
+
   /* ---- The published surface --------------------------------------- */
   win.ATLAS_DIALOG = {
     open: open,

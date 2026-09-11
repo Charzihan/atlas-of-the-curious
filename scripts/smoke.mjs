@@ -92,6 +92,8 @@
 
    Run: pnpm smoke  (or: node scripts/smoke.mjs) */
 import { startServer, launchChromium, INSTALL_HINT } from "./browser-harness.mjs";
+import { runSeaChecks, reportSeaChecks } from "./checks/sea.mjs";
+import { runMapArtChecks } from "./checks/map-art.mjs";
 import { runReaderChecks } from "./checks/reader.mjs";
 
 const VIEWPORTS = [
@@ -270,6 +272,7 @@ const ZOOM_RUN = `(async () => {
 async function labelsAt(page, zoom) {
   await page.evaluate((z) => window.ATLAS_MAP_DEBUG.setZoom(z), zoom);
   await settleFrames(page);
+  await page.evaluate(() => window.ATLAS_MAP_DEBUG.settle());
   return page.evaluate(() => {
     const D = window.ATLAS_MAP_DEBUG;
     const routed = D.checkLabels();
@@ -1675,6 +1678,8 @@ async function main() {
 
     /* ---- Phase 6: ways to read --------------------------------------- */
     await runReaderChecks(browser, server.origin, fail);
+    reportSeaChecks(await runSeaChecks(browser, server.origin), fail);
+    await runMapArtChecks(browser, server.origin);
   } catch (err) {
     console.error(`\nerror: ${err.stack || err.message}`);
     failed = true;

@@ -63,12 +63,17 @@
         </div>
         <!-- map stage injected here by js/map.js -->
         <div class="map-controls" role="group" aria-label="Map controls">
+          <button class="map-btn" id="map-serif" type="button" aria-pressed="false">Serif map</button>
+          <button class="map-btn" id="map-art-clear" type="button" hidden>Clear story</button>
           <button class="map-btn" id="map-locate" type="button" title="Show where I am on the map">⌖ Locate me</button>
           <button class="map-btn" id="map-zoom-in" type="button" aria-label="Zoom in" title="Zoom in (+)">＋</button>
           <button class="map-btn" id="map-zoom-out" type="button" aria-label="Zoom out" title="Zoom out (−)">−</button>
           <button class="map-btn" id="map-zoom-reset" type="button" aria-label="Reset map view" title="Reset view">⤢</button>
         </div>
       </div>
+      <p id="map-story-status" class="map-story-status" role="status" hidden></p>
+      <p id="map-story-copy" class="visually-hidden" hidden></p>
+      <p id="map-route-note" class="map-route-note" hidden></p>
       <div class="atlas-foot">
         <div class="wrap atlas-foot-inner">
           <div class="atlas-legend" id="atlas-legend"></div>
@@ -166,6 +171,12 @@
         <div class="field"><span>Nearest major city</span><em id="dialog-nearest"></em></div>
       </div>
       <p class="dialog-coords" id="dialog-coords"></p>
+    </div>
+    <div class="dialog-map-actions" id="dialog-map-actions" hidden>
+      <button id="dialog-map-country" class="ghost-btn" type="button">Read on the map</button>
+      <label for="dialog-route-to">Journey to</label>
+      <select id="dialog-route-to"></select>
+      <button id="dialog-map-route" class="ghost-btn" type="button">Show route</button>
     </div>
     <div class="dialog-foot">
       <button id="dialog-prev" class="ghost-btn" type="button">← Previous</button>

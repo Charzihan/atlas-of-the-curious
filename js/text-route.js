@@ -63,7 +63,11 @@ export function normalizeText(text) {
                  check described above
 
    Returns { lines, cursor, complete, height, width } where `lines` is an
-   array of { text, width, row, y }. */
+   array of { text, width, row, y, start, end }. `start` and `end` are the
+   pretext cursors the line was cut from, which is what lets a caller walk the
+   prepared handle's own segments and widths back out of a routed line — Phase
+   5's drifting sea sentences need per-word widths so a pointer can be mapped
+   to a word. */
 export function routeText(prepared, rowWidths, lineHeight, options) {
   const opts = options || {};
   const widths = rowWidths || [];
@@ -88,6 +92,7 @@ export function routeText(prepared, rowWidths, lineHeight, options) {
     }
     const range = layoutNextLineRange(prepared, cursor, usable);
     if (range === null) { ranOut = true; break; }
+    const start = cursor;
     cursor = range.end;
     const line = materializeLineRange(prepared, range);
     // pre-wrap keeps a hanging trailing space; it would paint past the edge.
@@ -96,7 +101,10 @@ export function routeText(prepared, rowWidths, lineHeight, options) {
     const width = line.width + extra;
     if (width > widest) widest = width;
     const row = startRow + i;
-    lines.push({ text: text, width: width, row: row, y: row * lh });
+    lines.push({
+      text: text, width: width, row: row, y: row * lh,
+      start: start, end: range.end
+    });
   }
 
   let complete;
