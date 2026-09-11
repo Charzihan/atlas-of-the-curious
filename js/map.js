@@ -2664,13 +2664,21 @@ import {
       cl.timer = setTimeout(function () {
         if (seq !== buildSeq) return;                     // a rebuild owns the sky now
         if (typeof document !== "undefined" && document.hidden) { scheduleMorph(cl); return; }
-        cl.morph++;
-        cl.nextPlan = planCloud(cl.baseRow, generateCloud({
-          seed: cl.seed, morph: cl.morph, aspect: CLOUD_ASPECT
-        }));
+        cl.nextPlan = nextCloudPlan(cl);
         cl.blend = 0;
         cl.wPx = Math.max(cl.plan.wPx, cl.nextPlan.wPx);
       }, 6000 + Math.random() * 7000);
+    }
+    // A morph must land on a different drawing: the generator repeats itself
+    // for about one seed in 160, so step the morph again until the key changes.
+    function nextCloudPlan(cl) {
+      let plan = null;
+      for (let tries = 0; tries < 6; tries++) {
+        cl.morph++;
+        plan = planCloud(cl.baseRow, generateCloud({ seed: cl.seed, morph: cl.morph, aspect: CLOUD_ASPECT }));
+        if (plan.shape.key !== cl.plan.shape.key) break;
+      }
+      return plan;
     }
     for (const cl of clouds) scheduleMorph(cl);
 
@@ -2780,10 +2788,7 @@ import {
       const cl = ASCII_CLOUDS && clouds[index];
       if (!cl) return null;
       const was = cl.plan.shape.key;
-      cl.morph++;
-      cl.nextPlan = planCloud(cl.baseRow, generateCloud({
-        seed: cl.seed, morph: cl.morph, aspect: CLOUD_ASPECT
-      }));
+      cl.nextPlan = nextCloudPlan(cl);
       cl.blend = 0;
       cl.wPx = Math.max(cl.plan.wPx, cl.nextPlan.wPx);
       return { was: was, to: cl.nextPlan.shape.key, morph: cl.morph, ms: MORPH_MS };
