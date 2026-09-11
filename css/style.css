@@ -907,6 +907,15 @@ dialog::backdrop {
   transform-origin: center center;
 }
 
+/* The map's two painted layers: the static one (land, and the sea's still
+   floor) and the animated water above it.
+
+   With the open ocean on, both are sized past the world grid — out to the water
+   that fills the rest of the viewport — and js/map.js pins them at a negative
+   left/top so the world grid still lands exactly where it did. `inset: 0` is
+   over-constrained by the width and height js/map.js sets, so that left/top is
+   what applies. Both are children of .map-zoom, so one transform moves the map
+   and the sea it sits in as a single unit. */
 .map-base,
 .map-sea {
   position: absolute;
