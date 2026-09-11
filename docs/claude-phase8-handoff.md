@@ -69,10 +69,18 @@ Landlocked/crowded markers can have no spill; their normal hover card remains.
 
 ## Phase 7 — Shapes and paths
 
-- `scripts/build-map.mjs` now emits `countryCodes`, `countryNames` and a flat
+- `scripts/build-map.mjs` emits `countryCodes`, `countryNames` and a flat
   `countries` index per desktop/mobile cell; zero is water, other values are
   one-based entries in `countryCodes`. Existing glyph/color output is unchanged.
   The ownership follows the generator's existing sampled-country assignment.
+- It also emits `outlines`: simplified lon/lat rings for the 31 countries the
+  dataset names (it runs `js/data.js` to find them, through the same alias
+  table `js/map.js` uses). Rings are pruned to the cluster around the largest
+  one — so the Aleutians, Svalbard, the Galapagos and Easter Island do not
+  swallow the bounding box, while Indonesia, Japan and New Zealand stay whole —
+  simplified with Douglas–Peucker at a tolerance proportional to the country's
+  own size, quantised to 1/50 of a degree and delta-encoded as integers.
+  That is +11 KB in `js/landmap.js` (41,891 → 53,248 bytes) for 1,592 points.
 - `js/landmap.js` is regenerated from the repository's existing Natural Earth
   data. No new network download is needed.
 - `js/map-art.js` supplies pure, cached country-story and route layout engines,
@@ -87,14 +95,43 @@ plus **Show route** draws a journey between two places. **Locate me** draws a
 route from the granted location to the nearest wonder. **Clear story** clears
 country/route content; **Serif map** is independent.
 
-Country stories try 9, 8, 7 and 6 px type against per-row country spans. Small
-text can be enlarged with the existing map zoom. A story that does not fit in
-full uses a 12 px regional inset near its marker; if even that cannot fit the
-map height, the full story is shown in a caption below the map. The complete story also has a screen-reader text equivalent. Nothing is
-silently truncated. At the tested 1280×800 size, **1 of 40 stories fits a
-silhouette and 39 use regional insets**. The current coarse 150×39 grid cannot
-provide large reading silhouettes for most countries. This is a deliberate,
-tested fallback, not forty country-shaped stories at that size.
+A country story is set inside the country's own polygon, not inside the land
+grid: the 150×39 cells are far too coarse to hold 400 words inside anything
+smaller than a continent. The rings are projected with the map's own
+equirectangular projection and scaled about the country's centre by k. Per text
+row the scanline runs of the polygon — even-odd over every ring, so holes are
+water, and the runs at five heights across the row are intersected so the whole
+line box is inside — become the widths fed to `layoutNextLineRange`. Several
+runs in one row are several slots, so a row that crosses two islands sets two
+pieces of the story. A run that cannot hold the next *whole* word is left empty
+rather than breaking the word: that is the minimum-run rule, measured against
+the word actually coming rather than against a fixed number of cells.
+
+Type sizes are tried at 14, 13, 12, 11 and 10 px; the first that fits at the
+largest scale the map allows is kept, and then a binary search finds the
+*smallest* k that still holds the whole story, which is the k that fills the
+shape. The view is anchored on the country's true position and slid only as far
+as it must to stay on the map and clear of the introduction panel and the map
+controls (`js/map.js` measures those once per request and passes them as
+`avoid`). The place's own coordinates are marked inside the silhouette; the
+outline is stroked in the country's palette colour and stamped with the grid's
+texture character at the grid's own cadence, over a dimmed map.
+
+At the tested 1280×800 size, **37 of 40 stories fill their country's
+silhouette and 3 use the regional inset** — `marble-caves`, `atacama` and
+`rapa-nui`, all Chile. Chile is 4,300 km long and about 180 km wide: scaled to
+the map's height it is a 100 px-wide ribbon whose rows hold roughly a third of
+the words, and scaling it to the map's width would make it nine screens tall.
+Rapa Nui is 3,500 km offshore and is dropped from Chile's rings for the same
+reason the Aleutians are dropped from America's. On a phone the map band is too
+short for a silhouette at 10 px, so phones keep the inset. A story that fits no
+silhouette uses a 12 px regional inset near its marker; if even that cannot fit
+the map height, the full story is shown in a caption below the map. The
+complete story also has a screen-reader text equivalent. Nothing is ever
+silently truncated: `scripts/checks/map-art.mjs` asserts that the lines
+concatenate back to the story, that every line box is inside the polygon, that
+the type never drops below 10 px, and that at least 34 of the 40 are
+silhouettes.
 
 Routes use spherical interpolation, split at the antimeridian and handle
 coincident/antipodal endpoints without NaN coordinates. Text runs rotate to

@@ -36,10 +36,14 @@ export async function runMapArtExtraChecks(browser, origin) {
     console.log(`serif fluid at 4x CPU: avg ${serif.avg.toFixed(2)}ms, p95 ${serif.p95.toFixed(2)}ms; baseline ${baseline.avg.toFixed(2)}ms; main-thread layouts ${serif.layouts}`);
     await mkdir('docs/screenshots', { recursive: true });
     await page.screenshot({ path: 'docs/screenshots/phase8-serif.png' });
-    await page.evaluate(() => { window.ATLAS_MAP_DEBUG.stopIdle(); window.ATLAS_MAP_ART.country('salar-de-uyuni'); });
-    await page.waitForFunction(() => window.ATLAS_MAP_ART.debug().result?.id === 'salar-de-uyuni');
-    await page.waitForTimeout(500);
-    await page.screenshot({ path: 'docs/screenshots/phase7-story.png' });
+    await page.evaluate(() => window.ATLAS_MAP_DEBUG.stopIdle());
+    for (const shot of [['salar-de-uyuni', 'phase7-story'], ['wadi-rum', 'phase7-wadi-rum']]) {
+      await page.evaluate(id => window.ATLAS_MAP_ART.country(id), shot[0]);
+      const shaped = await (await page.waitForFunction(id => { const d = window.ATLAS_MAP_ART.debug(); return d.result?.id === id ? d.result : false; }, shot[0])).jsonValue();
+      assert.equal(shaped.mode, 'country', shot[0] + ' did not fill its country');
+      await page.waitForTimeout(400);
+      await page.screenshot({ path: 'docs/screenshots/' + shot[1] + '.png' });
+    }
     await page.evaluate(() => window.ATLAS_MAP_ART.route({ lat: -35, lon: -130 }, 'shibuya-crossing'));
     await page.waitForFunction(() => window.ATLAS_MAP_ART.debug().result?.mode === 'route');
     await page.evaluate(() => window.ATLAS_MAP_DEBUG.setZoom(2.5));
@@ -92,7 +96,7 @@ export async function runMapArtExtraChecks(browser, origin) {
       assert(await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'horizontal overflow');
       if (options.viewport.width === 390) await p.waitForTimeout(200);
       if (options.viewport.width === 390) await p.screenshot({ path: 'docs/screenshots/phase7-phone.png' });
-      console.log(`map art ${options.reducedMotion || 'phone'}: complete story, serif toggle, no idle, no horizontal overflow OK`);
+      console.log(`map art ${options.reducedMotion || 'phone'}: complete story as a ${out.result.mode}, serif toggle, no idle, no horizontal overflow OK`);
     } finally { await c.close(); }
   }
   for (const query of ['?noflags=countryStories,routeText,serifAtlas', '?noflags=editorial']) {

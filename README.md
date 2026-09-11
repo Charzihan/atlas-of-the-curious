@@ -568,7 +568,9 @@ css/style.css     — all styling (no external assets)
 css/place.css     — styling for the generated per-place share pages
 js/data.js        — the dataset (40 places, 7 categories; every place also
                     carries nativeName + nativeLang)
-js/landmap.js     — generated ASCII land grid (120×40, from Natural Earth)
+js/landmap.js     — generated ASCII land grid (120×40, from Natural Earth),
+                    plus simplified outlines for the 31 countries the dataset
+                    names, for the country reading view (+11 KB)
 js/text.js       — text metrics on top of pretext: the font role registry,
                     window.ATLAS_TEXT, feature flags, dev agreement check,
                     grouped locale-aware preparation, bidi direction, and the
@@ -632,8 +634,17 @@ after twelve idle seconds, clickable field-note sentences drift in the sea.
 Idle animation is disabled on phones and under reduced motion.
 
 A place dialog offers **Read on the map** and **Journey to / Show route**.
-Stories flow into country cells when they fit, otherwise into a regional
-reading inset or a full-story caption. **Locate me** also draws a great-circle
+**Read on the map** fills the silhouette of the place's country with its whole
+story: the map dims, the outline is drawn in the grid's own colour and texture
+character, and each row of the polygon becomes a line width, so the text takes
+the shape of Bolivia, of Jordan, of the Indonesian archipelago. The silhouette
+is drawn at the smallest scale that holds the story in the site's serif at
+14px (10px at worst), anchored on the country's real position and slid only as
+far as it must to stay clear of the map's own panels. At 1280x800, 37 of the
+40 stories fill their country; the three Chilean places fall back to the
+regional reading inset, because a country 4,300 km long and 180 km wide is a
+sliver at any scale that fits the map. A story too long even for the inset
+stays in a full caption below the map. **Locate me** also draws a great-circle
 journey to the nearest place. Route text avoids map labels; notes too long for
 a route remain readable in a caption. **Clear story** removes the reading view.
 **Serif map** switches land and fluid glyphs to measured Georgia ink while
