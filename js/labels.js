@@ -64,22 +64,24 @@ export const LABEL_RUN_LIMIT = 44;    // longest free run worth scanning, in cel
 export const OCEAN_LS_EM = [0.18, 0.22, 0.26, 0.30];
 export const OCEAN_SLIDE = 16;
 
-// Ocean and sea names. Anchors are the point the name wants to be centred on;
-// placement slides left/right along the row to find a free run, and any name
-// that cannot find one at the current zoom is simply not drawn.
+// Ocean and sea names. Extents are conservative placement windows in degrees
+// [west, south, east, north], not coastline polygons (the land mask supplies
+// those). Every occupied cell's full lon/lat box must stay inside the window.
+// The two Pacific windows stop at the dateline rather than wrapping a label.
+// Even "Med. Sea" is too wide for the desktop Mediterranean's 4–5-cell runs.
 export const OCEANS = [
-  { name: "Pacific Ocean", lat: 0, lon: -132 },
-  { name: "Pacific Ocean", lat: 2, lon: 172 },
-  { name: "Atlantic Ocean", lat: 33, lon: -42 },
-  { name: "Atlantic Ocean", lat: -28, lon: -18 },
-  { name: "Indian Ocean", lat: -22, lon: 78 },
-  { name: "Southern Ocean", lat: -60, lon: 26 },
-  { name: "Arctic Ocean", lat: 84, lon: 10 },
-  { name: "Mediterranean", lat: 37, lon: 15 },
-  { name: "Caribbean Sea", lat: 15, lon: -74 },
-  { name: "Arabian Sea", lat: 15, lon: 63 },
-  { name: "South China Sea", lat: 14, lon: 114 },
-  { name: "Tasman Sea", lat: -38, lon: 161 }
+  { name: "Pacific Ocean", lat: 0, lon: -132, extent: [-170, -50, -85, 60], parts: ["Pacific", "Ocean"], short: "Pacific" },
+  { name: "Pacific Ocean", lat: 2, lon: 172, extent: [145, -25, 180, 45], parts: ["Pacific", "Ocean"], short: "Pacific" },
+  { name: "Atlantic Ocean", lat: 33, lon: -42, extent: [-65, 0, -10, 60], parts: ["Atlantic", "Ocean"], short: "Atlantic" },
+  { name: "Atlantic Ocean", lat: -28, lon: -18, extent: [-50, -55, 18, 0], parts: ["Atlantic", "Ocean"], short: "Atlantic" },
+  { name: "Indian Ocean", lat: -22, lon: 78, extent: [40, -50, 110, 0], parts: ["Indian", "Ocean"], short: "Indian" },
+  { name: "Southern Ocean", lat: -60, lon: 26, extent: [-180, -70, 180, -55], parts: ["Southern", "Ocean"], short: "Southern" },
+  { name: "Arctic Ocean", lat: 84, lon: 10, extent: [-180, 75, 180, 90], parts: ["Arctic", "Ocean"], short: "Arctic" },
+  { name: "Mediterranean", lat: 37, lon: 15, extent: [-6, 30, 36, 46], parts: ["Mediter-", "ranean"], short: "Med." },
+  { name: "Caribbean Sea", lat: 15, lon: -74, extent: [-88, 9, -60, 22], parts: ["Caribbean", "Sea"], short: "Carib. Sea" },
+  { name: "Arabian Sea", lat: 15, lon: 63, extent: [50, 5, 77, 26], parts: ["Arabian", "Sea"], short: "Arab. Sea" },
+  { name: "South China Sea", lat: 14, lon: 114, extent: [106, 2, 121, 23], parts: ["South China", "Sea"], short: "S. China Sea" },
+  { name: "Tasman Sea", lat: -38, lon: 161, extent: [150, -48, 174, -30], parts: ["Tasman", "Sea"], short: "Tasman" }
 ];
 
 // Anchor directions, tried in this order at each offset. `dir` is the direction
@@ -107,7 +109,8 @@ export function cellsOf(rec) {
   const out = [];
   for (const line of rec.lines) {
     const cells = Math.max(1, Math.ceil((line.width - 0.001) / rec.cellW));
-    const c0 = rec.dir > 0 ? rec.col : rec.col - cells + 1;
+    const col = line.col == null ? rec.col : line.col;
+    const c0 = rec.dir > 0 ? col : col - cells + 1;
     out.push({ row: line.row, c0: c0, c1: c0 + cells - 1 });
   }
   return out;
@@ -235,8 +238,11 @@ export function createLabelEngine(options) {
     const key = name + "|" + step;
     let h = oceanHandles.get(key);
     if (!h) {
-      const ls = OCEAN_LS_EM[step] * fontPxOf(role);
+      // Step -1 is the compact fallback; the usual zoom tiers stay unchanged.
+      const ls = (step < 0 ? 0 : OCEAN_LS_EM[step]) * fontPxOf(role);
       h = makeHandle(name.toUpperCase(), { font: role.font, letterSpacing: ls });
+      tick();
+      h.width = measureNaturalWidth(h.pre) + h.ls;
       oceanHandles.set(key, h);
     }
     return h;
@@ -343,41 +349,63 @@ export function createLabelEngine(options) {
   }
 
   // ---- Ocean and sea names ------------------------------------------------
-  // One row of free water, centred on the anchor and allowed to slide along the
-  // row to find it. Marked into the occupancy mask before any place label is
-  // routed, so place names flow around the ocean names rather than over them.
+  // Search nearby rows and columns, but never let a whole cell leave the named
+  // water's extent. Stacks use consecutive rows with independently centred
+  // lines. Only a complete form claims occupancy, before place names route.
   function placeOceanLabels(cellW, z, out) {
-    const role = roles["ocean-label"];
     const t = Math.max(0, Math.min(1, (z - 1) / (TIER_TAG_Z - 1)));
     const step = Math.round(t * (OCEAN_LS_EM.length - 1));
-    const lsPx = OCEAN_LS_EM[step] * fontPxOf(role);
     for (const ocean of oceans) {
-      const handle = oceanHandleFor(ocean.name, step);
-      tick();
-      const width = measureNaturalWidth(handle.pre) + handle.ls;
-      const need = Math.max(1, Math.ceil((width - 0.001) / cellW));
-      const row = toGridRow(ocean.lat);
-      const centre = toGridCol(ocean.lon) - Math.floor(need / 2);
-      let start = -1;
-      for (let slide = 0; slide <= OCEAN_SLIDE && start < 0; slide++) {
-        const tries = slide === 0 ? [0] : [-slide, slide];
-        for (const delta of tries) {
-          const c0 = centre + delta;
-          if (c0 < 0 || c0 + need > COLS) continue;
-          let ok = true;
-          for (let k = 0; k < need; k++) {
-            const i = row * COLS + c0 + k;
-            if (kind[i] || occupancy[i]) { ok = false; break; }
+      if (!ocean.extent) continue;   // unknown water is never a safe fallback
+      const [west, south, east, north] = ocean.extent;
+      const cMin = Math.max(0, Math.ceil((west + 180) / 360 * COLS));
+      const cMax = Math.min(COLS - 1, Math.floor((east + 180) / 360 * COLS) - 1);
+      const rMin = Math.max(0, Math.ceil((90 - north) / 180 * ROWS));
+      const rMax = Math.min(ROWS - 1, Math.floor((90 - south) / 180 * ROWS) - 1);
+      const anchorRow = toGridRow(ocean.lat);
+      const anchorCol = toGridCol(ocean.lon);
+      const rows = [];
+      for (let row = rMin; row <= rMax; row++) rows.push(row);
+      rows.sort((a, b) => Math.abs(a - anchorRow) - Math.abs(b - anchorRow) || a - b);
+
+      function tryForm(texts, spacing) {
+        const handles = texts.map((text) => oceanHandleFor(text, spacing));
+        const needs = handles.map((h) => Math.max(1, Math.ceil((h.width - 0.001) / cellW)));
+        for (const row of rows) {
+          if (row + handles.length - 1 > rMax) continue;
+          const lines = [];
+          for (let line = 0; line < handles.length; line++) {
+            const h = handles[line], need = needs[line];
+            const centre = anchorCol - Math.floor(need / 2);
+            let start = -1;
+            for (let slide = 0; slide <= OCEAN_SLIDE && start < 0; slide++) {
+              for (const delta of slide === 0 ? [0] : [-slide, slide]) {
+                const c0 = centre + delta;
+                if (c0 < cMin || c0 + need - 1 > cMax) continue;
+                if (freeRun(row + line, c0, 1, need) === need) { start = c0; break; }
+              }
+            }
+            if (start < 0) break;
+            lines.push({ text: h.text, width: h.width, row: row + line, col: start });
           }
-          if (ok) { start = c0; break; }
+          if (lines.length !== handles.length) continue;
+          return {
+            id: ocean.name, row: row, col: lines[0].col, dir: 1, cellW: cellW, lsPx: handles[0].ls,
+            nameCount: lines.length, nativeCount: 0, lines: lines
+          };
         }
+        return null;
       }
-      if (start < 0) continue;   // no room on this grid at this zoom
-      const rec = {
-        id: ocean.name, row: row, col: start, dir: 1, cellW: cellW, lsPx: lsPx,
-        nameCount: 1, nativeCount: 0,
-        lines: [{ text: handle.text, width: width, row: row }]
-      };
+
+      const forms = [[ocean.name]];
+      if (ocean.parts && ocean.parts.length === 2) forms.push(ocean.parts);
+      if (ocean.short) forms.push([ocean.short]);
+      let rec = null;
+      for (const form of forms) {
+        for (let spacing = step; spacing >= -1 && !rec; spacing--) rec = tryForm(form, spacing);
+        if (rec) break;
+      }
+      if (!rec) continue;
       rec.cells = cellsOf(rec);
       markCells(rec.cells);
       out.push(rec);

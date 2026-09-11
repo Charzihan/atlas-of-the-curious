@@ -5,7 +5,7 @@
    and fails on any console error or uncaught page error. Meant to be re-run
    after every roadmap phase.
 
-   Phase 1 ("labels on the map") adds three claims about the labels on the map,
+   Phase 1 ("labels on the map") adds four claims about the labels on the map,
    each driven through window.ATLAS_MAP_DEBUG rather than synthetic pointer
    events:
 
@@ -16,6 +16,8 @@
      2. No tagline in the hover card ends on a one-word last line, for all 40.
      3. A scripted zoom from 1× to 2.5× over 60 frames stays smooth. See
         PERF_NOTE below for what "smooth" can mean in headless Chromium.
+     4. At 1×, 1.5× and 2.5× every ocean line stays inside its named water's
+        extent, including stacked lines; the Mediterranean is always present.
 
    Phase 2 ("the predictive grid") adds four measurements on top of that:
 
@@ -118,7 +120,7 @@ const isBenign = (text) => BENIGN_CONSOLE.some((re) => re.test(text));
 const fmt = (n) => Math.round(n * 100) / 100;
 
 // Phase 1 thresholds.
-const LABEL_ZOOMS = [1.5, 2.5];
+const LABEL_ZOOMS = [1, 1.5, 2.5];
 // 40 places; the ones with no sea within four cells of the dot (Petra, the
 // Libyan Glass Desert, Zhangjiajie…) legitimately go unlabelled.
 const MIN_LABELS = 21;
@@ -273,18 +275,53 @@ async function labelsAt(page, zoom) {
   await page.evaluate((z) => window.ATLAS_MAP_DEBUG.setZoom(z), zoom);
   await settleFrames(page);
   await page.evaluate(() => window.ATLAS_MAP_DEBUG.settle());
-  return page.evaluate(() => {
+  return page.evaluate(async () => {
+    const { OCEANS } = await import("/js/labels.js");
     const D = window.ATLAS_MAP_DEBUG;
     const routed = D.checkLabels();
     const painted = D.checkPainted();
+    const oceans = D.oceanLabels().map((rec) => ({ ...rec, cells: [] }));
+    const oceanEls = Array.from(document.querySelectorAll(".map-ocean-label.is-placed"));
+    const { cols, rows } = window.LANDMAPS.desktop;
+    const origin = document.querySelector(".map-zoom").getBoundingClientRect();
+    const cellW = origin.width / cols, cellH = origin.height / rows;
+    const oceanExtentProblems = [];
+    // Recover every line's cells from what was painted, independently of the
+    // engine's bounds calculation. A stack has one span per routed line.
+    for (const el of oceanEls) {
+      const rec = oceans[Number(el.dataset.oceanIndex)];
+      if (!rec) {
+        oceanExtentProblems.push({ text: el.textContent, why: "missing ocean record" });
+        continue;
+      }
+      const box = el.getBoundingClientRect();
+      const col = Math.round((box.left - origin.left) / cellW);
+      const row = Math.round((box.top - origin.top) / cellH);
+      const need = Math.max(1, Math.ceil((box.width - 0.001) / cellW));
+      rec.cells.push({ row: row, c0: col, c1: col + need - 1 });
+    }
+    for (const rec of oceans) {
+      const inside = OCEANS.some((ocean) => ocean.name === rec.name && rec.cells.length &&
+        rec.cells.every((run) => {
+          const [west, south, east, north] = ocean.extent;
+          return run.c0 >= 0 && run.c1 < cols && run.row >= 0 && run.row < rows &&
+            run.c0 / cols * 360 - 180 >= west - 1e-9 &&
+            (run.c1 + 1) / cols * 360 - 180 <= east + 1e-9 &&
+            90 - run.row / rows * 180 <= north + 1e-9 &&
+            90 - (run.row + 1) / rows * 180 >= south - 1e-9;
+        }));
+      if (!inside) oceanExtentProblems.push(rec);
+    }
     return {
       zoom: D.getZoom(), tier: routed.tier,
       labels: routed.labels, oceanLabels: routed.oceanLabels, lines: routed.lines,
       overlaps: routed.overlaps, problems: routed.problems,
       paintedBoxes: painted.boxes, paintedOverlaps: painted.overlaps,
       paintedProblems: painted.problems,
+      oceanExtentProblems: oceanExtentProblems,
+      mediterranean: oceans.some((rec) => rec.name === "Mediterranean" && rec.cells.length),
       domLabels: document.querySelectorAll(".map-label.is-placed").length,
-      domOceanLabels: document.querySelectorAll(".map-ocean-label.is-placed").length
+      domOceanLabels: new Set(oceanEls.map((el) => el.dataset.oceanIndex)).size
     };
   });
 }
@@ -1164,7 +1201,12 @@ function reportViewport(label, res, viewport, fail) {
           console.error(`      ${p.what} "${p.id}" cell r${p.row} c${p.col}: ${p.why}`);
         }
       }
-      if (z.labels < MIN_LABELS) {
+      if (z.oceanExtentProblems.length) {
+        fail(`${label} at ${z.zoom.toFixed(2)}x has ocean cells outside their named water`);
+        for (const p of z.oceanExtentProblems.slice(0, 8)) console.error("      " + JSON.stringify(p));
+      }
+      if (!z.mediterranean) fail(`${label} at ${z.zoom.toFixed(2)}x dropped the Mediterranean`);
+      if (z.tier > 0 && z.labels < MIN_LABELS) {
         fail(
           `only ${z.labels} label(s) placed at ${z.zoom.toFixed(2)}x ` +
           `(expected more than ${MIN_LABELS - 1})`
