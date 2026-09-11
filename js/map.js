@@ -29,6 +29,10 @@ import {
 import { createSeaEngine, IDLE_MAX_SENTENCES } from "./sea.js";
 import { createMapArtEngine, COUNTRY_MARKER } from "./map-art.js";
 import { generateCloud, generateCloudSet } from "./clouds.js";
+import {
+  buildFlowField, createStaticFlow, currentsSummary,
+  FLOW_GLYPHS, FLOW_LEVELS, FLOW_ALPHABET
+} from "./currents.js";
 
 (function () {
   "use strict";
@@ -97,6 +101,36 @@ import { generateCloud, generateCloudSet } from "./clouds.js";
     "rgba(214, 244, 255, 0.70)"
   ];
   const WAVE_GAMMA = 1.9;          // >1 → quiet floor, thin bright crests
+  /* The open ocean's still floor: the faint texture the margin gets under the
+     animated crests, the same job the base canvas's "·" does inside the world
+     grid. Four levels, by current speed, so a gyre is legible even when no
+     crest happens to be passing — and it is the whole sea under
+     `prefers-reduced-motion: reduce`. */
+  const FLOOR_COLORS = [
+    "rgba(70, 118, 158, 0.10)",
+    "rgba(86, 140, 180, 0.15)",
+    "rgba(104, 164, 200, 0.21)",
+    "rgba(126, 188, 222, 0.28)",
+    "rgba(150, 210, 238, 0.36)"
+  ];
+  // How far the open ocean may reach past the world grid, in cells per side.
+  // A 4K viewport would otherwise ask for a grid six times the world's; past
+  // the cap the water is the still floor above, drawn once, and not simulated.
+  const MARGIN_CAP_X = 30, MARGIN_CAP_Y = 12;
+  // Below this the direction glyphs would be lost in the quiet floor, so the
+  // serif ramp keeps its tone glyph and only the crests take a direction.
+  const SERIF_DIR_LEVEL = 4;
+  /* One sine, pre-tabulated. The open ocean asks for two of them per water cell
+     per frame over an extended grid that is nearly twice the world's, which is
+     thousands of Math.sin() calls a frame and — at the 4× CPU throttle the
+     checks hold the map to — real milliseconds. A 2048-entry table at this
+     amplitude is indistinguishable on a character grid whose output is six
+     brightness levels. `x` is in radians and may be large and negative: the
+     truncation and the mask do the wrapping between them. */
+  const SIN_BITS = 11, SIN_N = 1 << SIN_BITS, SIN_MASK = SIN_N - 1;
+  const SIN_SCALE = SIN_N / (2 * Math.PI);
+  const SIN_TABLE = new Float32Array(SIN_N);
+  for (let i = 0; i < SIN_N; i++) SIN_TABLE[i] = Math.sin(i / SIN_SCALE);
   // The same, for the serif sea's ink: the monospace sea has six glyphs and
   // gets most of its contrast from colour, so mapping density straight onto a
   // measured ramp would make quiet water far heavier than it is now.
@@ -177,23 +211,13 @@ import { generateCloud, generateCloudSet } from "./clouds.js";
     }
   }
 
-  // Neighbour lists for the water-cell spring simulation.
-  const neighbors = new Int32Array(COLS * ROWS * 4);
-  const nCount = new Uint8Array(COLS * ROWS);
-  for (let r = 0; r < ROWS; r++) {
-    for (let c = 0; c < COLS; c++) {
-      const i = r * COLS + c;
-      if (kind[i]) continue;
-      let n = 0;
-      if (c > 0 && !kind[i - 1]) neighbors[i * 4 + n++] = i - 1;
-      if (c < COLS - 1 && !kind[i + 1]) neighbors[i * 4 + n++] = i + 1;
-      if (r > 0 && !kind[i - COLS]) neighbors[i * 4 + n++] = i - COLS;
-      if (r < ROWS - 1 && !kind[i + COLS]) neighbors[i * 4 + n++] = i + COLS;
-      nCount[i] = n;
-    }
-  }
-  const waterCells = [];
-  for (let i = 0; i < COLS * ROWS; i++) if (!kind[i]) waterCells.push(i);
+  /* The water-cell spring simulation runs on the *extended* grid — the world
+     grid plus the open ocean that fills the rest of the viewport — so its
+     neighbour lists, its water list and its land mask are built per map build,
+     where the margin is known. See "The open ocean" in build().
+
+     `kind` above stays exactly what it was: the world grid's land mask, the one
+     the labels, the sea text and every check are written against. */
 
   const places = DATA.places
     .map((p) => ({ p, accent: (catById.get(p.category) || {}).accent || "#e8b45a" }))
@@ -250,6 +274,9 @@ import { generateCloud, generateCloudSet } from "./clouds.js";
   FLAGS.seaStories = FLAGS.seaStories !== false; // taglines spill into the water
   FLAGS.idleSea = FLAGS.idleSea !== false;    // sentences drift when nothing moves
   FLAGS.seaClick = FLAGS.seaClick !== false;  // a drifting word opens its place
+  // The open ocean: the sea fills the whole viewport and flows as currents.
+  // Off restores the world-grid-only sea and its three uniform sine trains.
+  FLAGS.openOcean = FLAGS.openOcean !== false;
 
   // Font roles, resolved straight out of the CSS registry so the canvas font
   // pretext measures with is the font the browser paints (see js/text.js).
@@ -1013,7 +1040,9 @@ import { generateCloud, generateCloudSet } from "./clouds.js";
     let sum = 0, n = 0;
     for (let c = col; c < col + cells; c++) {
       if (c < 0 || c >= COLS) continue;
-      sum += disp[row * COLS + c];
+      const i = exOf(row, c);
+      if (i < 0) continue;
+      sum += disp[i];
       n++;
     }
     const d = n ? sum / n : 0;
@@ -1300,7 +1329,7 @@ import { generateCloud, generateCloudSet } from "./clouds.js";
       labels: LABELS_ON, oceanLabels: OCEAN_ON, hoverFit: FLAGS.hoverFit,
       nativeNames: FLAGS.nativeNames && !!ROLE_NATIVE,
       worker: FLAGS.worker, seaStories: SEA_ON, idleSea: IDLE_ON,
-      seaClick: FLAGS.seaClick
+      seaClick: FLAGS.seaClick, openOcean: FLAGS.openOcean !== false
     },
     tiers: { name: TIER_NAME_Z, tagline: TIER_TAG_Z },
     getZoom: function () { return view ? view.zoom : 1; },
@@ -1407,6 +1436,43 @@ import { generateCloud, generateCloudSet } from "./clouds.js";
         return { left: b.left, top: b.top, right: b.right, bottom: b.bottom };
       });
       return { boxes: boxes, rects: seaObstacleRects.slice() };
+    },
+    /* The open ocean, as numbers: how far the water reaches, how many cells of
+       it there are, how much of the world grid's water the currents actually
+       move, and whether every glyph the flow can paint is one cell wide in the
+       face the browser resolved. scripts/checks/ocean.mjs asks all of that. */
+    oceanState: function () {
+      const rectOf = function (el) {
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+      };
+      const vp = viewport.getBoundingClientRect();
+      const probe = document.createElement("canvas").getContext("2d");
+      probe.font = PX + "px " + MONO;
+      return {
+        on: FLAGS.openOcean !== false,
+        cols: COLS, rows: ROWS, exCols: EXC, exRows: EXR, mx: MX, my: MY,
+        floorMx: FMX, floorMy: FMY,
+        capped: FMX > MX || FMY > MY, cap: { x: MARGIN_CAP_X, y: MARGIN_CAP_Y },
+        cells: EXN, waterCells: waterLen, worldCells: COLS * ROWS,
+        charW: CHARW, lineH: LINEH, px: PX,
+        map: { width: mapW, height: mapH },
+        // The still floor rides on the base canvas; both have to reach the edge.
+        sea: rectOf(seaEl), floor: rectOf(baseEl),
+        viewport: { left: vp.left, top: vp.top, right: vp.right, bottom: vp.bottom },
+        flow: flow ? {
+          peak: flow.peak, cells: flow.cells, moving: flow.moving,
+          worldWater: flow.worldWater, worldMoving: flow.worldMoving,
+          onLand: flow.onLand, gyres: flow.gyres, jets: flow.jets, bands: flow.bands
+        } : null,
+        floorInk: floorInk, serifDirections: serifDirFound,
+        glyphs: FLOW_ALPHABET.map(function (g) {
+          return { glyph: g, width: probe.measureText(g).width };
+        }),
+        currents: currentsSummary(),
+        reduced: REDUCED, mobile: isMobile, zoom: view ? view.zoom : 1
+      };
     },
     /* Does the worker's font resolve to the face the page's does? Both measure
        the grid's reference string — the page through a canvas, the worker
@@ -1821,9 +1887,47 @@ import { generateCloud, generateCloudSet } from "./clouds.js";
     clampPan();
     applyView();
   }
-  // Wave phase + per-region bias (computed at build so the ocean has a stable
-  // regional character; the time-varying sines in frame() make it travel).
-  let phase, waveBias, waterList, waterLen = 0;
+  /* Wave phase + per-region bias (computed at build so the ocean has a stable
+     regional character; the time-varying sines in frame() make it travel), and
+     the open ocean's geometry.
+
+     Everything the fluid simulation touches — `disp`, `vel`, `phase`,
+     `waveBias`, the neighbour lists, the water list, the flow field — is
+     indexed on the *extended* grid: EXC × EXR cells, with the world grid at the
+     fixed offset (MX, MY) inside it. `exOf(row, col)` is the one conversion
+     from world cells to that index, and EXO is its origin. With
+     `?noflags=openOcean` the margin is zero and the extended grid *is* the
+     world grid, which is what makes the flag an exact restoration. */
+  let phase, waveBias, waterList, waterLen = 0, innerLen = 0, drawX, drawY;
+  let neighbors = null, nCount = null, exLand = null;
+  let MX = 0, MY = 0, EXC = COLS, EXR = ROWS, EXO = 0, EXN = COLS * ROWS;
+  // The still floor's grid: the same origin, but uncapped, so it covers the
+  // viewport even where the simulation stops (see MARGIN_CAP_X/Y).
+  let FMX = 0, FMY = 0;
+  let flow = null, floorInk = null;
+  // The two canvases the sea is painted on: the static one (land and the still
+  // current field) and the animated one above it.
+  let baseEl = null, seaEl = null;
+  let serifDirFound = 0;
+  // World cell -> extended index, or -1 when the cell is off the extended grid.
+  function exOf(row, col) {
+    const er = row + MY, ec = col + MX;
+    if (er < 0 || er >= EXR || ec < 0 || ec >= EXC) return -1;
+    return er * EXC + ec;
+  }
+  /* The margin the viewport asks for, in cells per side. The map is centred in
+     the viewport and never zooms out below 1, and a pan is clamped to the
+     overhang, so whatever covers the viewport at zoom 1 covers it at every
+     zoom. One cell of slack absorbs the rounding. */
+  function marginsFor(charW, lineH) {
+    const vw = viewport.clientWidth || 1200;
+    const vh = viewport.clientHeight || 700;
+    if (!FLAGS.openOcean || !(charW > 0) || !(lineH > 0)) return { x: 0, y: 0 };
+    return {
+      x: Math.max(0, Math.ceil((vw - COLS * charW) / 2 / charW) + 1),
+      y: Math.max(0, Math.ceil((vh - ROWS * lineH) / 2 / lineH) + 1)
+    };
+  }
   // Marker elements for the currently built map (reset each build). Search
   // and category filtering dim the ones that don't match, so the map mirrors
   // the grid instead of always showing every dot.
@@ -1850,6 +1954,7 @@ import { generateCloud, generateCloudSet } from "./clouds.js";
     // The label DOM went with the stage; drop the element cache (the prepared
     // pretext handles are keyed by text and deliberately survive a rebuild).
     markersEl = null;
+    baseEl = null; seaEl = null; floorInk = null;
     labelEls.clear();
     oceanEls.length = 0;
     labelRecords = [];
@@ -1883,38 +1988,123 @@ import { generateCloud, generateCloudSet } from "./clouds.js";
     vpW = viewport.clientWidth || mapW;
     vpH = viewport.clientHeight || mapH;
 
-    disp = new Float32Array(COLS * ROWS);
-    vel = new Float32Array(COLS * ROWS);
+    /* ---- The open ocean ------------------------------------------------
+       The world grid is 150 × 39 cells of equirectangular Earth and it is
+       *centred* in the viewport, which leaves dark space above and below it on
+       a tall screen and to both sides on a wide one. That space is ocean too:
+       the same cell size, the same fluid, the same currents, wrapped round the
+       antimeridian and faded out past the poles.
+
+       So the simulation runs on an extended grid — the world grid with a margin
+       of MX × MY cells on each side — and the animated sea canvas is sized to
+       it and hung inside the pan/zoom wrapper at a negative offset, so the one
+       transform that moves the map moves the open ocean with it. The world
+       grid's own placement and size are untouched: markers, labels, the land
+       mask, the hover card, the sea text and every hit test still speak in
+       world cells, and exOf() is the only thing that knows about the margin. */
+    const want = marginsFor(CHARW, LINEH);
+    FMX = want.x; FMY = want.y;
+    MX = Math.min(want.x, MARGIN_CAP_X);
+    MY = Math.min(want.y, MARGIN_CAP_Y);
+    EXC = COLS + 2 * MX; EXR = ROWS + 2 * MY; EXN = EXC * EXR;
+    EXO = MY * EXC + MX;
+    const OX = MX * CHARW, OY = MY * LINEH;
+    const exW = EXC * CHARW, exH = EXR * LINEH;
+
+    // The extended land mask: the world grid's land, and open water everywhere
+    // else. Only the neighbour lists and stir() read it.
+    exLand = new Uint8Array(EXN);
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) exLand[EXO + r * EXC + c] = kind[r * COLS + c];
+    }
+
+    disp = new Float32Array(EXN);
+    vel = new Float32Array(EXN);
+
+    // Neighbour lists for the water-cell spring simulation, over the extended
+    // grid: a splash at the edge of the map ripples on into the open ocean
+    // because the two are one connected body of water here.
+    neighbors = new Int32Array(EXN * 4);
+    nCount = new Uint8Array(EXN);
+    /* The water list is in two halves: the mapped ocean first, then the open
+       ocean around it. Everything that walks all the water (the spring, an
+       ambient pulse) walks the whole list and never knows; the wave painter
+       draws the first half every frame and the second half every other one. */
+    const water = new Int32Array(EXN);
+    const far = new Int32Array(EXN);
+    let nearN = 0, farN = 0;
+    for (let r = 0; r < EXR; r++) {
+      const inRows = r >= MY && r < MY + ROWS;
+      for (let c = 0; c < EXC; c++) {
+        const i = r * EXC + c;
+        if (exLand[i]) continue;
+        if (inRows && c >= MX && c < MX + COLS) water[nearN++] = i;
+        else far[farN++] = i;
+        let n = 0;
+        if (c > 0 && !exLand[i - 1]) neighbors[i * 4 + n++] = i - 1;
+        if (c < EXC - 1 && !exLand[i + 1]) neighbors[i * 4 + n++] = i + 1;
+        if (r > 0 && !exLand[i - EXC]) neighbors[i * 4 + n++] = i - EXC;
+        if (r < EXR - 1 && !exLand[i + EXC]) neighbors[i * 4 + n++] = i + EXC;
+        nCount[i] = n;
+      }
+    }
+    innerLen = nearN;
+    waterLen = nearN + farN;
+    water.set(far.subarray(0, farN), nearN);
+    waterList = water.subarray(0, waterLen);
+    /* Where each of those cells is painted, in world pixels, worked out once.
+       Indexed by the cell's place in the water list rather than by its grid
+       index, so the frame loop reads them in order — and so a frame never does
+       an integer division to turn an index back into a row and a column. */
+    drawX = new Float32Array(waterLen);
+    drawY = new Float32Array(waterLen);
+    for (let w = 0; w < waterLen; w++) {
+      const i = waterList[w];
+      drawX[w] = ((i % EXC) - MX) * CHARW;
+      drawY[w] = (((i / EXC) | 0) - MY + 0.5) * LINEH;
+    }
 
     // Wave phase + regional bias. Phase tilts wave fronts slightly per region
     // so swell arrives at different places at different times (real seas
     // interfere rather than scroll uniformly); bias gives each region a
     // characterful base energy (some seas are just rougher).
-    phase = new Float32Array(COLS * ROWS);
-    waveBias = new Float32Array(COLS * ROWS);
-    waterList = waterCells;
-    waterLen = waterCells.length;
-    for (let i = 0; i < COLS * ROWS; i++) {
-      if (kind[i]) continue;
-      const c = i % COLS, r = (i / COLS) | 0;
+    phase = new Float32Array(EXN);
+    waveBias = new Float32Array(EXN);
+    for (let i = 0; i < EXN; i++) {
+      if (exLand[i]) continue;
+      const c = i % EXC, r = (i / EXC) | 0;
       phase[i] = c * 0.21 + r * 0.09;
       waveBias[i] = 0.5 + 0.5 * Math.sin(c * 0.11 + r * 0.17); // 0..1
     }
 
+    /* The currents. js/currents.js turns a table of gyres, boundary jets and
+       zonal bands into one velocity per cell, then into the two numbers a frame
+       actually needs: the wave's phase at this cell and how fast that phase
+       runs. `phase - omega * t` is a crest lying across the current and
+       traveling down it at the local speed, which is what makes the Gulf Stream
+       read as a stream. Everything here is done once, at build. */
+    if (FLAGS.openOcean) {
+      flow = buildFlowField({
+        cols: COLS, rows: ROWS, land: kind,
+        mx: MX, my: MY, charW: CHARW, lineH: LINEH
+      });
+      phase = flow.phase;
+    } else {
+      flow = null;
+    }
+
     function stir(c, r, amp) {
       c = Math.round(c); r = Math.round(r);
-      if (c < 0 || c >= COLS || r < 0 || r >= ROWS) return;
-      const i = r * COLS + c;
-      if (!kind[i]) { disp[i] += amp; return; }
+      const i = exOf(r, c);
+      if (i < 0) return;
+      if (!exLand[i]) { disp[i] += amp; return; }
       // Land tapped: ripple the nearest water ring instead.
       for (let rad = 1; rad <= 8; rad++) {
         for (let dr = -rad; dr <= rad; dr++) {
           for (let dc = -rad; dc <= rad; dc++) {
             if (Math.max(Math.abs(dr), Math.abs(dc)) !== rad) continue;
-            const rr = r + dr, cc = c + dc;
-            if (rr < 0 || rr >= ROWS || cc < 0 || cc >= COLS) continue;
-            const j = rr * COLS + cc;
-            if (!kind[j]) { disp[j] += amp * 0.6; return; }
+            const j = exOf(r + dr, c + dc);
+            if (j >= 0 && !exLand[j]) { disp[j] += amp * 0.6; return; }
           }
         }
       }
@@ -1944,20 +2134,51 @@ import { generateCloud, generateCloudSet } from "./clouds.js";
     zoomEl.style.setProperty("--row-h", LINEH + "px");
     stage.appendChild(zoomEl);
 
-    // ---- Base canvas: static land + faint sea floor (drawn once) ------------
-    // The animated water (traveling waves + ripples) lives on the sea canvas
-    // canvas above this; keeping the base static makes each frame cheap.
+    const FLOOR_ON = !!FLAGS.openOcean;
+    // The still floor's own grid — the world grid plus the *uncapped* margin,
+    // so the water reaches the edge of the viewport even where the simulation
+    // stopped at MARGIN_CAP_X/Y and the far ring is standing water.
+    const FOX = FMX * CHARW, FOY = FMY * LINEH;
+    const baseW = FLOOR_ON ? (COLS + 2 * FMX) * CHARW : mapW;
+    const baseH = FLOOR_ON ? (ROWS + 2 * FMY) * LINEH : mapH;
+
+    /* ---- Base canvas: static land + the still floor of the sea -------------
+       The animated water (traveling waves + ripples) lives on the sea canvas
+       above this; keeping the base static makes each frame cheap.
+
+       With the open ocean on, this canvas is sized to the whole *still floor*
+       grid — the world grid plus the uncapped margin — and carries the current
+       field standing still under the entire sea, mapped water and open water
+       alike. That is one layer, painted twice in the life of a build (once, and
+       once more if the serif palette arrives), rather than a second full-screen
+       canvas for the compositor to blend on every frame: measured at 2000×900
+       under a 4× CPU throttle, a separate floor canvas cost four milliseconds a
+       frame to composite and this costs nothing at all.
+
+       It also covers the two places the animated sea cannot reach: the ring
+       beyond MARGIN_CAP_X/Y, which is never simulated, and
+       `prefers-reduced-motion: reduce`, where nothing animates and this is the
+       whole sea. The device pixel ratio is dropped on a viewport large enough
+       that keeping it would mean a canvas of tens of millions of pixels. */
     const base = document.createElement("canvas");
-    base.width = Math.round(mapW * DPR);
-    base.height = Math.round(mapH * DPR);
+    const bdpr = baseW * baseH * DPR * DPR > 9e6 ? 1 : DPR;
+    base.width = Math.round(baseW * bdpr);
+    base.height = Math.round(baseH * bdpr);
     base.className = "map-base";
-    base.style.width = mapW + "px";
-    base.style.height = mapH + "px";
+    base.style.width = baseW + "px";
+    base.style.height = baseH + "px";
+    if (FOX) base.style.setProperty("left", -FOX + "px");
+    if (FOY) base.style.setProperty("top", -FOY + "px");
     zoomEl.appendChild(base);
+    baseEl = base;
     const bctx = base.getContext("2d");
-    bctx.scale(DPR, DPR);
+    bctx.scale(bdpr, bdpr);
+    // Like the sea canvas: the origin stays the world grid's top left corner,
+    // so land is painted in exactly the coordinates it always was and a
+    // negative one simply lands in the open ocean.
+    bctx.translate(FOX, FOY);
     repaintBase = function () {
-    bctx.clearRect(0, 0, mapW, mapH);
+    bctx.clearRect(-FOX, -FOY, baseW, baseH);
     // A stale or unusable palette falls back to the monospace font and glyphs.
     const palette = serifMode && serifPalette && serifPalette.usable && serifPalette.landLevel
       && serifPalette.landLevel.length === COLS * ROWS && serifPalette.charW === CHARW
@@ -1986,32 +2207,91 @@ import { generateCloud, generateCloudSet } from "./clouds.js";
           landCells++;
           landPositions.push([x, y]);
           bctx.fillText(glyph, x + (ink ? (CHARW - ink.width) / 2 : 0), y);
-        } else {
+        } else if (!FLOOR_ON) {
           bctx.fillStyle = "rgba(80, 130, 170, 0.10)";
           // The still sea floor is tonal too, from the same static regional
           // bias the wave trains use. This is the whole sea under reduced
           // motion, where the fluid layer never draws — so it stays at the
           // bottom of the ramp, the way the monospace floor is a single dot.
-          const ink = palette && inkFor(palette, 0.02 + 0.10 * (waveBias[i] || 0));
+          //
+          // With the open ocean on, the still floor is the open ocean's own
+          // canvas instead: one continuous field of standing current under the
+          // whole sea, mapped water and margin alike, rather than two floors
+          // that meet at the edge of the world grid.
+          const ink = palette && inkFor(palette, 0.02 + 0.10 * (waveBias[EXO + r * EXC + c] || 0));
           bctx.fillText(ink ? ink.glyph : "·", x + (ink ? (CHARW - ink.width) / 2 : 0), y);
         }
       }
     }
     baseInk = { font: bctx.font, serif: !!palette, land: tally, landCells: landCells, landPositions: landPositions };
 
+    /* The still floor of the open ocean: the current field, standing still,
+       over every water cell of the floor grid. Each cell gets a mark the way
+       every cell of mapped water used to get its "·" — still water is textured
+       water — but the level and the glyph come from the current, so a gyre and
+       a boundary jet are legible as streams in a frame with no motion in it at
+       all. The animated crests are painted over this; below their cut (see the
+       frame loop) this is what shows through. */
+    floorInk = null;
+    if (FLOOR_ON) {
+      const seaPalette = palette && palette.ramp ? palette : null;
+      const sample = createStaticFlow({
+        cols: COLS, rows: ROWS, land: kind, charW: CHARW, lineH: LINEH,
+        peak: flow ? flow.norm : 1
+      });
+      let cells = 0;
+      const edges = { top: 0, bottom: 0, left: 0, right: 0, world: 0 };
+      for (let r = -FMY; r < ROWS + FMY; r++) {
+        const inRows = r >= 0 && r < ROWS;
+        const y = (r + 0.5) * LINEH;
+        for (let c = -FMX; c < COLS + FMX; c++) {
+          const f = sample(c, r);
+          if (f.land) continue;
+          const lvl = Math.min(FLOOR_COLORS.length - 1, (f.speed * 5.4) | 0);
+          const ink = seaPalette ? inkFor(seaPalette, 0.04 + 0.30 * f.speed) : null;
+          bctx.fillStyle = FLOOR_COLORS[lvl];
+          bctx.fillText(
+            ink ? ink.glyph : FLOW_GLYPHS[f.bucket * FLOW_LEVELS + Math.min(FLOW_LEVELS - 1, lvl + 1)],
+            c * CHARW + (ink ? (CHARW - ink.width) / 2 : 0), y
+          );
+          cells++;
+          if (inRows && c >= 0 && c < COLS) edges.world++;
+          else if (r < 0) edges.top++;
+          else if (r >= ROWS) edges.bottom++;
+          else if (c < 0) edges.left++;
+          else edges.right++;
+        }
+      }
+      floorInk = {
+        cells: cells, edges: edges, serif: !!seaPalette, dpr: bdpr,
+        width: baseW, height: baseH, cols: COLS + 2 * FMX, rows: ROWS + 2 * FMY
+      };
+    }
+
     };
     syncSerif();
     if (serifRequested) askPalette();
 
+    /* The animated sea. Sized to the extended grid and hung at a negative
+       offset inside the pan/zoom wrapper, so the open ocean is transformed by
+       the very same matrix the map is and the two can never slide apart. The
+       context is then translated so that (0, 0) is still the world grid's top
+       left corner: every line of painting below — the wave field, the spilled
+       taglines, the drifting sentences — goes on speaking in world pixels, and
+       a negative coordinate simply lands in the margin. */
     const sea = document.createElement("canvas");
-    sea.width = Math.round(mapW * DPR);
-    sea.height = Math.round(mapH * DPR);
+    sea.width = Math.round(exW * DPR);
+    sea.height = Math.round(exH * DPR);
     sea.className = "map-sea";
-    sea.style.width = mapW + "px";
-    sea.style.height = mapH + "px";
+    sea.style.width = exW + "px";
+    sea.style.height = exH + "px";
+    if (OX) sea.style.setProperty("left", -OX + "px");
+    if (OY) sea.style.setProperty("top", -OY + "px");
     zoomEl.appendChild(sea);
+    seaEl = sea;
     const sctx = sea.getContext("2d");
     sctx.scale(DPR, DPR);
+    sctx.translate(OX, OY);
     sctx.font = FONT;
     sctx.textBaseline = "middle";
     sctx.textAlign = "left";
@@ -3247,10 +3527,10 @@ import { generateCloud, generateCloudSet } from "./clouds.js";
     }, { capture: true });
 
     if (!REDUCED) ambientTimer = setInterval(() => {
-      const i = waterCells[(Math.random() * waterCells.length) | 0];
+      const i = waterList[(Math.random() * waterLen) | 0];
       disp[i] += 0.75;
       if (Math.random() < 0.5) {
-        const j = waterCells[(Math.random() * waterCells.length) | 0];
+        const j = waterList[(Math.random() * waterLen) | 0];
         disp[j] += 0.55;
       }
     }, 900);
@@ -3271,11 +3551,56 @@ import { generateCloud, generateCloudSet } from "./clouds.js";
     const W1 = { w: 0.30, kc: 0.11, kr: 0.020, amp: 0.55 }; // long eastward swell
     const W2 = { w: 0.42, kc: -0.05, kr: 0.070, amp: 0.40 }; // slow westward set
     const W3 = { w: 1.05, kc: 0.05, kr: 0.030, amp: 0.30 };  // fast short chop
+    /* The flow field, unpacked into locals the loop can keep in registers, and
+       the direction glyphs the serif ramp happens to carry. Both are decided
+       here, once per build, rather than per cell per frame: the whole extended
+       grid is walked sixty times a second and the only thing a frame is allowed
+       to do per cell is arithmetic and two array reads. */
+    const flowSpeed = flow ? flow.speed : null;
+    const flowBucket = flow ? flow.bucket : null;
+    const flowOmega = flow ? flow.omega : null;
+    const marginOn = MX > 0 || MY > 0;
+    /* The cut below which a water cell is left to the still floor. With the
+       open ocean on there is a floor under every water cell, carrying the
+       current's own glyph, and the animated layer's lowest level is the same
+       "·" it already put there — so the cut is raised to the top of that level
+       and the quiet water is simply the floor. What is left on the animated
+       layer is the crests and the ripples, which is what moves. That is about a
+       third of the water cells a frame not painted twice, and it is what pays
+       for the open ocean being there at all. */
+    const CUT = FLOOR_ON ? 2 / 6 : 0.08;
+    let frameNo = 0, marginDrawn = false;
+    let serifDir = null, lastInkPalette = null;
+    serifDirFound = 0;
+    function syncSerifDirections() {
+      const p = serifMode && serifPalette && serifPalette.usable ? serifPalette : null;
+      serifDir = null;
+      if (!p || !flow) return;
+      // A direction glyph is only used when the measured ramp already contains
+      // it: the ramp is what keeps the serif sea's tone honest, and a glyph that
+      // was never measured has neither a level nor a width here.
+      const byGlyph = new Map();
+      for (const ink of p.ramp) if (!byGlyph.has(ink.glyph)) byGlyph.set(ink.glyph, ink);
+      const table = new Array(FLOW_GLYPHS.length).fill(null);
+      let found = 0;
+      for (let k = 0; k < FLOW_GLYPHS.length; k++) {
+        const ink = byGlyph.get(FLOW_GLYPHS[k]);
+        if (ink) { table[k] = ink; found++; }
+      }
+      serifDirFound = found;
+      if (found) serifDir = table;
+    }
+
     function frame(now) {
       const t = (now - waveT0) / 1000;
       if (!viewportVisible) { loopRunning = false; return; } // off-screen: suspended
-      // Spring step for the interactive ripple field.
-      for (let i = 0; i < COLS * ROWS; i++) {
+      // Spring step for the interactive ripple field, over the water cells
+      // themselves rather than the whole grid: a quarter of the extended grid
+      // is continent, and the open ocean cannot afford to visit it twice a
+      // frame to be told so.
+      const NW = waterLen;
+      for (let w = 0; w < NW; w++) {
+        const i = waterList[w];
         const n = nCount[i];
         if (!n) continue;
         let lap = 0;
@@ -3283,25 +3608,56 @@ import { generateCloud, generateCloudSet } from "./clouds.js";
         for (let k = 0; k < n; k++) lap += disp[neighbors[b4 + k]];
         vel[i] += (lap - n * disp[i]) * SPREAD;
       }
-      for (let i = 0; i < COLS * ROWS; i++) {
-        if (!nCount[i]) continue;
+      for (let w = 0; w < NW; w++) {
+        const i = waterList[w];
         vel[i] += -SPRING * disp[i];
         vel[i] *= DAMP;
         disp[i] += vel[i];
       }
 
-      sctx.clearRect(0, 0, mapW, mapH);
+      /* The far water is redrawn every other frame. The margin is open ocean
+         with nothing in it but waves — no marker, no label, no sentence — and at
+         2000×900 it is more cells than the map itself, so giving it half the
+         frames is most of the cost of the open ocean back for something nobody
+         can see at 30 fps. The world grid is cleared and repainted every frame,
+         which is why only the margin's rectangle is left standing. */
+      const farFrame = (marginOn && (++frameNo & 1) === 0) || !marginDrawn;
+      if (farFrame) { sctx.clearRect(-OX, -OY, exW, exH); marginDrawn = true; }
+      else sctx.clearRect(0, 0, mapW, mapH);
       const inkPalette = serifMode && serifPalette && serifPalette.usable ? serifPalette : null;
+      if (inkPalette !== lastInkPalette) { lastInkPalette = inkPalette; syncSerifDirections(); }
       sctx.font = inkPalette ? inkPalette.font : FONT;
-      const N = waterLen;
+      const N = farFrame ? waterLen : innerLen;
+      let lastFill = "";
       for (let w = 0; w < N; w++) {
         const i = waterList[w];
-        const c = i % COLS, r = (i / COLS) | 0;
-        let density;
-        if (WAVE_AMP > 0) {
+        const x = drawX[w];
+        let density, spd = 0, bucket = 8;
+        if (WAVE_AMP > 0 && flowSpeed) {
+          /* Currents. The phase rises along the local flow, so `phase - ω t` is
+             a crest lying across the stream and traveling down it at the
+             stream's own speed: the Gulf Stream's crests run north-east up the
+             American coast, the circumpolar band's run east all the way round,
+             and the eye of a gyre barely moves at all. A second, longer train
+             on the same axis (offset by the static regional bias) beats against
+             the first so no two crests are the same height. */
+          spd = flowSpeed[i] * (1 / 255);
+          const th = phase[i] - flowOmega[i] * t;
+          const a = SIN_TABLE[((th * SIN_SCALE) | 0) & SIN_MASK];
+          const b = SIN_TABLE[(((th * 0.53 + waveBias[i] * 6.283) * SIN_SCALE) | 0) & SIN_MASK];
+          const base = (a * 0.74 + b * 0.44 + 1.18) / 2.36;   // 0 .. 1
+          // Brightness follows the current, so the gyres read as bright streams
+          // and their calm eyes — and the doldrums — stay quiet water. The
+          // gamma is squared rather than raised to WAVE_GAMMA: one multiply
+          // instead of a pow(), and two hundredths of a brightness level in it.
+          density = base * base * WAVE_AMP * (0.52 + 1.25 * spd)
+            + 0.10 * (waveBias[i] - 0.5);
+          bucket = flowBucket[i];
+        } else if (WAVE_AMP > 0) {
           // Superposed traveling waves; the per-region phase tilt makes the
           // fronts arrive at different times so the sea shimmers rather than
           // scrolling. Normalized to 0..1, then gamma-sharpened into crests.
+          const c = i % EXC, r = (i / EXC) | 0;
           const ph = phase[i];
           const a = Math.sin(t * W1.w + c * W1.kc + r * W1.kr + ph);
           const b = Math.sin(t * W2.w + c * W2.kc + r * W2.kr - ph * 0.4);
@@ -3319,25 +3675,56 @@ import { generateCloud, generateCloudSet } from "./clouds.js";
         // after gamma so a splash punches through the ambient waves.
         const d = disp[i];
         const densityRaw = density + d * 1.5;
-        const y0 = (r + 0.5) * LINEH;
+        const y0 = drawY[w];
         const y = y0 + Math.max(-2.4, Math.min(2.4, d)) * LIFT;
-        if (densityRaw <= 0.08) continue;            // static floor shows through
-        const lvl = Math.max(1, Math.min(5, (densityRaw * 6) | 0));
-        sctx.fillStyle = OCEAN_COLORS[lvl];
-        // Monospace has six ocean glyphs and the colour ramp carries the rest.
-        // In serif mode the density itself picks the ink out of the measured
-        // ramp, unquantised, so a crest and its trough are two tones of the same
-        // continuous field rather than two entries in a fixed list. The gamma is
-        // the same idea the wave field already uses: quiet water sits at the
-        // bottom of the ramp and the crests get the range, so the sea reads as
-        // water with weather in it rather than as an even texture.
-        const ink = inkPalette && inkFor(inkPalette, Math.pow(Math.min(1, densityRaw / 1.15), SERIF_SEA_GAMMA));
-        sctx.fillText(ink ? ink.glyph : OCEAN_GLYPHS[lvl], c * CHARW + (ink ? (CHARW - ink.width) / 2 : 0), REDUCED ? y0 : y);
+        if (densityRaw <= CUT) continue;       // the still floor shows through
+        let lvl = Math.max(1, Math.min(5, (densityRaw * 6) | 0));
+        /* A stream is never dark. Brightness normally follows the crest, but
+           fast water is held at a floor set by its own speed, so the Gulf
+           Stream, the Kuroshio and the circumpolar band read as continuous
+           bright ribbons with crests running along them rather than as the same
+           dotted water as the calm between the gyres. The top level stays
+           reserved for a crest or a splash. */
+        if (flowSpeed) {
+          const floorLvl = (spd * 4.0) | 0;
+          if (floorLvl > lvl) lvl = floorLvl > 4 ? 4 : floorLvl;
+        }
+        const fill = OCEAN_COLORS[lvl];
+        if (fill !== lastFill) { sctx.fillStyle = fill; lastFill = fill; }
+        /* Colour says how much water the crest lifted; shape says where it is
+           going. Monospace has six ocean glyphs per direction and the colour
+           ramp carries the rest, and a fast stream is given its direction glyph
+           whether or not a crest happens to be passing over it — which is what
+           makes the gyres and the boundary jets legible as streams even in a
+           still frame, and what keeps the quiet water between them a field of
+           dots.
+
+           In serif mode the density itself picks the ink out of the measured
+           ramp, unquantised, so a crest and its trough are two tones of the same
+           continuous field rather than two entries in a fixed list; a crest
+           takes a direction glyph when — and only when — the measured ramp
+           contains that glyph, because the ramp is where a glyph's tone and its
+           width come from. The gamma is the same idea the wave field already
+           uses: quiet water sits at the bottom of the ramp and the crests get
+           the range, so the sea reads as water with weather in it rather than
+           as an even texture. */
+        const g = flowSpeed
+          ? bucket * FLOW_LEVELS + Math.min(FLOW_LEVELS - 1, Math.max(lvl, (spd * 4.4) | 0))
+          : lvl;
+        let ink = null;
+        if (inkPalette) {
+          if (serifDir && lvl >= SERIF_DIR_LEVEL) ink = serifDir[g];
+          if (!ink) ink = inkFor(inkPalette, Math.pow(Math.min(1, densityRaw / 1.15), SERIF_SEA_GAMMA));
+        }
+        sctx.fillText(
+          ink ? ink.glyph : (flowSpeed ? FLOW_GLYPHS[g] : OCEAN_GLYPHS[lvl]),
+          x + (ink ? (CHARW - ink.width) / 2 : 0), REDUCED ? y0 : y
+        );
         // Troughs dip below the baseline in a dimmer tone, so a splash has a
         // visible leading and trailing edge, not just a bright crest.
         if (d < -0.5) {
-          sctx.fillStyle = "rgba(20, 40, 70, 0.55)";
-          sctx.fillText("·", c * CHARW, y);
+          sctx.fillStyle = lastFill = "rgba(20, 40, 70, 0.55)";
+          sctx.fillText("·", x, y);
         }
       }
       // The sea's own text, on the same canvas and lifted by the same field:
@@ -3402,7 +3789,13 @@ import { generateCloud, generateCloudSet } from "./clouds.js";
   let lastPX = 0;
   function scheduleBuild() {
     const px = computePX();
-    if (Math.abs(px - lastPX) > 0.25) build();
+    if (Math.abs(px - lastPX) > 0.25) { build(); return; }
+    // The cell size is unchanged, but a viewport that grew needs more open
+    // ocean around the same world grid — so the margin is a rebuild trigger of
+    // its own. (CHARW/LINEH only move with PX, so the margin computed from the
+    // current ones is the margin the next build would use.)
+    const want = marginsFor(CHARW, LINEH);
+    if (want.x !== FMX || want.y !== FMY) build();
   }
   requestAnimationFrame(() => {
     build();
@@ -3429,10 +3822,10 @@ import { generateCloud, generateCloudSet } from "./clouds.js";
           if (REDUCED) return; // static map: nothing to restart
           if (ambientTimer === null) {
             ambientTimer = setInterval(() => {
-              const i = waterCells[(Math.random() * waterCells.length) | 0];
+              const i = waterList[(Math.random() * waterLen) | 0];
               disp[i] += 0.75;
               if (Math.random() < 0.5) {
-                const j = waterCells[(Math.random() * waterCells.length) | 0];
+                const j = waterList[(Math.random() * waterLen) | 0];
                 disp[j] += 0.55;
               }
             }, 900);

@@ -382,6 +382,58 @@ Rendering notes:
 for the geometry alone, `node scripts/checks/run-clouds.mjs` for the browser too,
 and `pnpm smoke` for both. Screenshots: `docs/screenshots/clouds-1280.png` and
 `docs/screenshots/clouds-zoom.png`.
+## The open ocean (added after Phase 8)
+
+The hero's sea used to be exactly the world grid: a 150 x 39 character
+rectangle centred in `.map-viewport`, with dark space around it on a wide or
+tall screen, animated by three uniform traveling sine trains. It now fills the
+viewport and flows as real surface currents.
+
+**Extended grid.** `build()` computes a margin `MX x MY` in cells from the
+viewport and the cell size (capped by `MARGIN_CAP_X/Y = 30 x 12`), and every
+array the fluid touches — `disp`, `vel`, `phase`, `waveBias`, the neighbour
+lists, the water list, the flow field — is indexed on `EXC x EXR = COLS + 2*MX`
+by `ROWS + 2*MY`, with the world grid at the fixed offset `EXO`. `exOf(row,col)`
+is the only conversion. The sea canvas is sized to that grid and the base canvas
+(land plus the sea's still floor) to the uncapped floor grid; both sit at a
+negative `left`/`top` inside `.map-zoom`, and their 2D contexts are translated
+so that (0,0) is still the world grid's corner — which is why every other line of
+painting (sea text, spilled taglines, the ripple lift) is unchanged. The floor
+grid (`FMX x FMY`) is uncapped on purpose, so on a viewport past the cap the far
+ring is standing water painted once rather than a sixth of a million simulated
+cells.
+
+**`js/currents.js`** is pure and DOM-free. `GYRES`, `JETS` and `BANDS` are the
+table; `flowAt(lat, lon, out)` sums them; `coastDamping()` is a wrapping BFS
+distance-to-land field; `geoOf()` wraps longitude and folds the chart over the
+poles (`lat -> 180 - lat`, `lon + 180`, meridional sign flipped, with a decay to
+`POLE_FLOOR` past the pole); `buildFlowField()` freezes the whole thing into
+`speed` (Uint8, normalised at the 88th percentile so boundary jets saturate
+instead of dragging the ocean into the bottom of the ramp), `bucket` (Uint8, one
+of eight compass directions or a ninth "too slow to say"), `phase` and `omega`
+(Float32). `createStaticFlow()` is the same sampler for the once-per-build still
+floor. `FLOW_GLYPHS` is a flat array of single characters indexed
+`bucket * 6 + level`, so a frame never builds a string.
+
+**Frame loop.** Per water cell: two sine-table lookups, a squared gamma, the
+speed modulation, the ripple, a level, a glyph index, one `fillText`. Paint
+positions come from `drawX`/`drawY`, filled at build and indexed by the cell's
+place in the water list (so the frame reads them in order and never divides).
+The water list is in two halves — mapped ocean first, open ocean second — and
+the far half is redrawn every other frame, with only the world rectangle cleared
+in between. With the still floor underneath, the draw cut rises from 0.08 to
+2/6 — the top of the lowest brightness level, whose glyph is the same "·" the
+floor has already put in that cell — so what is left on the animated layer is
+the crests and the ripples, which is what moves. That is about a third of the
+water cells a frame not painted twice.
+
+**Watch out for.** The still floor rides on the base canvas *deliberately*: an
+earlier revision gave it a canvas of its own and that second full-viewport layer
+cost about 4ms a frame at 2000x900 under a 4x CPU throttle, purely in
+compositing. Do not split it out again. The Phase 7-8 art canvas is still sized
+to the world grid, so a country story dims the mapped ocean but not the margin
+around it; sizing `artCanvas` (and `paintSilhouette`'s dimming rect) to the
+extended grid is the natural follow-up.
 
 ## Flags and offline cache
 
@@ -397,12 +449,13 @@ All default on, except serif rendering is opt-in through its toggle:
 | `routeText` | Route layout and dialog route controls |
 | `serifAtlas` | Serif-map control/rendering |
 | `asciiClouds` | ASCII cloud outlines; restores the blurred sprite blobs |
+| `openOcean` | The open ocean and the currents; the sea returns to the world grid and to uniform sine trains |
 
 Example: `/?noflags=worker`, `/?noflags=asciiClouds`, or
 `/?noflags=countryStories,routeText,serifAtlas`.
 
 `sw.js` uses `atlas-of-the-curious-v3`, invalidating the previous cache-first
-JavaScript cache. Its CORE list includes labels, sea, clouds, text-worker and map-art,
+JavaScript cache. Its CORE list includes labels, sea, clouds, currents, text-worker and map-art,
 and retains the reader/notebook modules. The offline check also found that the
 pre-existing CORE list omitted `vendor/pretext/generated/bidi-data.js`; that
 transitive dependency is now precached too. The CORE list covers every direct
@@ -430,7 +483,13 @@ sandbox; those browser checks were run outside the sandbox with approval.
 These historical results do not certify the merged revision. No dependencies
 were installed or upgraded.
 
-`pnpm smoke` retains all earlier checks and adds the sea checks and basic
+`pnpm smoke` retains all earlier checks and adds the sea checks, the open-ocean
+checks (`scripts/checks/ocean.mjs`: the water reaches every edge of the
+viewport at 1280x800 and 2000x900, markers and labels land on the same pixels as
+with `?noflags=openOcean`, the currents move at least 80% of the world grid's
+water cells and exactly none of its land, sixteen named currents run the
+direction they should, every flow glyph is one cell wide, and the frame budget
+holds at both sizes against the same page with the ocean turned off) and basic
 country/route/serif checks. `run-map-art.mjs` additionally checks 4× CPU serif
 performance, actual painted-label clearance, offline worker reload, geolocation,
 phone/reduced-motion behavior, and writes screenshots to `docs/screenshots/`.

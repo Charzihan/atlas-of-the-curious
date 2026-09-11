@@ -35,10 +35,16 @@ export async function runMapArtExtraChecks(browser, origin) {
     // same throttle as idle mode, so the comparison is like for like: the same
     // sea, the same drifting sentences, the same 4x CPU, monospace then serif.
     assert(await page.evaluate(() => window.ATLAS_MAP_DEBUG.startIdle()), 'idle mode did not start');
-    await page.waitForFunction(() => {
+    // A full sea, and a full sea again before the second sample: a sentence
+    // reaches the far coast about twenty seconds after it spawns, and the six
+    // that start together come to the end of their corridors together, so
+    // whichever sample happens to run at that moment would otherwise be timing
+    // a thinner sea than the other one.
+    const seaIsFull = () => page.waitForFunction(() => {
       const d = window.ATLAS_MAP_DEBUG.idleState();
       return d.on && d.alpha === 1 && d.sentences === d.maxSentences;
     });
+    await seaIsFull();
     const sentenceCount = await page.evaluate(() => window.ATLAS_MAP_DEBUG.idleSentences().length);
     const cdp = await context.newCDPSession(page);
     await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
@@ -48,6 +54,7 @@ export async function runMapArtExtraChecks(browser, origin) {
     // The serif ink has to be on the canvas before the frames are timed, not
     // merely requested: wait for the repaint the palette's arrival triggers.
     await page.waitForFunction(() => window.ATLAS_MAP_ART.debug().base?.serif);
+    await seaIsFull();
     await page.evaluate(() => window.ATLAS_MAP_DEBUG.resetCounters());
     const serif = await page.evaluate(frames);
     await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
@@ -56,10 +63,11 @@ export async function runMapArtExtraChecks(browser, origin) {
     assert(sentenceCount > 0, 'no sentences adrift');
     for (const [name, sample] of [['idle', idle], ['serif', serif]]) {
       assert(sample.idleOn.every(Boolean), `${name} sample ended idle mode`);
-      // Sentences retire and respawn on their own clock, so one may be in
-      // transit during a sample; the workload is the same if the slots stay
-      // within one of full.
-      assert(sample.sentences.every(n => n >= sentenceCount - 1 && n <= sentenceCount), `${name} workload changed: ${counts(sample)} sentences, expected ${sentenceCount}`);
+      // Both samples start on a full sea. One sentence finishing its drift
+      // inside the three seconds a sample takes is the sea working, not the
+      // workload changing; two would mean the two timings are no longer
+      // comparable, which is the whole point of the assertion.
+      assert(sample.sentences.every(n => n >= sentenceCount - 1), `${name} workload changed: ${counts(sample)} sentences, expected ${sentenceCount}`);
     }
     assert.equal(serif.layouts, 0, 'serif fluid performed main-thread layout');
     assert.equal(idle.layouts, 0, 'idle mode performed main-thread layout');

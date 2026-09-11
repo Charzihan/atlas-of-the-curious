@@ -21,6 +21,7 @@ const CORE = [
   "/js/labels.js",
   "/js/sea.js",
   "/js/clouds.js",
+  "/js/currents.js",
   "/js/map-art.js",
   "/js/text-worker.js",
   "/js/justify.js",

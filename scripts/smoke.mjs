@@ -95,6 +95,7 @@
    Run: pnpm smoke  (or: node scripts/smoke.mjs) */
 import { startServer, launchChromium, INSTALL_HINT } from "./browser-harness.mjs";
 import { runSeaChecks, reportSeaChecks } from "./checks/sea.mjs";
+import { runOceanChecks } from "./checks/ocean.mjs";
 import { runMapArtChecks } from "./checks/map-art.mjs";
 import { runReaderChecks } from "./checks/reader.mjs";
 import { runCloudChecks } from "./checks/clouds.mjs";
@@ -1724,6 +1725,9 @@ async function main() {
     reportSeaChecks(await runSeaChecks(browser, server.origin), fail);
     await runMapArtChecks(browser, server.origin);
     await runCloudChecks(browser, server.origin, fail);
+
+    /* ---- The open ocean ---------------------------------------------- */
+    await runOceanChecks(browser, server.origin, fail);
   } catch (err) {
     console.error(`\nerror: ${err.stack || err.message}`);
     failed = true;

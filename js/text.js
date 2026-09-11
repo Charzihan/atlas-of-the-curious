@@ -787,6 +787,9 @@ export const DEFAULT_FLAGS = {
   localeText: true,     // native strings are prepared under their own locale
   // Phase 5 — the map in a worker (js/map.js).
   worker: true, seaStories: true, idleSea: true, seaClick: true,
+  // The open ocean: the sea fills the whole viewport and flows as real
+  // currents. Off is the world-grid-only sea with uniform sine trains.
+  openOcean: true,
   // Phases 7–8 — shapes, routes, and proportional map ink.
   countryStories: true, routeText: true, serifAtlas: true,
   asciiClouds: true,    // the sky is drawn in the map's own alphabet (js/clouds.js);

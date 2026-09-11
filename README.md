@@ -435,6 +435,7 @@ browser without a rebuild:
 | `scrollAnchor` | `js/app.js` | the card under the cursor no longer keeps its place across a reflow |
 | `fitText` | `js/app.js` | no balanced taglines, no fitted names, no fitted headline |
 | `expandInPlace` | `js/app.js` | clicking a card opens the modal instead of expanding it in the grid |
+| `openOcean` | `js/map.js` | the sea stops at the edge of the world grid again, in uniform sine trains instead of currents |
 | `editorial` | `js/dialog.js` | no `window.ATLAS_DIALOG`; the dialog falls back to `js/app.js`'s plain paragraph rendering |
 | `justify` | `js/dialog.js` | the wide-screen columns stay ragged-right instead of being justified |
 | `reveal` | `js/dialog.js` | the laid-out lines appear all at once instead of one at a time |
@@ -711,9 +712,83 @@ per frame, so crests and troughs read as continuous tone. Reduced motion gets
 the static tonal sea and no fluid. Marker positions, cell positions, the land
 mask and zoom are identical in both modes.
 
-New modules: `js/labels.js`, `js/sea.js`, `js/text-worker.js`, `js/map-art.js`.
+## The open ocean
+
+The character map is 150 x 39 cells of equirectangular Earth, and it is centred
+in the hero: on a wide or a tall screen that left dark nothing around it. The
+sea now fills the viewport instead, and it flows the way the ocean does.
+
+**One body of water.** The fluid simulation runs on an *extended* grid — the
+world grid plus a margin of open ocean on each side, at the same cell size —
+with the world grid at a fixed offset inside it. Both canvases — the static one
+carrying the land and the sea's still floor, and the animated one above it — are
+sized past the world grid and hung inside the pan/zoom wrapper at a negative
+offset, so one transform still moves the map and the water around it together
+and the two can never slide apart. (The static one reaches further: its margin
+is uncapped, so the water still gets to the edge of a viewport too large to
+simulate all of.) Nothing about the world grid's placement or size changes:
+markers, labels, the land mask, the hover card, the drifting sentences and every
+hit test still speak in world cells, and one helper converts. A splash at the
+edge of the map ripples on into the open ocean because the neighbour graph the
+spring runs on does not stop at the coastline of the printed map. The margin is
+recomputed on every rebuild, and a resize that changes it — a window that gets
+wider without changing the cell size — is now a rebuild. It is capped at 30 x 12
+cells a side so a 4K viewport cannot ask for six times the world grid; past the
+cap the water is the still floor alone, painted once.
+
+**Currents, not sines.** The sea used to be three traveling sine trains crossing
+the whole map in the same direction. `js/currents.js` carries a small table of
+the real surface circulation — five subtropical gyres, the North Atlantic and
+Alaska subpolar gyres, the Beaufort and Weddell gyres, six named boundary
+currents (Gulf Stream, Kuroshio, Brazil, Agulhas, East Australian, Humboldt) and
+seven zonal bands including the Antarctic Circumpolar Current and the equatorial
+counter-current — as smooth kernels in lat/lon: a gyre is a vortex that is still
+at its centre and fastest at its rim, a boundary current is a Gaussian ridge
+along a polyline, a band is a Gaussian in latitude. At build they are summed into
+one velocity per cell, damped to a standstill at the coast through a
+distance-to-land field, wrapped round the antimeridian and folded over the poles
+(past the pole, longitude turns by 180 degrees and north and south swap, which is
+why the currents cross the top and bottom edges of the map without a seam), then
+frozen into four flat typed arrays. A frame reads them and nothing else: the
+wave's phase rises *along* the local flow, so `phase - omega * t` is a crest
+lying across the current and traveling down it at that current's own speed.
+Shape says direction (`- ~ ≈` along a zonal current, `/` and `\` on the
+diagonals, `|` where a western boundary current runs poleward, `o` for an eddy in
+water too slow to have a direction) and colour says speed, so the gyres read as
+bright streams and their calm eyes, the doldrums and the enclosed seas stay
+quiet water. The interactive ripple and the regional wave bias are layered on
+top exactly as before, and the serif atlas still picks its ink out of the
+measured ramp — taking a direction glyph only at a crest, and only when the
+measured ramp contains that glyph.
+
+Under `prefers-reduced-motion: reduce` the field is drawn once and stands still,
+which is what the sea already did; on a phone the animation is unchanged and the
+water fills the band.
+
+Cost: at 1280x800 the extended grid is 156 x 41 cells (4,300 water cells, 15%
+more than the world grid's 3,754); at 2000x900 it is 210 x 41 (6,514 water
+cells, 74% more). It runs no slower than the sea it replaces at either size,
+because the arithmetic got cheaper in the same change: a 2,048-entry sine table
+instead of `Math.sin`, a squared gamma instead of `Math.pow`, per-cell paint
+positions worked out once at build instead of an integer division per cell per
+frame, the spring walking the water list instead of the whole grid, the far
+margin repainted every other frame, and the quietest glyphs left to the still
+floor underneath. `?noflags=openOcean` restores the world-grid-only sea and its
+uniform sines exactly.
+
+The new check is `scripts/checks/ocean.mjs`: the water reaches every edge of the
+viewport at both sizes, markers and labels land on the same pixels and in the
+same cells as with `?noflags=openOcean` (at 1x and at 2.5x, where every name is
+out on the water), the currents move at least 80% of the world grid's water
+cells and exactly none of its land, sixteen named currents run the direction
+they really run, every flow glyph is one cell wide in the face the browser
+resolved, and the frame budget holds at both sizes.
+
+New modules: `js/labels.js`, `js/sea.js`, `js/currents.js`,
+`js/text-worker.js`, `js/map-art.js`.
 The service-worker cache is bumped to v3 and includes these modules and all
 their transitive JavaScript imports, including the vendored pretext modules.
-`pnpm smoke` includes the recovered sea checks and new map-art checks.
+`pnpm smoke` includes the recovered sea checks, the open-ocean checks and the
+map-art checks.
 For the additional serif performance, offline, geolocation, mobile and
 screenshot checks, run `node scripts/checks/run-map-art.mjs`.
