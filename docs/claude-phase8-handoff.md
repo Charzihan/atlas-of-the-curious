@@ -1,9 +1,11 @@
 # Claude handoff — Phases 5, 7 and 8
 
-Date: 2026-09-10. Branch: `pretext-roadmap`. Starting HEAD: `8103e5b`
-(Phase 6). Changes are in the working tree; no commit, merge, push or deployment
-was performed. Preserve the original `.claude/` worktrees and
-`claude-Phase5-handoff.txt`; neither was edited.
+Original handoff: 2026-09-10, branch `pretext-roadmap`, starting at `8103e5b`
+(Phase 6). Integration update: 2026-09-11, combining Phase 7 (`2beb714`) and
+Phase 8 (`5a33022`) for `integration-p7-p8`, with service-worker cache v3.
+Both phases below describe the combined implementation. No push or deployment
+was performed. The original `.claude/` worktrees and `claude-Phase5-handoff.txt`
+were preserved.
 
 ## Start here
 
@@ -105,10 +107,18 @@ more of it.
 
 ## Phase 7 — Shapes and paths
 
-- `scripts/build-map.mjs` now emits `countryCodes`, `countryNames` and a flat
+- `scripts/build-map.mjs` emits `countryCodes`, `countryNames` and a flat
   `countries` index per desktop/mobile cell; zero is water, other values are
   one-based entries in `countryCodes`. Existing glyph/color output is unchanged.
   The ownership follows the generator's existing sampled-country assignment.
+- It also emits `outlines`: simplified lon/lat rings for the 31 countries the
+  dataset names (it runs `js/data.js` to find them, through the same alias
+  table `js/map.js` uses). Rings are pruned to the cluster around the largest
+  one — so the Aleutians, Svalbard, the Galapagos and Easter Island do not
+  swallow the bounding box, while Indonesia, Japan and New Zealand stay whole —
+  simplified with Douglas–Peucker at a tolerance proportional to the country's
+  own size, quantised to 1/50 of a degree and delta-encoded as integers.
+  That is +11 KB in `js/landmap.js` (41,891 → 53,248 bytes) for 1,592 points.
 - `js/landmap.js` is regenerated from the repository's existing Natural Earth
   data. No new network download is needed.
 - `js/map-art.js` supplies pure, cached country-story and route layout engines,
@@ -123,14 +133,43 @@ plus **Show route** draws a journey between two places. **Locate me** draws a
 route from the granted location to the nearest wonder. **Clear story** clears
 country/route content; **Serif map** is independent.
 
-Country stories try 9, 8, 7 and 6 px type against per-row country spans. Small
-text can be enlarged with the existing map zoom. A story that does not fit in
-full uses a 12 px regional inset near its marker; if even that cannot fit the
-map height, the full story is shown in a caption below the map. The complete story also has a screen-reader text equivalent. Nothing is
-silently truncated. At the tested 1280×800 size, **1 of 40 stories fits a
-silhouette and 39 use regional insets**. The current coarse 150×39 grid cannot
-provide large reading silhouettes for most countries. This is a deliberate,
-tested fallback, not forty country-shaped stories at that size.
+A country story is set inside the country's own polygon, not inside the land
+grid: the 150×39 cells are far too coarse to hold 400 words inside anything
+smaller than a continent. The rings are projected with the map's own
+equirectangular projection and scaled about the country's centre by k. Per text
+row the scanline runs of the polygon — even-odd over every ring, so holes are
+water, and the runs at five heights across the row are intersected so the whole
+line box is inside — become the widths fed to `layoutNextLineRange`. Several
+runs in one row are several slots, so a row that crosses two islands sets two
+pieces of the story. A run that cannot hold the next *whole* word is left empty
+rather than breaking the word: that is the minimum-run rule, measured against
+the word actually coming rather than against a fixed number of cells.
+
+Type sizes are tried at 14, 13, 12, 11 and 10 px; the first that fits at the
+largest scale the map allows is kept, and then a binary search finds the
+*smallest* k that still holds the whole story, which is the k that fills the
+shape. The view is anchored on the country's true position and slid only as far
+as it must to stay on the map and clear of the introduction panel and the map
+controls (`js/map.js` measures those once per request and passes them as
+`avoid`). The place's own coordinates are marked inside the silhouette; the
+outline is stroked in the country's palette colour and stamped with the grid's
+texture character at the grid's own cadence, over a dimmed map.
+
+At the tested 1280×800 size, **37 of 40 stories fill their country's
+silhouette and 3 use the regional inset** — `marble-caves`, `atacama` and
+`rapa-nui`, all Chile. Chile is 4,300 km long and about 180 km wide: scaled to
+the map's height it is a 100 px-wide ribbon whose rows hold roughly a third of
+the words, and scaling it to the map's width would make it nine screens tall.
+Rapa Nui is 3,500 km offshore and is dropped from Chile's rings for the same
+reason the Aleutians are dropped from America's. On a phone the map band is too
+short for a silhouette at 10 px, so phones keep the inset. A story that fits no
+silhouette uses a 12 px regional inset near its marker; if even that cannot fit
+the map height, the full story is shown in a caption below the map. The
+complete story also has a screen-reader text equivalent. Nothing is ever
+silently truncated: `scripts/checks/map-art.mjs` asserts that the lines
+concatenate back to the story, that every line box is inside the polygon, that
+the type never drops below 10 px, and that at least 34 of the 40 are
+silhouettes.
 
 Routes use spherical interpolation, split at the antimeridian and handle
 coincident/antipodal endpoints without NaN coordinates. Text runs rotate to
@@ -146,14 +185,73 @@ sequence/build IDs so obsolete layouts do not repaint a new map.
 
 ## Phase 8 — A serif atlas
 
-The map control **Serif map** toggles a Georgia glyph palette for land and the
-fluid sea. `prepareWithSegments` measures advances; palette selection scores
-both density and distance from the existing cell width. Narrow glyphs are
-centered in their cells. The land mask, marker coordinates and zoom stay fixed.
-The sea reuses the existing wave/ripple simulation and changes its ink. Labels
-and readable sea sentences keep their own measured fonts. Palette generation
-happens once per geometry/font, not in the animation loop. Reduced-motion mode
-has no autonomous fluid animation.
+The map control **Serif map** re-sets the map in the site's Georgia face
+(`--font-serif`). The first pass of this phase shipped a hand-ordered list of
+fourteen glyphs whose "tone" was its index, which produced a map that was
+indistinguishable from the monospace one. The palette is now measured.
+
+**The palette** (`palette()` in `js/map-art.js`). The candidates are printable
+ASCII, the printable half of Latin-1, and the typographic marks a WGL4 face
+such as Georgia also carries (`† ‡ • ≈ ∞ œ Œ – — ‰`); 198 in all. Each is
+rendered once into an `OffscreenCanvas` in the worker — a hidden DOM canvas on
+the synchronous fallback host — at the map's own cell size, drawn exactly as
+`repaintBase` draws it, and its ink is summed from the alpha channel. That
+gives two numbers per glyph: `coverage`, the share of the cell it inks, and
+`spill`, the share of its ink that lands outside the cell. Its advance comes
+from `prepareWithSegments`, the same measurement pretext lays text out with.
+
+A glyph is usable if its advance fits the cell (narrower is fine and is centred;
+wider is rejected, because that is what would put the ink out of step with the
+markers) and if it spills no more than 6% of its ink into the neighbouring rows.
+141 of the 198 survive that at the desktop cell size. A glyph the resolved face
+does not have is dropped first: it is detected by measuring an unassigned
+private-use code point and discarding anything that matches that notdef box, so
+the atlas is set in one face rather than in whatever the browser would
+substitute. Coverage is then normalised 0..1 over the usable set, so tone 0 and
+tone 1 are that cell's real lightest and darkest ink.
+
+The ramp has **24 rungs**. Each is the glyph minimising
+`|coverage − target| + 0.4 · max(0, (cellWidth − advance) / cellWidth)` among
+those darker than the rung below it, leaving one candidate behind for every rung
+still to come — so the ramp is strictly increasing in measured coverage and no
+rung repeats its neighbour. At 1280×800 it comes out as
+`¬÷=+<>×*«≈†}oLT4üFµZEÉÈË`, coverage 0.125 to 0.994. The whole thing is built
+once per geometry and font and cached in the engine; nothing measures inside a
+frame.
+
+**Land tone.** A multi-source breadth-first search over the land mask gives each
+land cell its distance to the nearest coast (columns wrap, so the antimeridian
+is not a false coastline; the poles count as edges). Tone runs from 1.0 at the
+coast down to 0.3 five cells inland, plus ±0.025 of the existing colour dither
+so a wide interior does not flatten into one even grey. That is what keeps a
+continent readable as a shape once the glyphs are no longer all one width: its
+outline stays the darkest thing on the map. The per-cell rung index is computed
+with the palette and travels with it, so `repaintBase` is a lookup. Country
+colours come from the existing palette, unchanged.
+
+**The sea.** The wave and ripple simulation is untouched; only its ink changes.
+Where the monospace sea quantises density into six glyphs and gets the rest of
+its contrast from colour, the serif sea maps `(density / 1.15) ^ 1.6` straight
+onto the 24-rung ramp per cell per frame, so crests and troughs read as one
+continuous tone. The gamma is there because a 24-rung ramp mapped linearly makes
+quiet water much heavier than the monospace floor. The still sea floor on the
+base canvas is tonal too, taken from the same static regional bias the wave
+trains use; under reduced motion, where the fluid layer never draws, that static
+tonal sea is the whole sea.
+
+The toggle is remembered in `localStorage` under `atlas:serif-map` (every access
+wrapped, including the property read, which throws outright in a browser with
+site data blocked). `aria-pressed` reflects it, and `serifAtlas` still gates
+both the control and the rendering. Land mask, cell positions, marker
+coordinates and zoom are identical in both modes; labels, hover cards and the
+readable sea sentences keep their own measured fonts. The combined release
+bumps `sw.js` to cache v3 so returning visitors fetch the updated modules.
+No inline style attributes, no `eval`.
+
+`ATLAS_MAP_ART.debug()` exposes `palette` (the ramp with its measured coverage
+and advances, without the per-cell array) and `base` — the base canvas's
+resolved font string and the multiset of land glyphs it last painted — so the
+checks can assert on what was actually drawn rather than diff pixels.
 
 ## Flags and offline cache
 
@@ -172,11 +270,13 @@ All default on, except serif rendering is opt-in through its toggle:
 Example: `/?noflags=worker` or
 `/?noflags=countryStories,routeText,serifAtlas`.
 
-`sw.js` uses `atlas-of-the-curious-v2`, invalidating the previous cache-first
+`sw.js` uses `atlas-of-the-curious-v3`, invalidating the previous cache-first
 JavaScript cache. Its CORE list includes labels, sea, text-worker and map-art,
 and retains the reader/notebook modules. The offline check also found that the
 pre-existing CORE list omitted `vendor/pretext/generated/bidi-data.js`; that
-transitive dependency is now precached too. CSP was not loosened. New runtime
+transitive dependency is now precached too. The CORE list covers every direct
+and transitive JavaScript import of map, map-art, text-worker, sea and labels.
+CSP was not loosened. New runtime
 modules use same-origin imports only.
 
 ## Verification
@@ -192,10 +292,12 @@ node scripts/checks/run-sea.mjs
 node scripts/checks/run-map-art.mjs
 ```
 
-The final validation outcomes are recorded below after execution. Browser tests
+The original implementation's validation outcomes are recorded below. Browser tests
 require a working Playwright Chromium installation and permission to launch it.
-In the Codex sandbox Chromium could not start; browser checks were run outside
-the sandbox with approval. No dependencies were installed or upgraded.
+During the original implementation, Chromium could not start in the Codex
+sandbox; those browser checks were run outside the sandbox with approval.
+These historical results do not certify the merged revision. No dependencies
+were installed or upgraded.
 
 `pnpm smoke` retains all earlier checks and adds the sea checks and basic
 country/route/serif checks. `run-map-art.mjs` additionally checks 4× CPU serif
@@ -205,7 +307,37 @@ Timing is a local headless-Chromium regression measurement, not a guarantee for
 all hardware. Firefox/Safari and real-device visual/performance testing were not
 performed.
 
-## Verification results
+## Integration verification — 2026-09-11
+
+- `node --check` passed for every JavaScript file changed across the two phases
+  and the integration, including both check modules and `sw.js`. Every new
+  named helper was found with `rg`, and all added runtime/check lines from both
+  phase commits survive in the merged files.
+- `pnpm validate` exited 0: all 40 places passed dataset validation, but the
+  browser text/locale checks were skipped because Chromium could not launch.
+- `pnpm build` passed and regenerated 40 place pages without changes.
+- `pnpm build-map` passed after copying the existing ignored Natural Earth
+  input into this worktree. `git status --short -- js/landmap.js` was empty
+  afterwards, and the file matches Phase 7 byte for byte.
+- `node scripts/checks/run-map-art.mjs` and `pnpm smoke` both exited 1 before
+  running browser assertions: Chromium could not launch in this sandbox
+  (`browserType.launch: Target page, context or browser has been closed`).
+  Browser verification of the merged revision remains to be run outside it.
+- The two conflicting Phase 7 screenshots match `2beb714`; both Phase 8
+  screenshots match `5a33022`. No screenshots were regenerated during these
+  failed browser launches.
+- The service-worker cache is v3. All 15 modules in the map's transitive import
+  graph are in CORE, and all 30 CORE assets exist. `git diff --check` passed.
+
+The initial pnpm run tried to install dependencies and failed on registry DNS.
+Subsequent runs used a local copy of the already installed dependencies with
+`pnpm_config_verify_deps_before_run=false`; no dependency versions changed.
+The original worktree's Git metadata is read-only outside this sandbox's
+writable directory, so the merge is committed using `.merge-git/` inside the
+worktree and exported as `integration-p7-p8.bundle`. Importing that commit into
+the original branch requires a Git operation outside this sandbox.
+
+## Original implementation verification results
 
 - Dataset validation and page generation: passed, 40 places and 40 generated pages.
 - Text agreement/overflow and locale checks: passed at 320, 768 and 1280 px.
@@ -218,10 +350,31 @@ performed.
 - Extended map checks: painted place/ocean label clearance at 2.5× zoom,
   coincident/antipodal routes, actual geolocation, offline worker/serif reload,
   phone and reduced-motion behavior passed.
-- Serif + idle at 4× CPU: 33.05 ms average / 33.40 ms p95 against a 16.67 ms
-  baseline in the latest completed extended run; zero main-thread layout calls.
+- Serif palette checks (both backends, identical results): 24 rungs from
+  141 usable of 198 candidates, coverage 0.125→0.994 strictly increasing, every
+  rung's advance within the cell, no rung repeating its neighbour; the base
+  canvas font resolves to the serif family, the land glyph multiset differs from
+  the monospace one and the land mask is unchanged across the toggle.
+- Serif + idle at 4× CPU: 27.22 ms average / 33.40 ms p95, against **idle mode
+  in monospace under the same 4× throttle** at 27.78 ms / 33.40 ms; unthrottled
+  baseline 16.67 ms; zero main-thread layout calls. The like-for-like comparison
+  is the roadmap's own bar ("holds frame rate under the same throttle as idle
+  mode"); the unthrottled baseline is vsync-capped at ~16.7 ms, so twice it is
+  really "30 fps at 4× CPU" — a line monospace idle mode itself sits on, which
+  made that bound a coin flip rather than a measurement of the serif ink. It is
+  retained as an alternative, not as the sole gate.
+- Serif toggle persistence: on after an offline reload, off again after being
+  turned off and reloaded, with the palette rebuilt from the cached worker
+  modules and no network.
 - Desktop and phone screenshots inspected; corrected inset stacking so marker
   circles cannot paint over or receive clicks through the reading panel.
+- `docs/screenshots/phase8-serif.png` (1280×800) and
+  `phase8-serif-zoom.png` (the same view at 2.5× zoom) were inspected. At 2.5×
+  the map plainly reads as an atlas set in a serif face: Africa comes out as
+  `ÈZüL†××××†LüZÈ`, a dark lettered coast around a lighter interior. At 1× the
+  continents stay recognisable — the coastal outline carries them — though the
+  overall texture is busier than the monospace map, since a proportional face
+  has no glyph as quiet as a monospace `·`.
 - Final integrated rerun: **`node scripts/smoke.mjs` passed (`smoke OK`)**.
 - Final extended rerun: **`node scripts/checks/run-map-art.mjs --extra-only`
   passed**, including disabled feature flags and the editorial fallback.
@@ -243,8 +396,8 @@ performed.
 - JavaScript syntax checks and `git diff --check`: passed.
 
 The remaining roadmap phases are implemented with the geometry fallbacks
-specified above. There are no known failing checks at handoff. Changes remain
-uncommitted; the original Claude worktree remains available for comparison.
+specified above. The original handoff reported no known failing checks; its
+Claude worktree remains available for comparison.
 
 The first integrated run caught empty idle water with the old corridor estimate.
 After the corridor fix, all six slots filled before timing began. That exposed
@@ -257,13 +410,13 @@ is also now a failing assertion, not just a reported count.
 ## Reviewing or continuing
 
 1. Read the roadmap and this handoff, then `git diff` and `git status --short`.
-   New runtime/test/docs files are untracked until added; do not omit them from
-   a future commit. Do not accidentally stage the original `.claude/` directory.
+   Preserve both phases when making further changes. Do not accidentally stage
+   the original `.claude/` directory.
 2. Run the commands above. No build step downloads geography; place pages remain
    generated with the existing script. `pnpm build` does not rebuild the map,
    so changes to map generation require `pnpm build-map` explicitly.
 3. Visual examples are in `docs/screenshots/`. Verify the regional inset and route
    caption behavior before changing typography or the map grid resolution.
-4. Product follow-up, if desired: a larger country-detail view would allow more
-   full stories to follow recognizable country silhouettes at readable sizes.
-   That is beyond the original coarse-map geometry and has not been added here.
+4. Country silhouettes already scale independently of the coarse land grid.
+   Further reading-view work should preserve the complete-story inset/caption
+   fallbacks for Chile and for short phone map bands.

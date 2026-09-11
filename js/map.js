@@ -96,6 +96,10 @@ import { createMapArtEngine } from "./map-art.js";
     "rgba(214, 244, 255, 0.70)"
   ];
   const WAVE_GAMMA = 1.9;          // >1 → quiet floor, thin bright crests
+  // The same, for the serif sea's ink: the monospace sea has six glyphs and
+  // gets most of its contrast from colour, so mapping density straight onto a
+  // 24-rung measured ramp would make quiet water far heavier than it is now.
+  const SERIF_SEA_GAMMA = 1.6;
   // Clouds are withheld from Antarctica (it is already white ice): the fade
   // ramps 1 → 0 over the last few rows so a cloud dissolves into the ice.
   function cloudFade(row) {
@@ -1459,10 +1463,140 @@ import { createMapArtEngine } from "./map-art.js";
   const serifFamily = getComputedStyle(document.documentElement).getPropertyValue('--font-serif').trim() || 'Georgia, serif';
   let artPinned = false;
   let artSeq = 0, artResult = null, artRequest = null, artCanvas = null, artInset = null;
-  let serifMode = false, serifPalette = null, repaintBase = null;
+  let serifMode = false, serifPalette = null, repaintBase = null, baseInk = null;
   const artLatest = { country: 0, route: 0, palette: 0 };
   function artGeometry() {
     return { cols: COLS, rows: ROWS, charW: CHARW, lineH: LINEH, family: serifFamily };
+  }
+  // The dataset spells a few countries its own way; scripts/build-map.mjs holds
+  // the same table when it decides which outlines to emit.
+  const COUNTRY_ALIASES = {
+    'Türkiye': 'Turkey', 'Malaysia (Borneo)': 'Malaysia',
+    'United States': 'United States of America', 'Tanzania': 'United Republic of Tanzania'
+  };
+  // Simplified lon/lat rings for a place's country, delta-decoded once.
+  // "Poland / Belarus" is two countries and simply becomes two sets of rings.
+  const outlineCache = new Map();
+  function countryOutline(country) {
+    if (outlineCache.has(country)) return outlineCache.get(country);
+    const units = (MAPS && MAPS.outlineUnits) || 50;
+    const rings = [];
+    for (const part of String(country).split(' / ')) {
+      const name = COUNTRY_ALIASES[part] || part;
+      const encoded = MAPS && MAPS.outlines && MAPS.countryNames && MAPS.outlines[MAPS.countryNames[name]];
+      for (const delta of encoded || []) {
+        const ring = new Array(delta.length);
+        let x = 0, y = 0;
+        for (let i = 0; i < delta.length; i += 2) {
+          x += delta[i]; y += delta[i + 1];
+          ring[i] = x / units; ring[i + 1] = y / units;
+        }
+        rings.push(ring);
+      }
+    }
+    outlineCache.set(country, rings);
+    return rings;
+  }
+  // The panels the page paints over the map stage. A story hidden behind the
+  // introduction is not a story, so the reading view is told to dodge them.
+  // Map-local pixels: the boxes are read once per request, never in a frame.
+  function artPanels() {
+    const boxes = [];
+    if (!zoomEl) return boxes;
+    const origin = zoomEl.getBoundingClientRect();
+    const zoom = (view && view.zoom) || 1;
+    for (const el of document.querySelectorAll('.atlas-overlay, .map-controls')) {
+      const rect = el.getBoundingClientRect();
+      if (!rect.width || !rect.height) continue;
+      boxes.push({
+        x: (rect.left - origin.left) / zoom, y: (rect.top - origin.top) / zoom,
+        width: rect.width / zoom, height: rect.height / zoom
+      });
+    }
+    return boxes;
+  }
+  // The colour and texture character the map itself uses for this country, so
+  // the reading silhouette is drawn in the atlas's own ink.
+  function artInk(id) {
+    const x = placeById.get(id);
+    let index = -1, glyph = '';
+    for (let ring = 0; x && MAP && ring < 4 && index < 0; ring++) {
+      for (let r = x.grow - ring; r <= x.grow + ring && index < 0; r++) {
+        for (let c = x.gcol - ring; c <= x.gcol + ring; c++) {
+          const code = (MAP.colors[r] || '').charCodeAt(c);
+          if (code >= 65) { index = code - 65; glyph = MAP.glyphs[r][c]; break; }
+        }
+      }
+    }
+    const base = (PALETTE && PALETTE[index]) || 'rgb(143,201,106)';
+    const rgb = base.slice(base.indexOf('(') + 1, base.lastIndexOf(')'));
+    return {
+      wash: 'rgba(' + rgb + ',0.15)', line: 'rgba(' + rgb + ',0.85)',
+      texture: 'rgba(' + rgb + ',0.6)', glyph: glyph && glyph !== ' ' ? glyph : '+'
+    };
+  }
+  // The country silhouette: the map dimmed behind it, the coastline stamped in
+  // the grid's own texture glyph, and the place's true position marked.
+  function paintSilhouette(ctx, out) {
+    const ink = artInk(out.id);
+    ctx.save();
+    ctx.fillStyle = 'rgba(6, 14, 26, 0.82)';
+    ctx.fillRect(0, 0, mapW, mapH);
+    const path = new Path2D();
+    for (const ring of out.shape.rings) {
+      path.moveTo(ring[0], ring[1]);
+      for (let i = 2; i < ring.length; i += 2) path.lineTo(ring[i], ring[i + 1]);
+      path.closePath();
+    }
+    ctx.fillStyle = ink.wash;
+    ctx.fill(path, 'evenodd');
+    ctx.strokeStyle = ink.line;
+    ctx.lineWidth = 1.2;
+    ctx.stroke(path);
+    ctx.font = PX + 'px ' + MONO;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = ink.texture;
+    const step = Math.max(7, CHARW * 1.7);
+    for (const ring of out.shape.rings) {
+      let travelled = 0, next = step / 2;
+      for (let i = 2; i < ring.length; i += 2) {
+        const ax = ring[i - 2], ay = ring[i - 1];
+        const dx = ring[i] - ax, dy = ring[i + 1] - ay;
+        const len = Math.hypot(dx, dy);
+        if (!(len > 0)) continue;
+        while (next <= travelled + len) {
+          const t = (next - travelled) / len;
+          ctx.fillText(ink.glyph, ax + dx * t, ay + dy * t);
+          next += step;
+        }
+        travelled += len;
+      }
+    }
+    ctx.restore();
+  }
+  // The palette carries the land mask with it: the distance-to-coast field that
+  // gives each land cell its tone is part of the same once-per-geometry answer.
+  function askPalette() {
+    askArt('palette', { ...artGeometry(), size: PX, land: kind, color: cellColor });
+  }
+  // Measured coverage 0..1 → the nearest rung of the measured ramp. A lookup and
+  // a rounding, which is all the sea can afford per cell per frame.
+  function inkFor(p, tone) {
+    const last = p.ramp.length - 1;
+    return p.ramp[Math.max(0, Math.min(last, Math.round(tone * last)))];
+  }
+  // The serif toggle outlives the visit. A browser in private mode throws on the
+  // `localStorage` property itself, so the property read is inside the try too.
+  const SERIF_KEY = 'atlas:serif-map';
+  function readSerifPref() {
+    try { return window.localStorage.getItem(SERIF_KEY) === '1'; } catch (e) { return false; }
+  }
+  function writeSerifPref(on) {
+    try {
+      if (on) window.localStorage.setItem(SERIF_KEY, '1');
+      else window.localStorage.removeItem(SERIF_KEY);
+    } catch (e) { /* the toggle still works, it just will not be remembered */ }
   }
   function askArt(action, request) {
     const seq = ++artSeq;
@@ -1501,10 +1635,10 @@ import { createMapArtEngine } from "./map-art.js";
     const geometry = artGeometry();
     if (artRequest.action === 'country') {
       const x = placeById.get(artRequest.id);
-      const aliases = { 'Türkiye': 'Turkey', 'Malaysia (Borneo)': 'Malaysia', 'United States': 'United States of America' };
-      const names = x.p.country.split(' / ').map(name => aliases[name] || name);
-      const codes = names.map(name => MAPS.countryCodes.indexOf(MAPS.countryNames[name]) + 1).filter(n => n > 0);
-      askArt('country', { ...geometry, id: x.p.id, text: x.p.story, col: x.gcol, row: x.grow, countries: MAP.countries, codes });
+      askArt('country', {
+        ...geometry, id: x.p.id, text: x.p.story, col: x.gcol, row: x.grow,
+        rings: countryOutline(x.p.country), at: parseCoords(x.p.coordinates), avoid: artPanels()
+      });
     } else {
       // Hide geometry from the previous label mask while the worker reroutes.
       artResult = null; paintArt();
@@ -1529,6 +1663,7 @@ import { createMapArtEngine } from "./map-art.js";
       for (const [key, value] of Object.entries({ left: out.box.x, top: out.box.y, width: out.box.width, height: out.box.height })) artInset.style.setProperty(key, value + 'px');
     }
     ctx.save();
+    if (out.shape) paintSilhouette(ctx, out);
     if (out.box) {
       ctx.fillStyle = 'rgba(9, 20, 35, 0.96)';
       ctx.fillRect(out.box.x, out.box.y, out.box.width, out.box.height);
@@ -1540,10 +1675,21 @@ import { createMapArtEngine } from "./map-art.js";
       for (const s of out.segments) { ctx.moveTo(s.a.x, s.a.y); ctx.lineTo(s.b.x, s.b.y); }
       ctx.stroke();
     }
-    ctx.font = out.font; ctx.textBaseline = 'top'; ctx.fillStyle = '#f5e4c3';
+    ctx.font = out.font; ctx.textBaseline = 'top'; ctx.textAlign = 'left'; ctx.fillStyle = '#f5e4c3';
     for (const l of out.lines) {
       ctx.save(); ctx.translate(l.x, l.y); ctx.rotate(l.angle || 0);
       ctx.fillText(l.text, 0, 0); ctx.restore();
+    }
+    // The place's own position, marked inside the silhouette it is read in.
+    if (out.marker) {
+      for (const pass of [{ color: 'rgba(6, 14, 26, 0.85)', width: 3.6 }, { color: '#e8b45a', width: 1.6 }]) {
+        ctx.beginPath();
+        ctx.arc(out.marker.x, out.marker.y, 5.5, 0, Math.PI * 2);
+        ctx.strokeStyle = pass.color; ctx.lineWidth = pass.width; ctx.stroke();
+      }
+      ctx.beginPath();
+      ctx.arc(out.marker.x, out.marker.y, 1.8, 0, Math.PI * 2);
+      ctx.fillStyle = '#e8b45a'; ctx.fill();
     }
     ctx.restore();
   }
@@ -1566,13 +1712,30 @@ import { createMapArtEngine } from "./map-art.js";
   function setSerif(on) {
     serifMode = !!on && FLAGS.serifAtlas !== false;
     $('map-serif')?.setAttribute('aria-pressed', String(serifMode));
-    if (serifMode && !serifPalette) askArt('palette', { ...artGeometry(), size: PX });
+    if (FLAGS.serifAtlas !== false) writeSerifPref(serifMode);
+    if (serifMode && !serifPalette) askPalette();
     if (repaintBase) repaintBase();
     return serifMode;
   }
   window.ATLAS_MAP_ART = {
     country: showCountry, route: showRoute, clear: clearArt, setSerif,
-    debug: () => ({ result: artResult, request: artRequest, serif: serifMode, palette: serifPalette, geometry: artGeometry(), countries: MAP.countries })
+    debug: () => ({
+      result: artResult, request: artRequest, serif: serifMode,
+      // Without the per-cell tone array: a check wants the ramp and the numbers
+      // behind it, not another copy of the grid.
+      palette: serifPalette && {
+        font: serifPalette.font, family: serifPalette.family, size: serifPalette.size,
+        charW: serifPalette.charW, levels: serifPalette.levels, measured: serifPalette.measured,
+        candidates: serifPalette.candidates, usable: serifPalette.usable,
+        coast: serifPalette.coast, ramp: serifPalette.ramp,
+        cells: serifPalette.landLevel ? serifPalette.landLevel.length : 0
+      },
+      // What the base canvas last actually painted: its resolved font string and
+      // the multiset of land glyphs. Phase 8's own check reads this rather than
+      // diffing pixels.
+      base: baseInk,
+      geometry: artGeometry(), countries: MAP.countries
+    })
   };
   window.addEventListener('atlas:highlight', e => showCountry(e.detail, false));
   window.addEventListener('hashchange', () => { if (!artPinned && !location.hash.startsWith('#/place/')) clearArt(); });
@@ -1784,9 +1947,16 @@ import { createMapArtEngine } from "./map-art.js";
     repaintBase = function () {
     bctx.clearRect(0, 0, mapW, mapH);
     const palette = serifMode && serifPalette;
+    // The palette's tone field is sized for the geometry it was built for; a
+    // stale one paints nothing rather than the wrong cells.
+    const landLevel = palette && palette.landLevel && palette.landLevel.length === COLS * ROWS
+      ? palette.landLevel : null;
     bctx.font = palette ? palette.font : FONT;
     bctx.textBaseline = "middle";
     bctx.textAlign = "left";
+    // The multiset of land glyphs actually painted, for the phase 8 check.
+    const tally = {};
+    let landCells = 0;
     for (let r = 0; r < ROWS; r++) {
       const rowBase = r * COLS;
       const y = (r + 0.5) * LINEH;
@@ -1795,18 +1965,29 @@ import { createMapArtEngine } from "./map-art.js";
         const x = c * CHARW;
         if (kind[i]) {
           bctx.fillStyle = PALETTE[cellColor[i]];
-          const ink = palette && palette.ramp[3 + cellColor[i] % 5];
-          bctx.fillText(ink ? ink.glyph : String.fromCharCode(cellGlyph[i]), x + (ink ? (CHARW - ink.width) / 2 : 0), y);
+          // Coast dark, interior lighter: the shape of a continent, set in the
+          // serif face, as a tone rather than as one repeated texture glyph.
+          const ink = landLevel && palette.ramp[landLevel[i]];
+          const glyph = ink ? ink.glyph : String.fromCharCode(cellGlyph[i]);
+          tally[glyph] = (tally[glyph] || 0) + 1;
+          landCells++;
+          bctx.fillText(glyph, x + (ink ? (CHARW - ink.width) / 2 : 0), y);
         } else {
           bctx.fillStyle = "rgba(80, 130, 170, 0.10)";
-          bctx.fillText("·", x, y);
+          // The still sea floor is tonal too, from the same static regional
+          // bias the wave trains use. This is the whole sea under reduced
+          // motion, where the fluid layer never draws — so it stays at the
+          // bottom of the ramp, the way the monospace floor is a single dot.
+          const ink = palette && inkFor(palette, 0.02 + 0.10 * (waveBias[i] || 0));
+          bctx.fillText(ink ? ink.glyph : "·", x + (ink ? (CHARW - ink.width) / 2 : 0), y);
         }
       }
     }
+    baseInk = { font: bctx.font, serif: !!palette, land: tally, landCells: landCells };
 
     };
     repaintBase();
-    if (serifMode) askArt("palette", { ...artGeometry(), size: PX });
+    if (serifMode) askPalette();
 
     const sea = document.createElement("canvas");
     sea.width = Math.round(mapW * DPR);
@@ -2797,7 +2978,14 @@ import { createMapArtEngine } from "./map-art.js";
         if (densityRaw <= 0.08) continue;            // static floor shows through
         const lvl = Math.max(1, Math.min(5, (densityRaw * 6) | 0));
         sctx.fillStyle = OCEAN_COLORS[lvl];
-        const ink = inkPalette && inkPalette.ramp[Math.min(7, lvl + 1)];
+        // Monospace has six ocean glyphs and the colour ramp carries the rest.
+        // In serif mode the density itself picks the ink out of the measured
+        // ramp, unquantised, so a crest and its trough are two tones of the same
+        // continuous field rather than two entries in a fixed list. The gamma is
+        // the same idea the wave field already uses: quiet water sits at the
+        // bottom of the ramp and the crests get the range, so the sea reads as
+        // water with weather in it rather than as an even texture.
+        const ink = inkPalette && inkFor(inkPalette, Math.pow(Math.min(1, densityRaw / 1.15), SERIF_SEA_GAMMA));
         sctx.fillText(ink ? ink.glyph : OCEAN_GLYPHS[lvl], c * CHARW + (ink ? (CHARW - ink.width) / 2 : 0), REDUCED ? y0 : y);
         // Troughs dip below the baseline in a dimmer tone, so a splash has a
         // visible leading and trailing edge, not just a bright crest.
@@ -2917,6 +3105,9 @@ import { createMapArtEngine } from "./map-art.js";
     if ($("map-serif")) {
       $("map-serif").hidden = FLAGS.serifAtlas === false;
       $("map-serif").addEventListener("click", () => setSerif(!serifMode));
+      // A visitor who chose the serif atlas last time gets it back. build() has
+      // already run, so this only costs the palette and one repaint.
+      if (readSerifPref()) setSerif(true);
     }
     $("map-art-clear")?.addEventListener("click", clearArt);
     const zin = $("map-zoom-in");
