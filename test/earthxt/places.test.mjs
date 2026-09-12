@@ -79,18 +79,80 @@ test('routed labels stay on a synthetic disc, clear land and markers, and reserv
   assert.ok(out.labels.every(label => label.rowSpan === 2));
   for (const label of out.labels) for (let i = 1; i < label.lines.length; i++) assert.ok(label.lines[i].row - label.lines[i - 1].row >= 2);
   const held = router.update({ ...camera, longitude: 0.001 }, LEVELS[1], viewport, grid, blocked, markers, true);
-  assert.equal(router.passes(), 1, 'subcell camera travel holds the last placement');
+  assert.equal(router.passes(), 2, 'even subcell camera travel gets a placement pass');
   assert.deepEqual(held.labels, out.labels);
+  assert.ok(Number.isFinite(held.placeLabelMs) && held.placeLabelMs >= 0);
   const span = out.labels[0].cells[0];
   blocked[span.row * grid.cols + span.c0] = 1;
   const clipped = router.update(camera, LEVELS[1], viewport, grid, blocked, markers, true);
-  assert.equal(clipped.labels.length, 1, 'new land invalidates a held label immediately');
+  assert.equal(clipped.labels.length, 2, 'new land triggers a replacement in the same frame');
   assertClear(clipped, blocked, grid);
   router.update({ ...camera, longitude: 2 }, LEVELS[1], viewport, grid, blocked, markers, true);
-  assert.equal(router.passes(), 2);
+  assert.equal(router.passes(), 4);
+  blocked.fill(1);
+  assert.equal(router.update(camera, LEVELS[1], viewport, grid, blocked, markers, true).labels.length, 0, 'no labels when there is no free water');
   assert.equal(measurements, prepared, 'frames never prepare text or measure glyphs');
   assert.equal(router.update(camera, LEVELS[0], viewport, grid, blocked, markers, true).labels.length, 0);
   assert.equal(router.update(camera, LEVELS[2], viewport, grid, blocked, markers, false).labels.length, 0);
+});
+
+test('a mask shifting one column per frame under fixed markers never drops a name or changes its side', () => {
+  const movingGrid = { cols: 200, rows: 100, cellWidth: 7, cellHeight: 10, x: 0, y: 0 };
+  const items = Array.from({ length: 6 }, (_, i) => ({ id: `island-${i}`, name: `Island ${i}` }));
+  const markers = items.map((place, i) => ({ id: place.id, col: 40 + (i % 2) * 80,
+    row: 15 + Math.floor(i / 2) * 30, visible: true }));
+  const blocked = new Uint8Array(movingGrid.cols * movingGrid.rows);
+  for (const marker of markers) for (let row = marker.row - 4; row <= marker.row + 8; row++) {
+    for (let col = marker.col - 7; col <= marker.col + 1; col++) blocked[row * movingGrid.cols + col] = 1;
+  }
+  const router = createPlaceRouter(items, role), prepared = measurements;
+  let previous;
+  for (let frame = 0; frame < 12; frame++) {
+    const out = router.update({ latitude: 0, longitude: frame * 0.001, distance: 2.05 },
+      LEVELS[1], viewport, movingGrid, blocked, markers, true);
+    assert.equal(out.labels.length, items.length, `all six labels survive frame ${frame}`);
+    assertClear(out, blocked, movingGrid);
+    for (const label of out.labels) {
+      const before = previous?.find(rec => rec.id === label.id);
+      assert.equal(label.anchor.dc, 1, 'water remains available east of the marker');
+      assert.equal(label.anchor.dr, 0);
+      if (before) {
+        assert.equal(label.dir, before.dir);
+        assert.equal(label.col, before.col + 1, 'the replacement follows the moving coast on the same side');
+      }
+    }
+    previous = out.labels;
+    // Move the entire mask one column right, including into the old labels.
+    for (let row = 0; row < movingGrid.rows; row++) {
+      const base = row * movingGrid.cols;
+      blocked.copyWithin(base + 1, base, base + movingGrid.cols - 1);
+      blocked[base] = 0;
+    }
+  }
+  assert.equal(router.passes(), 12);
+  assert.equal(measurements, prepared, 'replacement searches reuse prepared handles');
+});
+
+test('valid previous lines and offsets follow their marker even when a preferred default side opens', () => {
+  const items = [{ id: 'cove', name: 'Blue Cove' }];
+  const markers = [{ id: 'cove', col: 50, row: 35, visible: true }];
+  const blocked = new Uint8Array(grid.cols * grid.rows);
+  for (let row = 20; row < 50; row++) blocked.fill(1, row * grid.cols + 52, row * grid.cols + 60);
+  const router = createPlaceRouter(items, role), camera = { latitude: 0, longitude: 0, distance: 2.05 };
+  const first = router.update(camera, LEVELS[1], viewport, grid, blocked, markers, true).labels[0];
+  assert.equal(first.anchor.dc, -1);
+  blocked.fill(0);
+  markers[0].col++; markers[0].row++;
+  const out = router.update(camera, LEVELS[1], viewport, grid, blocked, markers, true);
+  assertClear(out, blocked, grid);
+  assert.deepEqual(out.labels[0].anchor, first.anchor, 'newly free eastern water does not steal the western label');
+  assert.equal(out.labels[0].col, first.col + 1);
+  assert.equal(out.labels[0].row, first.row + 1);
+  assert.deepEqual(out.labels[0].lines.map(line => line.text), first.lines.map(line => line.text));
+  markers[0].visible = false;
+  const hidden = router.update(camera, LEVELS[1], viewport, grid, blocked, markers, true);
+  assert.equal(hidden.labels.length, 0, 'a marker leaving the disc loses its label immediately');
+  assert.equal(hidden.placeLabelMs, 0, 'no placement pass when no marker is visible');
 });
 
 test('real South American coastlines have at least four visible and routed places with stubbed advances', async () => {
@@ -99,7 +161,7 @@ test('real South American coastlines have at least four visible and routed place
   const geography = new Geography(metadata, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
   const context = { setTransform() {}, clearRect() {}, fillText() {} };
   const renderer = new TextRenderer({ getContext: () => context }, { append() {} }, { label: roles['globe-label'], mono: readFontFamily(doc, '--font-mono') });
-  renderer.resize(1000, 700);
+  renderer.resize(1440, 1000);
   const camera = { latitude: -19.917, longitude: -67.846, distance: LEVELS[1].targetDistance };
   renderer.draw(camera, LEVELS[1], geography);
   const markers = projectPlaces(places, camera, renderer.viewport, renderer.grid);
@@ -108,6 +170,18 @@ test('real South American coastlines have at least four visible and routed place
   assert.ok(markers.filter(marker => marker.visible).length >= 4);
   assert.ok(out.labels.length >= 4, `${out.labels.length} routed names; Node advances are synthetic, not browser measurements`);
   assertClear(out, renderer.blockedCells, renderer.grid);
+  const prepared = measurements;
+  for (let frame = 1; frame <= 120; frame++) {
+    camera.longitude += 1.6 / 60;
+    renderer.draw(camera, LEVELS[1], geography);
+    const movingMarkers = projectPlaces(places, camera, renderer.viewport, renderer.grid);
+    const moving = router.update(camera, LEVELS[1], renderer.viewport, renderer.grid, renderer.blockedCells, movingMarkers, true);
+    assert.equal(movingMarkers.filter(marker => marker.visible).length, 6);
+    assert.equal(moving.labels.length, 6, `six labels remain at rotation frame ${frame}; advances are synthetic`);
+    assertClear(moving, renderer.blockedCells, renderer.grid);
+  }
+  assert.equal(router.passes(), 121);
+  assert.equal(measurements, prepared);
 });
 
 test('shared hover fitting preserves complete taglines and cached metrics across repeated layout', () => {

@@ -183,7 +183,8 @@ export class PlaceLayer {
       ctx.fill();
     }
     this.positionCard();
-    return { visibleMarkers: this.markers.filter(point => point.visible).length, labelledPlaces: this.labels.length };
+    return { visibleMarkers: this.markers.filter(point => point.visible).length,
+      labelledPlaces: this.labels.length, placeLabelMs: out.placeLabelMs };
   }
   snapshot() {
     return structuredClone({ placeCount: this.places.length, placeLabels: this.labels,

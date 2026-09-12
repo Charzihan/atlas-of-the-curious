@@ -74,7 +74,7 @@ export class TextRenderer {
     this.labelLayer = labelLayer;
     this.labelNodes = new Map();
     this.viewport = { width: 1, height: 1, focal: 1 };
-    this.metrics = { visibleGlyphs: 0, totalGlyphs: 0, projectionMs: 0, renderMs: 0, labelMs: 0, placeLabelMs: 0, visibleMarkers: 0, labelledPlaces: 0, visibleLabels: 0, silhouetteLabels: 0, fallbackLabels: 0 };
+    this.metrics = { visibleGlyphs: 0, totalGlyphs: 0, projectionMs: 0, renderMs: 0, labelMs: 0, placeLabelMs: 0, placeRenderMs: 0, visibleMarkers: 0, labelledPlaces: 0, visibleLabels: 0, silhouetteLabels: 0, fallbackLabels: 0 };
     this.cells = new Uint8Array(MAX_CELLS);
     this.variants = new Uint8Array(MAX_CELLS);
     this.countryIds = new Uint8Array(MAX_CELLS);
@@ -239,12 +239,12 @@ export class TextRenderer {
     const placeStart = performance.now();
     const placeMetrics = this.places?.draw(ctx, camera, level, this.viewport, this.grid, this.blockedCells,
       options.labels, options.places !== false) || { visibleMarkers: 0, labelledPlaces: 0 };
-    const placeLabelMs = performance.now() - placeStart;
+    const placeRenderMs = performance.now() - placeStart;
     const labelMs = performance.now() - labelStart;
     const silhouetteLabels = this.labelPlacements.filter(label => label.mode === 'silhouette').length;
     this.metrics = { visibleGlyphs: visible, totalGlyphs: cols * rows, projectionMs: projected - start,
       renderMs: performance.now() - projected, labelMs, visibleLabels, silhouetteLabels,
-      fallbackLabels: visibleLabels - silhouetteLabels, ...placeMetrics, placeLabelMs, cellWidth, cellHeight };
+      fallbackLabels: visibleLabels - silhouetteLabels, placeLabelMs: 0, ...placeMetrics, placeRenderMs, cellWidth, cellHeight };
     return this.metrics;
   }
   drawLabels(camera, level, geography, enabled) {

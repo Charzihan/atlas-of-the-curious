@@ -194,22 +194,29 @@ try {
   await page.locator('#rotate-toggle').click();
   const placeTiming = await page.evaluate(async () => {
     const samples = [], start = performance.now();
-    let previous = 0, frame = -1;
+    let previous = 0, frame = -1, visible = 0;
     while (performance.now() - start < 2000) {
       const time = await new Promise(resolve => requestAnimationFrame(resolve));
       const state = EARTHXT_DEBUG.snapshot();
       if (state.frameNumber === frame) continue;
-      if (previous) samples.push({ intervalMs: time - previous, cpuMs: state.projectionMs + state.renderMs, placeLabelMs: state.placeLabelMs, labelledPlaces: state.labelledPlaces });
-      frame = state.frameNumber; previous = time;
+      if (previous) samples.push({ intervalMs: time - previous, cpuMs: state.projectionMs + state.renderMs,
+        placeLabelMs: state.placeLabelMs, placeRenderMs: state.placeRenderMs, placeLayoutPasses: state.placeLayoutPasses,
+        labelledPlaces: state.labelledPlaces, visibleMarkers: state.visibleMarkers, visibleMarkersDropped: state.visibleMarkers < visible });
+      frame = state.frameNumber; previous = time; visible = state.visibleMarkers;
     }
     return samples;
   });
   assert.ok(placeTiming.length > 1);
-  assert.ok(placeTiming.every(sample => sample.labelledPlaces >= 4));
+  const min = Math.min(...placeTiming.map(sample => sample.labelledPlaces));
+  const max = Math.max(...placeTiming.map(sample => sample.labelledPlaces));
+  const visible = placeTiming.map(sample => sample.visibleMarkers);
   const p95 = key => placeTiming.map(sample => sample[key]).sort((a, b) => a - b)[Math.floor((placeTiming.length - 1) * 0.95)];
-  const placeBudget = { cpuMs: p95('cpuMs'), intervalMs: p95('intervalMs'), placeLabelMs: p95('placeLabelMs') };
-  await writeFile(new URL('../../test-results/earthxt/places-timing.json', import.meta.url), JSON.stringify({ p95: placeBudget, samples: placeTiming }, null, 2) + '\n');
+  const placeBudget = { cpuMs: p95('cpuMs'), intervalMs: p95('intervalMs'), placeLabelMs: p95('placeLabelMs'), placeRenderMs: p95('placeRenderMs') };
+  await writeFile(new URL('../../test-results/earthxt/places-timing.json', import.meta.url), JSON.stringify({ min, max, visible, p95: placeBudget, samples: placeTiming }, null, 2) + '\n');
   console.log('Coastlines places timing:', JSON.stringify(placeBudget));
+  assert.ok(placeTiming.every(sample => sample.labelledPlaces >= max - 1 || sample.visibleMarkersDropped),
+    `labelled places stay within one of the sample maximum unless markers leave that frame (min ${min}, max ${max})`);
+  assert.ok(placeBudget.placeLabelMs < 2, 'p95 place placement stays within the 2 ms budget');
   assert.ok(placeBudget.cpuMs < 33.4, 'p95 CPU submission stays within the 33.4 ms smoke budget');
   assert.ok(placeBudget.intervalMs < 50, 'p95 frame interval stays below 50 ms');
   await page.locator('#rotate-toggle').click();

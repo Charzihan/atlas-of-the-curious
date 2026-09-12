@@ -318,50 +318,88 @@ export function createLabelEngine(options) {
   }
 
   // Best anchor for one marker, or null when the name cannot be fitted into
-  // the sea anywhere near it at this zoom.
-  function findAnchor(x, tier, cellW, nativeOn) {
+  // the sea anywhere near it at this zoom. Moving hosts can prefer an earlier
+  // candidate: try its offset, then nearby offsets on the same side first.
+  function findAnchor(x, tier, cellW, nativeOn, preferred) {
     const nameH = nameHandleFor(x);
     const nativeH = tier >= 2 && nativeOn ? nativeHandleFor(x) : null;
     const tagH = tier >= 2 ? tagHandleFor(x) : null;
+    function candidate(d, off) {
+      const col = x.col + d.dc * off;
+      const row = x.row + d.dr * off;
+      if (col < 0 || col >= COLS || row < 0 || row >= ROWS) return null;
+      if (kind[row * COLS + col] || occupancy[row * COLS + col]) return null;
+      const name = routeAt(nameH, col, d.dir, cellW, NAME_MAX_LINES, row);
+      if (!name.complete || !name.lines.length) return null;
+      let from = name.lines[name.lines.length - 1].row + rowSpan;
+      // The native name takes the rows straight under the Latin one; if the
+      // water there is too narrow for it the label falls back to name +
+      // tagline rather than losing the anchor altogether.
+      let nativeLines = [];
+      if (nativeH) {
+        const nat = routeAt(nativeH, col, d.dir, cellW, NATIVE_MAX_LINES, from);
+        if (nat.complete && nat.lines.length) {
+          nativeLines = nat.lines;
+          from = nat.lines[nat.lines.length - 1].row + rowSpan;
+        }
+      }
+      let tagLines = [];
+      if (tagH) {
+        const tag = routeAt(tagH, col, d.dir, cellW, TAG_MAX_LINES, from);
+        if (tag.complete) tagLines = tag.lines;
+      }
+      const score = name.lines.length * 100 + off * 12 + d.pen +
+        (tagH && !tagLines.length ? 40 : 0) +
+        (nativeH && !nativeLines.length ? 20 : 0);
+      return {
+        score: score, row: row, col: col, dir: d.dir,
+        anchor: { dc: d.dc, dr: d.dr, off: off },
+        nameLines: name.lines, nativeLines: nativeLines, tagLines: tagLines
+      };
+    }
+    if (preferred) {
+      const d = LABEL_DIRS.find(d => d.dc === preferred.dc && d.dr === preferred.dr);
+      if (d) for (let delta = 0; delta < maxOffset; delta++) {
+        for (const off of delta === 0 ? [preferred.off] : [preferred.off - delta, preferred.off + delta]) {
+          if (off < 1 || off > maxOffset) continue;
+          const at = candidate(d, off);
+          if (at) return at;
+        }
+      }
+    }
     let best = null;
     for (let off = 1; off <= maxOffset; off++) {
       for (const d of LABEL_DIRS) {
-        const col = x.col + d.dc * off;
-        const row = x.row + d.dr * off;
-        if (col < 0 || col >= COLS || row < 0 || row >= ROWS) continue;
-        if (kind[row * COLS + col] || occupancy[row * COLS + col]) continue;
-        const name = routeAt(nameH, col, d.dir, cellW, NAME_MAX_LINES, row);
-        if (!name.complete || !name.lines.length) continue;
-        let from = name.lines[name.lines.length - 1].row + rowSpan;
-        // The native name takes the rows straight under the Latin one; if the
-        // water there is too narrow for it the label falls back to name +
-        // tagline rather than losing the anchor altogether.
-        let nativeLines = [];
-        if (nativeH) {
-          const nat = routeAt(nativeH, col, d.dir, cellW, NATIVE_MAX_LINES, from);
-          if (nat.complete && nat.lines.length) {
-            nativeLines = nat.lines;
-            from = nat.lines[nat.lines.length - 1].row + rowSpan;
-          }
-        }
-        let tagLines = [];
-        if (tagH) {
-          const tag = routeAt(tagH, col, d.dir, cellW, TAG_MAX_LINES, from);
-          if (tag.complete) tagLines = tag.lines;
-        }
-        const score = name.lines.length * 100 + off * 12 + d.pen +
-          (tagH && !tagLines.length ? 40 : 0) +
-          (nativeH && !nativeLines.length ? 20 : 0);
-        if (!best || score < best.score) {
-          best = {
-            score: score, row: row, col: col, dir: d.dir,
-            nameLines: name.lines, nativeLines: nativeLines, tagLines: tagLines
-          };
-        }
+        const at = candidate(d, off);
+        if (at && (!best || at.score < best.score)) best = at;
       }
       if (best) break;   // nearest offset that works wins; distance matters
     }
     return best;
+  }
+
+  // Preserve the previous line breaks and marker-relative offset if every
+  // occupied cell is still free. Reserve all surviving records before finding
+  // replacements so a new search cannot displace a still-valid neighbour.
+  function retainAnchor(x, rec, cellW) {
+    if (!rec?.anchor || rec.cellW !== cellW || rec.rowSpan !== rowSpan) return null;
+    const { dc, dr, off } = rec.anchor;
+    if (off > maxOffset) return null;
+    const col = x.col + dc * off, row = x.row + dr * off;
+    const dx = col - rec.col, dy = row - rec.row;
+    const next = { ...rec, col: col, row: row, lines: rec.lines.map(line => ({
+      ...line, row: line.row + dy, y: line.y + dy,
+      ...(line.col == null ? {} : { col: line.col + dx })
+    })) };
+    next.cells = cellsOf(next);
+    for (const span of next.cells) {
+      if (span.row < 0 || span.row >= ROWS || span.c0 < 0 || span.c1 >= COLS) return null;
+      for (let col = span.c0; col <= span.c1; col++) {
+        const i = span.row * COLS + col;
+        if (kind[i] || occupancy[i]) return null;
+      }
+    }
+    return next;
   }
 
   // Which way the native name runs. pretext's richer handle carries an
@@ -446,7 +484,9 @@ export function createLabelEngine(options) {
        cropRows    rows off the top (and the bottom) of the viewport, 0 usually
        oceanOn     place the ocean and sea names
        nativeNames the label carries the name in its own script from tier 2
-       visible     array of visible place ids, or null for "everything" */
+       visible     array of visible place ids, or null for "everything"
+       preferred   optional Map of id -> previous label record, from the same
+                   strings, font roles and tier; offsets follow each marker */
   function place(params) {
     const p = params || {};
     const tier = p.tier | 0;
@@ -488,12 +528,22 @@ export function createLabelEngine(options) {
     if (p.oceanOn) placeOceanLabels(cellW, Number(p.zoom) || 1, oceanRecs);
 
     if (tier > 0) {
+      const retained = new Map();
+      if (p.preferred) for (const x of places) {
+        if (visible && !visible.has(x.id)) continue;
+        const rec = retainAnchor(x, p.preferred.get(x.id), cellW);
+        if (!rec) continue;
+        markCells(rec.cells);
+        retained.set(x.id, rec);
+      }
       for (const x of places) {
         if (visible && !visible.has(x.id)) continue;
-        const best = findAnchor(x, tier, cellW, p.nativeNames !== false);
+        if (retained.has(x.id)) { labels.push(retained.get(x.id)); continue; }
+        const best = findAnchor(x, tier, cellW, p.nativeNames !== false, p.preferred?.get(x.id)?.anchor);
         if (!best) continue;
         const rec = {
           id: x.id, row: best.row, col: best.col, dir: best.dir, cellW: cellW,
+          anchor: best.anchor,
           rowSpan: rowSpan, nameCount: best.nameLines.length,
           nativeCount: best.nativeLines.length,
           nativeLang: best.nativeLines.length ? (x.nativeLang || "") : "",

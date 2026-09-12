@@ -5,9 +5,9 @@ import { runInNewContext } from 'node:vm';
 import { root, runtimeGraph } from '../../scripts/earthxt/graph.mjs';
 
 const source = await readFile(new URL('sw.js', root), 'utf8');
-test('service worker v8 precaches every globe dependency', async () => {
+test('service worker v9 precaches every globe dependency', async () => {
   const { CORE, CACHE } = runInNewContext(`${source}\n({ CORE, CACHE });`, { self: { addEventListener() {} } });
-  assert.equal(CACHE, 'atlas-of-the-curious-v8');
+  assert.equal(CACHE, 'atlas-of-the-curious-v9');
   assert.ok(CORE.includes('/earthxt/'));
   for (const file of (await runtimeGraph()).keys()) assert.ok(CORE.includes(`/${file}`), file);
 });
