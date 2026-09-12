@@ -17,7 +17,10 @@ try {
     const context = await browser.newContext({ viewport, reducedMotion: 'reduce' });
     const page = await context.newPage();
     page.on('pageerror', error => errors.push(error.message));
-    page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+    // Chromium reports the atlas page's meta-delivered `frame-ancestors` as an
+    // error; it is a known no-op of CSP-in-meta, not a page failure.
+    const KNOWN = /'frame-ancestors' is ignored when delivered via a <meta> element/;
+    page.on('console', message => { if (message.type() === 'error' && !KNOWN.test(message.text())) errors.push(message.text()); });
     const globeReady = () => page.waitForFunction(() => window.EARTHXT_DEBUG?.snapshot().visibleGlyphs > 500);
     const palette = () => page.evaluate(() => {
       const style = getComputedStyle(document.documentElement);
