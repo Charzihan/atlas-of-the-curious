@@ -127,7 +127,9 @@ export function cellsOf(rec) {
     const cells = Math.max(1, Math.ceil((line.width - 0.001) / rec.cellW));
     const col = line.col == null ? rec.col : line.col;
     const c0 = rec.dir > 0 ? col : col - cells + 1;
-    out.push({ row: line.row, c0: c0, c1: c0 + cells - 1 });
+    for (let dr = 0; dr < (rec.rowSpan || 1); dr++) {
+      out.push({ row: line.row + dr, c0: c0, c1: c0 + cells - 1 });
+    }
   }
   return out;
 }
@@ -150,7 +152,7 @@ export function createLabelEngine(options) {
   const onLayout = typeof opts.onLayout === "function" ? opts.onLayout : null;
   const provider = typeof opts.handleProvider === "function" ? opts.handleProvider : null;
 
-  let COLS = 0, ROWS = 0;
+  let COLS = 0, ROWS = 0, rowSpan = 1;
   // The three cell distances above, converted to this grid once per build.
   let maxOffset = LABEL_MAX_OFFSET, runLimit = LABEL_RUN_LIMIT, oceanSlide = OCEAN_SLIDE;
   let kind = new Uint8Array(0);
@@ -179,9 +181,8 @@ export function createLabelEngine(options) {
     }
     return {
       text: str,
-      // CSS paints a letter-space after the last grapheme too; pretext counts
-      // only the gaps between them. Carrying the difference as `ls` keeps the
-      // routed width and the painted width the same number.
+      // Tracking is already included once by the vendored pretext kernel.
+      // Keep it only as paint metadata; never add it to a measured width.
       ls: role.letterSpacing || 0,
       pre: prepareWithSegments(str, role.font, Object.keys(o).length ? o : undefined)
     };
@@ -260,7 +261,7 @@ export function createLabelEngine(options) {
       const ls = (step < 0 ? 0 : OCEAN_LS_EM[step]) * fontPxOf(role);
       h = makeHandle(name.toUpperCase(), { font: role.font, letterSpacing: ls });
       tick();
-      h.width = measureNaturalWidth(h.pre) + h.ls;
+      h.width = measureNaturalWidth(h.pre);
       oceanHandles.set(key, h);
     }
     return h;
@@ -294,20 +295,26 @@ export function createLabelEngine(options) {
   function routeAt(handle, anchorCol, dir, cellW, maxLines, startRow) {
     const widths = [];
     for (let i = 0; i < maxLines; i++) {
-      widths.push(freeRun(startRow + i, anchorCol, dir, runLimit) * cellW);
+      let run = runLimit;
+      for (let dr = 0; dr < rowSpan; dr++) run = Math.min(run, freeRun(startRow + i * rowSpan + dr, anchorCol, dir, runLimit));
+      widths.push(run * cellW);
     }
     tick();
-    return routeText(handle.pre, widths, 1, {
+    const routed = routeText(handle.pre, widths, 1, {
       maxLines: maxLines,
       text: handle.text,
       startRow: startRow,
-      extraWidth: handle.ls,
       minWidth: cellW,         // a single free cell is not worth a line
       // The lines are painted as one stacked block, so they must live on
       // consecutive rows: a blocked row ends this candidate rather than being
       // skipped over.
       contiguous: true
     });
+    for (const line of routed.lines) {
+      line.row = startRow + (line.row - startRow) * rowSpan;
+      line.y = line.row;
+    }
+    return routed;
   }
 
   // Best anchor for one marker, or null when the name cannot be fitted into
@@ -325,7 +332,7 @@ export function createLabelEngine(options) {
         if (kind[row * COLS + col] || occupancy[row * COLS + col]) continue;
         const name = routeAt(nameH, col, d.dir, cellW, NAME_MAX_LINES, row);
         if (!name.complete || !name.lines.length) continue;
-        let from = name.lines[name.lines.length - 1].row + 1;
+        let from = name.lines[name.lines.length - 1].row + rowSpan;
         // The native name takes the rows straight under the Latin one; if the
         // water there is too narrow for it the label falls back to name +
         // tagline rather than losing the anchor altogether.
@@ -334,7 +341,7 @@ export function createLabelEngine(options) {
           const nat = routeAt(nativeH, col, d.dir, cellW, NATIVE_MAX_LINES, from);
           if (nat.complete && nat.lines.length) {
             nativeLines = nat.lines;
-            from = nat.lines[nat.lines.length - 1].row + 1;
+            from = nat.lines[nat.lines.length - 1].row + rowSpan;
           }
         }
         let tagLines = [];
@@ -487,7 +494,7 @@ export function createLabelEngine(options) {
         if (!best) continue;
         const rec = {
           id: x.id, row: best.row, col: best.col, dir: best.dir, cellW: cellW,
-          nameCount: best.nameLines.length,
+          rowSpan: rowSpan, nameCount: best.nameLines.length,
           nativeCount: best.nativeLines.length,
           nativeLang: best.nativeLines.length ? (x.nativeLang || "") : "",
           nativeDir: best.nativeLines.length ? nativeDirFor(x) : "ltr",
@@ -506,7 +513,8 @@ export function createLabelEngine(options) {
     setGrid: function (cfg) {
       COLS = cfg.cols | 0;
       ROWS = cfg.rows | 0;
-      maxOffset = scaleCells(LABEL_MAX_OFFSET, COLS);
+      rowSpan = Math.max(1, cfg.rowSpan | 0);
+      maxOffset = scaleCells(cfg.maxOffset ?? LABEL_MAX_OFFSET, COLS);
       runLimit = scaleCells(LABEL_RUN_LIMIT, COLS);
       oceanSlide = scaleCells(OCEAN_SLIDE, COLS);
       kind = cfg.land;
@@ -526,6 +534,10 @@ export function createLabelEngine(options) {
         if (!at) continue;
         x.col = at[0]; x.row = at[1];
       }
+    },
+    // Animation hosts explicitly warm every handle before their first frame.
+    preparePlaces: function () {
+      for (const x of places) { nameHandleFor(x); nativeHandleFor(x); tagHandleFor(x); }
     },
     place: place,
     // The live occupancy mask, so js/sea.js can route around this pass's labels.

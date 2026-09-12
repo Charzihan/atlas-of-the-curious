@@ -90,6 +90,17 @@
   --lh-ocean-label: 1.4;
   --ls-ocean-label: 0.18em;
 
+  /* Hover card chrome, shared by the atlas and globe. */
+  --font-hover-name: normal 1.02rem var(--font-serif);
+  --lh-hover-name: 1.55;
+  --ls-hover-name: 0px;
+  --font-hover-loc: normal 0.66rem var(--font-sans);
+  --lh-hover-loc: 1.55;
+  --ls-hover-loc: 0.08em;
+  --font-hover-cta: normal 0.72rem var(--font-sans);
+  --lh-hover-cta: 1.55;
+  --ls-hover-cta: 0.04em;
+
   /* Marker hover card tagline — .map-card-tag */
   --font-hover-card: normal 0.72rem var(--font-mono);
   --lh-hover-card: 1.5;

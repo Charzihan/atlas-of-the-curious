@@ -26,6 +26,8 @@ import {
   createLabelEngine, cellsOf, tierFor, scaleCells,
   TIER_NAME_Z, TIER_TAG_Z, TAG_MAX_LINES
 } from "./labels.js";
+import { fitHoverTagline } from "./hover-card.js";
+import { readCategoryColors } from "./category-colors.js";
 import { createSeaEngine, IDLE_MAX_SENTENCES } from "./sea.js";
 import { createMapArtEngine, COUNTRY_MARKER } from "./map-art.js";
 import { generateCloud, generateCloudSet } from "./clouds.js";
@@ -239,8 +241,9 @@ import {
      `kind` above stays exactly what it was: the world grid's land mask, the one
      the labels, the sea text and every check are written against. */
 
+  const categoryColors = readCategoryColors(document, DATA.categories);
   const places = DATA.places
-    .map((p) => ({ p, accent: (catById.get(p.category) || {}).accent || "#e8b45a" }))
+    .map((p) => ({ p, accent: categoryColors.get(p.category) }))
     .filter((x) => parseCoords(x.p.coordinates));
 
   /* ==================================================================== *
@@ -3127,46 +3130,17 @@ import {
       return lines.map(function (l) { return l.replace(/\s+$/, ""); })
         .filter(function (l) { return l.length; });
     }
-    // A last line holding one lonely word is the classic typographic widow.
-    function isWidow(lines) {
-      return lines.length >= 2 && !/\s/.test(lines[lines.length - 1].trim());
-    }
-
-    /* Shrink-wrap one tagline, then refuse to leave a one-word last line.
-       tightWidthOfText() gives the narrowest box with the same line count;
-       if that still ends on a single word, walk narrower (which pulls a word
-       down onto the last line) and then wider, and keep the first width that
-       reads properly. The chosen lines are baked into the <pre> with real
-       newlines, so widening the card for a long name cannot re-wrap them. */
     const tagFits = new Map();
     function tagFit(p) {
-      let fit = tagFits.get(p.id);
-      if (fit) return fit;
+      if (tagFits.has(p.id)) return tagFits.get(p.id);
       const T = window.ATLAS_TEXT;
-      const text = String(p.tagline || "");
-      if (!FLAGS.hoverFit || !T || typeof T.tightWidthOfText !== "function") {
-        fit = { width: CARD_TEXT_W, lines: tagLines(text, CARD_TEXT_W) };
-        tagFits.set(p.id, fit);
-        return fit;
-      }
-      countLayout(1);
-      let width = T.tightWidthOfText("hover-card", text, CARD_TEXT_W);
-      let lines = tagLines(text, width);
-      if (isWidow(lines)) {
-        const STEP = 3;
-        let found = null;
-        for (let w = width - STEP; w >= CARD_MIN_TEXT && !found; w -= STEP) {
-          const candidate = tagLines(text, w);
-          if (candidate.length > TAG_MAX_LINES + 1) break;   // do not grow it forever
-          if (!isWidow(candidate)) found = { width: w, lines: candidate };
-        }
-        for (let w = width + STEP; w <= CARD_TEXT_W && !found; w += STEP) {
-          const candidate = tagLines(text, w);
-          if (!isWidow(candidate)) found = { width: w, lines: candidate };
-        }
-        if (found) { width = found.width; lines = found.lines; }
-      }
-      fit = { width: width, lines: lines };
+      const fit = fitHoverTagline(String(p.tagline || ""), {
+        maxWidth: CARD_TEXT_W, minWidth: CARD_MIN_TEXT, maxLines: TAG_MAX_LINES + 1,
+        linesOfText: tagLines,
+        tightWidthOfText: FLAGS.hoverFit && T && typeof T.tightWidthOfText === "function"
+          ? (text, width) => { countLayout(1); return T.tightWidthOfText("hover-card", text, width); }
+          : null
+      });
       tagFits.set(p.id, fit);
       return fit;
     }

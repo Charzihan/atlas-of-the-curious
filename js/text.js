@@ -680,6 +680,7 @@ export const ROLE_NAMES = [
   "globe-label",
   "ocean-label",
   "hover-card",
+  "hover-name", "hover-loc", "hover-cta",
   "notebook",
   // Phase 4 — the name in its own script, and the bold half of a highlighted
   // search match.

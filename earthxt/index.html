@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="../css/fonts.css">
   <link rel="stylesheet" href="../css/tokens.css">
   <link rel="stylesheet" href="./styles.css">
+  <script src="../js/data.js"></script>
   <script type="module" src="./app.js"></script>
 </head>
 <body>
@@ -38,7 +39,7 @@
           <p class="detail-note">Detail unfolds automatically as you zoom.</p>
         </section>
         <div class="display-settings">
-          <label class="setting-row" for="labels-toggle"><span>Country labels <small>at close range</small></span><input id="labels-toggle" type="checkbox" checked role="switch"><span class="switch" aria-hidden="true"></span></label>
+          <label class="setting-row" for="labels-toggle"><span>Place &amp; country labels <small>at close range</small></span><input id="labels-toggle" type="checkbox" checked role="switch"><span class="switch" aria-hidden="true"></span></label>
           <label class="setting-row" for="grid-toggle"><span>Coordinate grid</span><input id="grid-toggle" type="checkbox" role="switch"><span class="switch" aria-hidden="true"></span></label>
         </div>
         <div class="source-control"><span class="eyebrow">GEOGRAPHY</span><div class="segmented" role="group" aria-label="Geography source"><button id="source-earth" type="button" aria-pressed="true">Earth</button><button id="source-synthetic" type="button" aria-pressed="false">Synthetic</button></div></div>
@@ -50,6 +51,7 @@
         <div class="globe-stage" id="globe-stage">
           <canvas id="globe" tabindex="0" role="img" aria-label="Interactive globe made of text characters" aria-describedby="globe-instructions">An interactive text globe. Use the level buttons to zoom, or focus this globe and use the arrow keys to rotate.</canvas>
           <div id="country-labels" aria-hidden="true"></div>
+          <div id="globe-markers" role="group" aria-label="Atlas places"></div>
           <div class="axis-label axis-n" aria-hidden="true">N</div><div class="axis-label axis-s" aria-hidden="true">S</div>
           <div class="loading-state" id="loading" role="status"><span class="loading-glyph" aria-hidden="true">⊕</span>Assembling a world of characters…</div>
         </div>
@@ -76,7 +78,7 @@
 
   <section class="debug-panel" id="debug-panel" aria-label="Globe diagnostics" hidden><div class="section-heading"><h2>GLOBE / DIAGNOSTICS</h2><button id="debug-close" class="inline-button" aria-label="Close diagnostics" type="button">×</button></div><dl id="debug-values"></dl><p>Frame rate counts rendered frames.<br>Memory is shown when the browser provides it.</p></section>
   <dialog id="about-dialog" aria-labelledby="about-title"><button class="dialog-close" data-close type="button" aria-label="Close about">×</button><p class="eyebrow">ATLAS / GLOBE</p><h2 id="about-title">A planet.<br>An alphabet.</h2><p>The globe is the spherical view of Atlas of the Curious, built on the same text foundation: shared type, text measurement, and the pretext library.</p><p>Every mark on this globe is a character, positioned with the mathematics of a 3D sphere. As you approach the surface, coarse land gives way to coastlines, country borders, and names.</p><p>Its geography comes from the same public-domain Natural Earth country shapes as the atlas, sampled into three local grids. The globe runs entirely in your browser, with no mapping services. Synthetic mode lets you explore the same engine with invented geography.</p><div class="about-facts"><span>177 country features</span><span>3 levels of detail</span><span>Works entirely offline</span></div><p class="attribution">Geography: <a href="https://www.naturalearthdata.com/about/terms-of-use/" target="_blank" rel="noreferrer">Natural Earth, public domain ↗</a>. Simplified 1:110m data; borders reflect the source dataset. This view stops at country scale.</p></dialog>
-  <dialog id="help-dialog" aria-labelledby="help-title"><button class="dialog-close" data-close type="button" aria-label="Close keyboard controls">×</button><p class="eyebrow">TAKE A LOOK AROUND</p><h2 id="help-title">Your world to explore.</h2><p>Focus the globe to use these shortcuts.</p><dl class="shortcuts"><div><dt>Rotate</dt><dd>↑ ↓ ← →</dd></div><div><dt>Zoom in / out</dt><dd>+ / −</dd></div><div><dt>Reset view</dt><dd>0</dd></div><div><dt>Pause / resume rotation</dt><dd>Space</dd></div><div><dt>Diagnostics</dt><dd>D</dd></div></dl><p>On touchscreens, drag with one finger to rotate and pinch with two fingers to zoom.</p></dialog>
+  <dialog id="help-dialog" aria-labelledby="help-title"><button class="dialog-close" data-close type="button" aria-label="Close keyboard controls">×</button><p class="eyebrow">TAKE A LOOK AROUND</p><h2 id="help-title">Your world to explore.</h2><p>Focus the globe to use these shortcuts.</p><dl class="shortcuts"><div><dt>Rotate</dt><dd>↑ ↓ ← →</dd></div><div><dt>Zoom in / out</dt><dd>+ / −</dd></div><div><dt>Reset view</dt><dd>0</dd></div><div><dt>Pause / resume rotation</dt><dd>Space</dd></div><div><dt>Diagnostics</dt><dd>D</dd></div></dl><p>Tab through visible place markers to read their cards. Enter opens the atlas field note. Escape dismisses a card. In the standalone edition, cards include a short story excerpt.</p><p>On touchscreens, drag with one finger to rotate and pinch with two fingers to zoom.</p></dialog>
   <p class="sr-only" id="live-status" role="status" aria-live="polite"></p>
   <noscript><p class="noscript">The globe needs JavaScript to calculate and render the text globe. Enable it and reload this page.</p></noscript>
 </body>

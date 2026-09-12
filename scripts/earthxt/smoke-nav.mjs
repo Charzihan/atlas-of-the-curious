@@ -47,6 +47,26 @@ try {
     assert.equal(await globeLink.evaluate(link => link.href), `${server.origin}/earthxt/`);
     await Promise.all([page.waitForURL(`${server.origin}/earthxt/`), globeLink.click()]);
     await globeReady();
+    await page.goto(`${server.origin}/#/place/salar-de-uyuni`);
+    await page.waitForFunction(() => document.getElementById('place-dialog').open && document.getElementById('dialog-globe'));
+    const placeLink = page.locator('#dialog-globe');
+    assert.equal(await placeLink.innerText(), 'See on the globe →');
+    await Promise.all([page.waitForURL(`${server.origin}/earthxt/#/place/salar-de-uyuni`), placeLink.click()]);
+    await globeReady();
+    const state = await page.evaluate(() => EARTHXT_DEBUG.snapshot());
+    assert.equal(state.lod, 2);
+    assert.ok(Math.abs(state.latitude + 19.917) < 0.001 && Math.abs(state.longitude + 67.846) < 0.001);
+    assert.ok(await page.locator('#globe-place-card').isVisible());
+    const marker = page.locator('.globe-marker[data-id="salar-de-uyuni"]');
+    await marker.focus();
+    await Promise.all([page.waitForURL(`${server.origin}/#/place/salar-de-uyuni`), page.keyboard.press('Enter')]);
+    await page.waitForFunction(() => document.getElementById('place-dialog').open);
+    await page.goto(`${server.origin}/earthxt/#/place/fez-medina`);
+    await globeReady();
+    const native = page.locator('#globe-place-card .map-card-native');
+    assert.ok(await native.isVisible());
+    assert.equal(await native.getAttribute('dir'), 'rtl');
+    assert.equal(await native.innerText(), await page.evaluate(() => ATLAS_DATA.places.find(place => place.id === 'fez-medina').nativeName));
     await context.close();
   }
   assert.deepEqual(errors, []);

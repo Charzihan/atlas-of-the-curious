@@ -55,6 +55,13 @@ export function stylesheetLinks(html) {
     .map(match => ({ statement: match[0], reference: match[0].match(/\bhref=['"]([^'"]+)['"]/)?.[1] }));
 }
 
+export function scriptLinks(html) {
+  return [...html.matchAll(/<script\b[^>]*>\s*<\/script\s*>/gi)]
+    .filter(match => /\bsrc=['"]/.test(match[0]))
+    .map(match => ({ statement: match[0], reference: match[0].match(/\bsrc=['"]([^'"]+)['"]/)?.[1],
+      type: match[0].match(/\btype=['"]([^'"]+)['"]/)?.[1] || 'classic' }));
+}
+
 export function cssImports(css) {
   return [...css.matchAll(/@import\s+(?:url\(\s*['"]?([^'"\s)]+)['"]?\s*\)|['"]([^'"]+)['"])\s*;/g)]
     .map(match => ({ statement: match[0], reference: match[1] ?? match[2] }));
@@ -75,8 +82,7 @@ export function runtimeReferences(file, source) {
   }
   if (file.endsWith('.html')) {
     const links = stylesheetLinks(source);
-    const scripts = [...source.matchAll(/<script\b[^>]*\bsrc=['"]([^'"]+)['"][^>]*>/g)]
-      .map(match => ({ statement: match[0], reference: match[1] }));
+    const scripts = scriptLinks(source);
     return [...links, ...scripts].map(item => ({ ...item, dependency: resolveReference(file, item.reference) }));
   }
   if (file.endsWith('.css')) {

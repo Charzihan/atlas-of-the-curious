@@ -155,6 +155,70 @@ try {
   // Startup with reduced motion must also remain still.
   await page.reload(); await page.waitForFunction(() => window.EARTHXT_DEBUG?.snapshot().visibleGlyphs > 0);
   assert.equal((await snapshot()).autoRotate, false);
+  // Place deep links set the camera and open a card before interaction.
+  await page.goto(server.origin + '/dist/earthxt/#/place/salar-de-uyuni');
+  await page.waitForFunction(() => window.EARTHXT_DEBUG?.snapshot().lod === 2 && !document.getElementById('globe-place-card').hidden);
+  const linked = await snapshot();
+  assert.equal(linked.placeCount, 40);
+  assert.equal(linked.autoRotate, false);
+  assert.ok(Math.abs(linked.latitude + 19.917) < 0.001 && Math.abs(linked.longitude + 67.846) < 0.001);
+  assert.equal(await page.locator('#globe-place-card').getAttribute('data-id'), 'salar-de-uyuni');
+  await page.locator('#globe').focus(); await page.keyboard.press('Escape');
+  await page.locator('[data-level="1"]').click(); await settled();
+  await page.waitForFunction(() => EARTHXT_DEBUG.snapshot().visibleMarkers >= 4 && EARTHXT_DEBUG.snapshot().labelledPlaces >= 4);
+  const poi = await page.evaluate(() => EARTHXT_DEBUG.snapshot({ includeGeometry: true }));
+  const occupied = new Set();
+  for (const label of poi.labelCells) for (const span of label.cells) for (let col = span.c0; col <= span.c1; col++) {
+    const cell = span.row * poi.grid.cols + col;
+    assert.ok(span.row >= 0 && span.row < poi.grid.rows && col >= 0 && col < poi.grid.cols);
+    assert.equal(poi.grid.countryIds[cell], 0);
+    assert.equal(poi.grid.blockedCells[cell], 0, 'label stays on water within the disc');
+    assert.ok(!poi.markerCells.includes(cell), 'label clears marker footprint');
+    assert.ok(!occupied.has(cell), 'place labels do not overlap');
+    occupied.add(cell);
+  }
+  const marker = page.locator('.globe-marker[data-id="salar-de-uyuni"]');
+  await marker.hover();
+  const card = page.locator('#globe-place-card');
+  assert.ok(await card.isVisible());
+  const tagline = await page.evaluate(() => ATLAS_DATA.places.find(place => place.id === 'salar-de-uyuni').tagline);
+  assert.equal((await card.locator('.map-card-tag').innerText()).replace(/\s+/g, ' ').trim(), tagline);
+  const cardBounds = await card.boundingBox(), stageBounds = await page.locator('#globe-stage').boundingBox();
+  assert.ok(cardBounds.x >= stageBounds.x && cardBounds.y >= stageBounds.y && cardBounds.x + cardBounds.width <= stageBounds.x + stageBounds.width && cardBounds.y + cardBounds.height <= stageBounds.y + stageBounds.height);
+  await page.mouse.move(0, 0);
+  await page.locator('#globe').focus(); await page.keyboard.press('Tab');
+  assert.ok(await page.evaluate(() => document.activeElement.matches('.globe-marker:not([hidden])')), 'Tab reaches a visible marker');
+  await page.keyboard.press('Escape');
+  assert.ok(!(await card.isVisible()));
+  // Real rotation timing with routed place names enabled, at a fixed viewport.
+  await page.locator('#rotate-toggle').click();
+  const placeTiming = await page.evaluate(async () => {
+    const samples = [], start = performance.now();
+    let previous = 0, frame = -1;
+    while (performance.now() - start < 2000) {
+      const time = await new Promise(resolve => requestAnimationFrame(resolve));
+      const state = EARTHXT_DEBUG.snapshot();
+      if (state.frameNumber === frame) continue;
+      if (previous) samples.push({ intervalMs: time - previous, cpuMs: state.projectionMs + state.renderMs, placeLabelMs: state.placeLabelMs, labelledPlaces: state.labelledPlaces });
+      frame = state.frameNumber; previous = time;
+    }
+    return samples;
+  });
+  assert.ok(placeTiming.length > 1);
+  assert.ok(placeTiming.every(sample => sample.labelledPlaces >= 4));
+  const p95 = key => placeTiming.map(sample => sample[key]).sort((a, b) => a - b)[Math.floor((placeTiming.length - 1) * 0.95)];
+  const placeBudget = { cpuMs: p95('cpuMs'), intervalMs: p95('intervalMs'), placeLabelMs: p95('placeLabelMs') };
+  await writeFile(new URL('../../test-results/earthxt/places-timing.json', import.meta.url), JSON.stringify({ p95: placeBudget, samples: placeTiming }, null, 2) + '\n');
+  console.log('Coastlines places timing:', JSON.stringify(placeBudget));
+  assert.ok(placeBudget.cpuMs < 33.4, 'p95 CPU submission stays within the 33.4 ms smoke budget');
+  assert.ok(placeBudget.intervalMs < 50, 'p95 frame interval stays below 50 ms');
+  await page.locator('#rotate-toggle').click();
+  // Dist intentionally ships only the globe; intercept the atlas destination
+  // to assert its URL. smoke-nav exercises the combined site's real dialog.
+  const atlasDestination = server.origin + '/dist/#/place/salar-de-uyuni';
+  await page.route(server.origin + '/dist/', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>Atlas destination</title>' }));
+  await Promise.all([page.waitForURL(atlasDestination), marker.click()]);
+  assert.equal(page.url(), atlasDestination);
   // Real touch events via Chromium's input protocol, including pinch and cancel.
   const mobile = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, reducedMotion: 'reduce' });
   const touchPage = await mobile.newPage();
@@ -193,12 +257,23 @@ try {
     externalRequests.push(route.request().url());
     return route.abort();
   });
-  await offline.goto(standalone.output.href);
+  await offline.goto(standalone.output.href + '#/place/salar-de-uyuni');
   await offline.waitForFunction(() => window.EARTHXT_DEBUG?.snapshot().visibleGlyphs > 500);
   assert.equal(await offline.evaluate(() => EARTHXT_DEBUG.snapshot().countryCount), 177);
   assert.equal(await offline.evaluate(() => EARTHXT_DEBUG.snapshot().source), 'earth');
   await offline.locator('[data-level="2"]').click();
   await offline.waitForFunction(() => EARTHXT_DEBUG.snapshot().lod === 2);
+  assert.equal(await offline.evaluate(() => EARTHXT_DEBUG.snapshot().placeCount), 40);
+  const offlineCard = offline.locator('#globe-place-card');
+  assert.ok(await offlineCard.isVisible());
+  assert.equal(await offlineCard.locator('a').count(), 0);
+  const excerpt = await offlineCard.locator('.map-card-cta').innerText();
+  assert.ok(excerpt.length > 40);
+  assert.ok(await offline.evaluate(text => ATLAS_DATA.places.find(place => place.id === 'salar-de-uyuni').story.startsWith(text), excerpt));
+  await offline.locator('.globe-marker[data-id="salar-de-uyuni"]').focus();
+  await offline.keyboard.press('Enter');
+  assert.equal(offline.url(), standalone.output.href + '#/place/salar-de-uyuni');
+  assert.ok(await offlineCard.isVisible());
   assert.deepEqual(externalRequests, []);
   assert.deepEqual(errors, []);
   console.log('PASS: deployed subpath, all LODs, drag, wheel, zoom limits, silhouette name containment, rotation timing sample, labels toggle, source modes, keyboard, dialogs, reduced motion, mobile layout, touch rotation/pinch/cancel, load-error fallback, and standalone file without HTTP access.');

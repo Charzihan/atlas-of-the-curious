@@ -13,7 +13,7 @@ test('static output contains the whole graph and resolves within dist at a neste
   const graph = await runtimeGraph();
   const builtGraph = await runtimeGraph(undefined, output);
   assert.deepEqual([...builtGraph.keys()], [...graph.keys()]);
-  for (const required of ['earthxt/app.js', 'js/map-art.js', 'js/labels.js', 'js/text-route.js', 'js/text.js', 'vendor/pretext/layout.js', 'vendor/pretext/generated/bidi-data.js', 'css/fonts.css']) {
+  for (const required of ['earthxt/app.js', 'earthxt/places.js', 'earthxt/place-layer.js', 'js/data.js', 'js/hover-card.js', 'js/category-colors.js', 'js/map-art.js', 'js/labels.js', 'js/text-route.js', 'js/text.js', 'vendor/pretext/layout.js', 'vendor/pretext/generated/bidi-data.js', 'css/fonts.css']) {
     assert.ok(graph.has(required), required);
   }
   const servedRoot = new URL('https://static.example/project/');
@@ -36,9 +36,10 @@ test('static output contains the whole graph and resolves within dist at a neste
 test('graph follows multiline imports, parent paths, data URLs, stylesheet links and CSS import chains', async () => {
   const fixture = pathToFileURL(`${await mkdtemp(`${tmpdir()}/earthxt-graph-`)}/`);
   const files = {
-    'earthxt/index.html': '<link rel="stylesheet" href="../css/main.css"><script type="module" src="./app.js"></script>',
+    'earthxt/index.html': '<link rel="stylesheet" href="../css/main.css"><script src="../js/data.js"></script><script type="module" src="./app.js"></script>',
     'earthxt/app.js': "import {\n value,\n} from '../js/shared.js';\nconst data = new URL('./data.json', import.meta.url);\n",
     'earthxt/data.json': '{}',
+    'js/data.js': 'window.ATLAS_DATA = { places: [1, 2] };',
     'js/shared.js': 'export const value = 1;',
     'css/main.css': '@import url("nested.css");\nbody { color: red; }',
     'css/nested.css': '@import "./fonts.css";\n:root { color: blue; }',

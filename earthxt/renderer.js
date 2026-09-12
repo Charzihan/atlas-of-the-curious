@@ -74,10 +74,11 @@ export class TextRenderer {
     this.labelLayer = labelLayer;
     this.labelNodes = new Map();
     this.viewport = { width: 1, height: 1, focal: 1 };
-    this.metrics = { visibleGlyphs: 0, totalGlyphs: 0, projectionMs: 0, renderMs: 0, labelMs: 0, visibleLabels: 0, silhouetteLabels: 0, fallbackLabels: 0 };
+    this.metrics = { visibleGlyphs: 0, totalGlyphs: 0, projectionMs: 0, renderMs: 0, labelMs: 0, placeLabelMs: 0, visibleMarkers: 0, labelledPlaces: 0, visibleLabels: 0, silhouetteLabels: 0, fallbackLabels: 0 };
     this.cells = new Uint8Array(MAX_CELLS);
     this.variants = new Uint8Array(MAX_CELLS);
     this.countryIds = new Uint8Array(MAX_CELLS);
+    this.blockedCells = new Uint8Array(MAX_CELLS);
     this.labelPlacements = [];
     this.nativeSpacing = 'letterSpacing' in this.context;
   }
@@ -172,6 +173,7 @@ export class TextRenderer {
         const discriminant = d2 - a * (d2 - 1);
         this.cells[index] = 0;
         this.countryIds[index] = 0;
+        this.blockedCells[index] = 1;
         if (discriminant <= 0) continue;
         // Inverse projection bounds work by viewport size instead of world size.
         // Choosing the near root excludes every point behind the visible surface.
@@ -184,6 +186,10 @@ export class TextRenderer {
         const longitude = Math.atan2(wx, wz) / RAD;
         geography.sample(latitude, longitude, level, sample);
         this.countryIds[index] = sample.country;
+        // A routed cell's corners must stay on the disc, including at the rim.
+        const farX = Math.abs(xOffset + col * cellWidth - width / 2) + cellWidth / 2;
+        const farY = Math.abs(yOffset + row * cellHeight - height / 2) + cellHeight / 2;
+        this.blockedCells[index] = sample.country || farX * farX + farY * farY >= focal * focal / (d2 - 1) ? 1 : 0;
         const facing = (distance * z - 1) / Math.hypot(x, y, distance - z);
         const light = Math.max(0, Math.min(3, Math.floor((facing * 0.85 - x * 0.24 + y * 0.1) * 4)));
         let color = sample.country ? 4 + (level.labels ? Math.max(1, light) : light) : light;
@@ -222,11 +228,23 @@ export class TextRenderer {
     }
     const labelStart = performance.now();
     const visibleLabels = this.drawLabels(camera, level, geography, options.labels);
+    // DOM country pills can occupy water; reserve their rectangles too.
+    for (const label of this.labelPlacements) {
+      if (label.mode !== 'pill') continue;
+      const { box } = label;
+      for (let row = Math.max(0, Math.floor((box.y - this.grid.y) / cellHeight)); row < Math.min(rows, Math.ceil((box.y + box.height - this.grid.y) / cellHeight)); row++) {
+        for (let col = Math.max(0, Math.floor((box.x - this.grid.x) / cellWidth)); col < Math.min(cols, Math.ceil((box.x + box.width - this.grid.x) / cellWidth)); col++) this.blockedCells[row * cols + col] = 1;
+      }
+    }
+    const placeStart = performance.now();
+    const placeMetrics = this.places?.draw(ctx, camera, level, this.viewport, this.grid, this.blockedCells,
+      options.labels, options.places !== false) || { visibleMarkers: 0, labelledPlaces: 0 };
+    const placeLabelMs = performance.now() - placeStart;
     const labelMs = performance.now() - labelStart;
     const silhouetteLabels = this.labelPlacements.filter(label => label.mode === 'silhouette').length;
     this.metrics = { visibleGlyphs: visible, totalGlyphs: cols * rows, projectionMs: projected - start,
       renderMs: performance.now() - projected, labelMs, visibleLabels, silhouetteLabels,
-      fallbackLabels: visibleLabels - silhouetteLabels, cellWidth, cellHeight };
+      fallbackLabels: visibleLabels - silhouetteLabels, ...placeMetrics, placeLabelMs, cellWidth, cellHeight };
     return this.metrics;
   }
   drawLabels(camera, level, geography, enabled) {
@@ -289,6 +307,7 @@ export class TextRenderer {
   // mutate the reusable country buffer or the renderer's placement records.
   labelSnapshot() {
     return structuredClone({ labelPlacements: this.labelPlacements, grid: this.grid && { ...this.grid,
+      blockedCells: Array.from(this.blockedCells.subarray(0, this.grid.cols * this.grid.rows)),
       countryIds: Array.from(this.countryIds.subarray(0, this.grid.cols * this.grid.rows)) } });
   }
 }

@@ -8,5 +8,12 @@
   --ink-dim: #9aa4c8;
   --gold: #e8b45a;
   --gold-soft: rgba(232, 180, 90, 0.16);
+  --category-geology: #e8b45a;
+  --category-coastal: #4fc3f7;
+  --category-desert: #f0975a;
+  --category-forest: #66bb6a;
+  --category-glacier: #90caf9;
+  --category-sacred: #ce93d8;
+  --category-urban: #ef5350;
   --line: rgba(154, 164, 200, 0.18);
 }

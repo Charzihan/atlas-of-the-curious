@@ -3,6 +3,9 @@ import { HOME, EARTH_RADIUS_KM, MIN_DISTANCE, MAX_DISTANCE, clamp, wrapLongitude
 import { LEVELS, selectLOD } from './lod.js';
 import { loadGeography, syntheticGeography } from './geography.js';
 import { TextRenderer } from './renderer.js';
+import { globePlaces, parsePlaceHash } from './places.js';
+import { PlaceLayer } from './place-layer.js';
+import { readCategoryColors } from '../js/category-colors.js';
 
 const $ = id => document.getElementById(id);
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
@@ -13,6 +16,8 @@ let fps = 0, projectionSum = 0, renderSum = 0, averageProjection = 0, averageRen
 let labelSum = 0, averageLabels = 0, frameNumber = 0;
 const pointers = new Map();
 let pinchDistance = 0;
+let placeLayer;
+const places = globePlaces(window.ATLAS_DATA?.places || []);
 
 function setRotation(enabled) {
   state.autoRotate = enabled;
@@ -32,6 +37,7 @@ function zoomTo(distance) {
 }
 function zoomBy(factor) { zoomTo(1 + (state.targetDistance - 1) * factor); }
 function reset() {
+  placeLayer?.hide();
   state.latitude = HOME.latitude;
   state.longitude = HOME.longitude;
   setRotation(false);
@@ -82,6 +88,8 @@ function updateMetrics() {
       'Projection + lookup': `${averageProjection.toFixed(2)} ms`,
       'Text render + labels': `${averageRender.toFixed(2)} ms`,
       'Name layout + drawing': `${metrics.labelMs.toFixed(2)} ms (avg ${averageLabels.toFixed(2)})`,
+      'Visible / labelled places': `${metrics.visibleMarkers} / ${metrics.labelledPlaces}`,
+      'Place routing + drawing': `${metrics.placeLabelMs.toFixed(2)} ms`,
       'Silhouette / pill names': `${metrics.silhouetteLabels} / ${metrics.fallbackLabels}`,
       'Resident geography': geography ? `${(geography.loadedBytes / 1024).toFixed(1)} KiB` : 'None',
       'JS heap': performance.memory ? `${(performance.memory.usedJSHeapSize / 1024 / 1024).toFixed(1)} MiB` : 'Unavailable',
@@ -113,7 +121,7 @@ function frame(time) {
   if (oceanPhase !== lastOceanPhase) { dirty = true; lastOceanPhase = oceanPhase; }
   if (dirty) {
     const metrics = renderer.draw(state, level, state.source === 'earth' && geography ? geography : syntheticGeography,
-      { labels: state.labels, grid: state.grid, animateOcean: !reducedMotion.matches, time });
+      { labels: state.labels, places: state.source === 'earth', grid: state.grid, animateOcean: !reducedMotion.matches, time });
     renderedFrames++;
     frameNumber++;
     projectionSum += metrics.projectionMs;
@@ -219,17 +227,26 @@ function setupControls() {
   });
 }
 async function main() {
-  const roles = readFontRoles(document, ['globe-label']);
+  const roles = readFontRoles(document, ['globe-label', 'map-label', 'hover-card', 'native-name', 'hover-name', 'hover-loc', 'hover-cta']);
   if (!roles['globe-label']) throw new Error('The globe-label font role is missing.');
   renderer = new TextRenderer($('globe'), $('country-labels'), {
     label: roles['globe-label'], mono: readFontFamily(document, '--font-mono')
   });
+  placeLayer = new PlaceLayer($('globe-stage'), $('globe-markers'), places, roles,
+    readCategoryColors(document, window.ATLAS_DATA.categories), {
+      standalone: document.documentElement.hasAttribute('data-standalone'), onInspect: () => setRotation(false)
+    });
+  renderer.places = placeLayer;
   setupControls();
-  const observer = new ResizeObserver(entries => {
-    const { width, height } = entries[0].contentRect;
+  const resize = (width, height) => {
     if (width <= 0 || height <= 0) return;
     renderer.resize(width, height, devicePixelRatio);
+    placeLayer.resize(width, height);
     dirty = true;
+  };
+  const observer = new ResizeObserver(entries => {
+    const { width, height } = entries[0].contentRect;
+    resize(width, height);
   });
   observer.observe($('globe-stage'));
   try { geography = await loadGeography(); }
@@ -240,6 +257,8 @@ async function main() {
     $('data-error').hidden = false;
   }
   renderer.prepareLabels(geography ? geography.labels() : syntheticGeography.labels());
+  const stageSize = $('globe-stage').getBoundingClientRect();
+  resize(stageSize.width, stageSize.height);
   $('loading').hidden = true;
   setRotation(state.autoRotate);
   zoomTo(state.distance);
@@ -247,10 +266,27 @@ async function main() {
   metricTime = performance.now();
   // Read-only instrumentation for manual profiling and end-to-end verification.
   window.EARTHXT_DEBUG = Object.freeze({ snapshot: ({ includeGeometry = false } = {}) => ({ ...state, lod: level.index, lodId: level.id,
-    ...renderer.metrics, fps, averageProjection, averageRender, averageLabels, frameNumber, loadedBytes: geography?.loadedBytes ?? 0,
+    ...renderer.metrics, ...placeLayer.snapshot(), fps, averageProjection, averageRender, averageLabels, frameNumber, loadedBytes: geography?.loadedBytes ?? 0,
     ...(includeGeometry ? renderer.labelSnapshot() : {}),
     countryCount: geography?.countries.length ?? 0, viewport: { ...renderer.viewport },
     reducedMotion: reducedMotion.matches, activePointers: pointers.size, ready: true }) });
+  const openHash = () => {
+    const id = parsePlaceHash(location.hash);
+    const place = places.find(item => item.id === id);
+    if (!place || !geography) return;
+    setRotation(false);
+    setSource('earth');
+    state.latitude = place.latitude;
+    state.longitude = place.longitude;
+    state.distance = LEVELS[2].targetDistance;
+    zoomTo(state.distance);
+    updateLOD(LEVELS[2]);
+    renderer.draw(state, level, geography, { labels: state.labels, places: true });
+    placeLayer.show(id);
+    dirty = true;
+  };
+  window.addEventListener('hashchange', openHash);
+  openHash();
   updateMetrics();
   if (!frameId) frameId = requestAnimationFrame(frame);
 }

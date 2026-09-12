@@ -1079,6 +1079,15 @@ function boot(win, doc) {
     $("dialog-title").textContent = flag("hyphens") ? hyphenate(place.name) : place.name;
     fillNative(place);
     $("dialog-loc").textContent = place.country + " — " + place.region;
+    let globeLink = $("dialog-globe");
+    if (!globeLink) {
+      globeLink = document.createElement("a");
+      globeLink.id = "dialog-globe";
+      globeLink.className = "dialog-globe";
+      globeLink.textContent = "See on the globe →";
+      $("dialog-loc").after(globeLink);
+    }
+    globeLink.href = "./earthxt/#/place/" + encodeURIComponent(place.id);
     $("dialog-tagline").textContent = place.tagline;
     storyEl.textContent = place.story;   // the accessible, un-hyphenated copy
     factEl.textContent = place.fact;

@@ -53,9 +53,8 @@ export function normalizeText(text) {
                  column would silently shift every line below it up a row —
                  and straight onto whatever already owns that row
      extraWidth  px of chrome each rendered line pays on top of the measured
-                 text — CSS letter-spacing paints one extra gap after the last
-                 grapheme that pretext does not count, so passing the role's
-                 letter-spacing keeps the routed width equal to the painted one
+                 text. Vendored pretext already includes terminal tracking;
+                 callers must not add letter spacing here again.
      startRow    row index the first entry of rowWidths stands for (default 0),
                  so a second call can continue below the first
      cursor      resume from a previous result's `cursor`

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { Script, runInNewContext } from 'node:vm';
-import { buildStandalone, bundleEarthxt } from '../../scripts/earthxt/standalone.mjs';
+import { buildStandalone, bundleEarthxt, bundlePageScripts } from '../../scripts/earthxt/standalone.mjs';
 
 test('standalone HTML embeds executable code, styles, and matching CSP hashes', async () => {
   const { html, output } = await buildStandalone();
@@ -44,7 +44,7 @@ test('bundled data loader loads the complete real geography using only embedded 
   assert.equal(sample.country, 0);
 });
 
-test('standalone embeds every pretext module and resolves the shared registry without atlas boot', async () => {
+test('standalone embeds pretext and metrics remain importable without atlas data', async () => {
   const { runtimeGraph } = await import('../../scripts/earthxt/graph.mjs');
   const { registryDocument } = await import('./fonts-fixture.mjs');
   const { html } = await buildStandalone();
@@ -64,4 +64,26 @@ test('standalone embeds every pretext module and resolves the shared registry wi
   assert.equal(role.font, `normal 10px ${readFontFamily(doc, '--font-mono')}`);
   assert.equal(role.lineHeight, 10);
   assert.equal(role.letterSpacing, 0.5);
+});
+
+
+test('page bundling executes classic atlas data before its dependent module', async () => {
+  const source = await readFile(new URL('../../js/data.js', import.meta.url), 'utf8');
+  const template = '<script src="../js/data.js"></script><script type="module" src="./probe.js"></script>';
+  const graph = new Map([
+    ['js/data.js', { bytes: Buffer.from(source) }],
+    ['earthxt/probe.js', { bytes: Buffer.from('window.observedPlaces = window.ATLAS_DATA.places.length;') }]
+  ]);
+  const window = {};
+  runInNewContext(bundlePageScripts(graph, template), { window });
+  assert.equal(window.observedPlaces, 40);
+  const { html } = await buildStandalone();
+  assert.match(html, /<html lang="en" data-standalone>/);
+  assert.ok(html.indexOf('window.ATLAS_DATA = Object.freeze') < html.indexOf('function boot(win, doc)'));
+  assert.match(html, /id="globe-markers"/);
+  for (const file of ['earthxt/places.js', 'earthxt/place-layer.js', 'js/hover-card.js']) assert.ok(html.includes(`modules[${JSON.stringify(file)}] =`));
+  // NUL and other HTML-normalized control bytes would invalidate CSP hashes.
+  for (const [file, { bytes }] of (await (await import('../../scripts/earthxt/graph.mjs')).runtimeGraph())) {
+    if (/\.(?:js|css|html)$/.test(file)) assert.doesNotMatch(bytes.toString('utf8'), /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/, file);
+  }
 });

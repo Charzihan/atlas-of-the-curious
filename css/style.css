@@ -1228,10 +1228,11 @@ dialog::backdrop {
 
 .map-card-name {
   display: block;
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 1.02rem;
   color: var(--ink);
   margin-bottom: 2px;
+  font: var(--font-hover-name);
+  line-height: var(--lh-hover-name);
+  letter-spacing: var(--ls-hover-name);
 }
 
 /* The native name, under the Latin one. `lang` and `dir` are written per
@@ -1251,11 +1252,12 @@ dialog::backdrop {
 
 .map-card-loc {
   display: block;
-  font-size: 0.66rem;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
   color: var(--ink-dim);
   margin-bottom: 8px;
+  font: var(--font-hover-loc);
+  line-height: var(--lh-hover-loc);
+  letter-spacing: var(--ls-hover-loc);
 }
 
 .map-card-tag {
@@ -1279,8 +1281,9 @@ dialog::backdrop {
 .map-card-cta {
   display: block;
   color: var(--accent, var(--gold));
-  font-size: 0.72rem;
-  letter-spacing: 0.04em;
+  font: var(--font-hover-cta);
+  line-height: var(--lh-hover-cta);
+  letter-spacing: var(--ls-hover-cta);
 }
 
 .card--lit {
@@ -1714,3 +1717,6 @@ dialog::backdrop {
 .map-art-inset { position: absolute; z-index: 7; }
 
 .dialog-map-actions[hidden], .map-art-inset[hidden] { display: none; }
+
+.dialog-globe { display: inline-block; font: var(--font-card-link); line-height: var(--lh-card-link); color: var(--gold); margin: 0 0 8px; }
+.dialog-globe:hover { text-decoration: underline; }

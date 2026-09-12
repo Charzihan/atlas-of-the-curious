@@ -11,6 +11,8 @@ const [tokens, atlasCSS, globeCSS, atlasHTML, globeHTML, sw] = await Promise.all
 ].map(read));
 // Source contracts only: these tests do not assert browser rendering or navigation.
 const palette = {
+  'category-geology': '#e8b45a', 'category-coastal': '#4fc3f7', 'category-desert': '#f0975a',
+  'category-forest': '#66bb6a', 'category-glacier': '#90caf9', 'category-sacred': '#ce93d8', 'category-urban': '#ef5350',
   bg: '#0b1020', 'bg-soft': '#101733', panel: '#141c3a', 'panel-2': '#1a2450',
   ink: '#e8ecf8', 'ink-dim': '#9aa4c8', gold: '#e8b45a',
   'gold-soft': 'rgba(232, 180, 90, 0.16)', line: 'rgba(154, 164, 200, 0.18)',
@@ -51,7 +53,7 @@ test('globe stylesheet derives every colour from the shared palette', () => {
   assert.doesNotMatch(css, /#[\da-f]{3,8}\b|\b(?:rgb|hsl|hwb|lab|lch|oklab|oklch)a?\(/i);
   const defined = new Set(declarations(tokens).map(([, key]) => key));
   for (const [, name] of css.matchAll(/var\((--[\w-]+)\)/g)) {
-    if (/^--(?:font|lh|ls)-/.test(name) || name === '--mono') continue;
+    if (/^--(?:font|lh|ls)-/.test(name) || name === '--mono' || name === '--accent') continue;
     assert.ok(defined.has(name), `${name} must come from the shared palette`);
   }
   for (const [, property, value] of css.matchAll(/(?:^|[;{])\s*(color|background(?:-color|-image)?|border(?:-color|-top|-bottom)?|outline|accent-color|box-shadow)\s*:\s*([^;}]+)/gm)) {
