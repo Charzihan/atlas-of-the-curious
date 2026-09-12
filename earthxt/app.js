@@ -1,3 +1,4 @@
+import { readFontRoles, readFontFamily } from '../js/text.js';
 import { HOME, EARTH_RADIUS_KM, MIN_DISTANCE, MAX_DISTANCE, clamp, wrapLongitude, distanceToZoom, zoomToDistance } from './geometry.js';
 import { LEVELS, selectLOD } from './lod.js';
 import { loadGeography, syntheticGeography } from './geography.js';
@@ -213,7 +214,11 @@ function setupControls() {
   });
 }
 async function main() {
-  renderer = new TextRenderer($('globe'), $('country-labels'));
+  const roles = readFontRoles(document, ['globe-label']);
+  if (!roles['globe-label']) throw new Error('The globe-label font role is missing.');
+  renderer = new TextRenderer($('globe'), $('country-labels'), {
+    label: roles['globe-label'], mono: readFontFamily(document, '--font-mono')
+  });
   setupControls();
   const observer = new ResizeObserver(entries => {
     const { width, height } = entries[0].contentRect;
@@ -229,6 +234,7 @@ async function main() {
     $('data-error').textContent = `${error.message} Showing synthetic geography. Reload to retry loading Earth.`;
     $('data-error').hidden = false;
   }
+  renderer.prepareLabels(geography ? geography.labels() : syntheticGeography.labels());
   $('loading').hidden = true;
   setRotation(state.autoRotate);
   zoomTo(state.distance);

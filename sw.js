@@ -8,11 +8,22 @@
    - Navigations: network-first (fresh content wins), cache as offline fallback.
    - Everything else: cache-first, falling back to network and caching the
      result so repeated visits are instant. */
-const CACHE = "atlas-of-the-curious-v5";
+const CACHE = "atlas-of-the-curious-v6";
 const CORE = [
   "/",
   "/index.html",
   "/css/style.css",
+  "/css/fonts.css",
+  "/earthxt/",
+  "/earthxt/index.html",
+  "/earthxt/styles.css",
+  "/earthxt/app.js",
+  "/earthxt/geometry.js",
+  "/earthxt/geography.js",
+  "/earthxt/lod.js",
+  "/earthxt/renderer.js",
+  "/earthxt/data/world.bin",
+  "/earthxt/data/world.json",
   "/css/place.css",
   "/js/data.js",
   "/js/landmap.js",
@@ -87,7 +98,7 @@ self.addEventListener("fetch", (e) => {
           return res;
         })
         .catch(() =>
-          caches.match(req).then((hit) => hit || caches.match("/index.html"))
+          caches.match(req).then((hit) => hit || caches.match(url.pathname.startsWith("/earthxt/") ? "/earthxt/index.html" : "/index.html"))
         )
     );
   } else {

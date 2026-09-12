@@ -4,19 +4,29 @@ import { readFile } from 'node:fs/promises';
 import { TextRenderer } from '../../earthxt/renderer.js';
 import { Geography } from '../../earthxt/geography.js';
 import { HOME, latLonToCartesian, project } from '../../earthxt/geometry.js';
+import { readFontRoles, readFontFamily } from '../../js/text.js';
+import { registryDocument } from './fonts-fixture.mjs';
 import { LEVELS } from '../../earthxt/lod.js';
 const raw = await readFile(new URL('../../earthxt/data/world.bin', import.meta.url));
 const meta = JSON.parse(await readFile(new URL('../../earthxt/data/world.json', import.meta.url), 'utf8'));
 const data = new Geography(meta, raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength));
 
+const doc = registryDocument();
+const fonts = { label: readFontRoles(doc, ['globe-label'])['globe-label'], mono: readFontFamily(doc, '--font-mono') };
+let measurements = 0;
+globalThis.OffscreenCanvas = class {
+  getContext() { return { measureText(text) { measurements++; return { width: [...text].length * 6 }; } }; }
+};
+
 // A canvas-command recorder checks the renderer's output without pretending to
 // measure browser painting or layout. The Playwright suite covers those APIs.
 export function recorder() {
   const marks = [];
-  const context = { setTransform() {}, clearRect() { marks.length = 0; }, measureText(text) { return { width: text.length * 6 }; },
+  const context = { setTransform() {}, clearRect() { marks.length = 0; }, measureText() { throw new Error('Renderer must use pretext'); },
     fillText(text, x, y) { marks.push({ text, x, y, color: this.fillStyle }); } };
   const canvas = { getContext: () => context };
-  const renderer = new TextRenderer(canvas, { append() {} });
+  const renderer = new TextRenderer(canvas, { append() {} }, fonts);
+  renderer.prepareLabels(data.labels());
   return { renderer, marks, canvas };
 }
 test('globe silhouette matches perspective radius; only text is drawn', () => {
@@ -79,5 +89,31 @@ test('projected country labels are visible, in bounds, and do not overlap', () =
     }
     assert.equal(renderer.draw(camera, LEVELS[2], data, { labels: false }).visibleLabels, 0);
     assert.ok([...renderer.labelNodes.values()].every(node => node.hidden));
+  } finally { globalThis.document = previousDocument; }
+});
+
+test('country names are prepared once per font and draw uses cached widths with CSS spacing', () => {
+  const previousDocument = globalThis.document;
+  globalThis.document = { createElement: () => ({ style: {}, hidden: true, textContent: '' }) };
+  try {
+    const { renderer } = recorder();
+    const first = renderer.labelMetrics;
+    const handle = first.get('CANADA');
+    assert.ok(handle.pre);
+    assert.equal(handle.width, 6 * 6 + 6 * fonts.label.letterSpacing + 22);
+    const measuredBefore = measurements;
+    renderer.prepareLabels(data.labels());
+    renderer.resize(1000, 800);
+    for (const longitude of [15, 25, -106]) {
+      renderer.draw({ latitude: 20, longitude, distance: 1.4 }, LEVELS[2], data, { labels: true });
+    }
+    assert.equal(measurements, measuredBefore, 'no text measurement during repeated preparation or frames');
+    assert.equal(first.get('CANADA'), handle);
+    renderer.fonts = { ...fonts, label: { ...fonts.label, font: fonts.label.font.replace('10px', '12px') } };
+    renderer.prepareLabels(data.labels());
+    assert.notEqual(renderer.labelMetrics.get('CANADA').pre, handle.pre);
+    renderer.fonts = fonts;
+    renderer.prepareLabels(data.labels());
+    assert.equal(renderer.labelMetrics.get('CANADA'), handle, 'returning to a font reuses its prepared handle');
   } finally { globalThis.document = previousDocument; }
 });

@@ -1,12 +1,14 @@
+import { prepareWithSegments, measureNaturalWidth } from '../vendor/pretext/layout.js';
 import { cameraBasis, latLonToCartesian, project, RAD } from './geometry.js';
 
 const PALETTE = ['#213e42', '#2e5558', '#3c6969', '#598580', '#45695a', '#73977a', '#a0bea0', '#c6dfb3', '#dfd4a6', '#dcad79', '#3b5651'];
-const MONO = '"SFMono-Regular", Consolas, "Liberation Mono", monospace';
 const MAX_CELLS = 24000;
 
 /** Display adapter: geography is painted exclusively with browser text glyphs. */
 export class TextRenderer {
-  constructor(canvas, labelLayer) {
+  constructor(canvas, labelLayer, fonts) {
+    this.fonts = fonts;
+    this.preparedLabels = new Map();
     this.canvas = canvas;
     this.context = canvas.getContext('2d', { alpha: true });
     if (!this.context) throw new Error('This browser cannot create a 2D text canvas.');
@@ -16,6 +18,23 @@ export class TextRenderer {
     this.metrics = { visibleGlyphs: 0, totalGlyphs: 0, projectionMs: 0, renderMs: 0, visibleLabels: 0 };
     this.cells = new Uint8Array(MAX_CELLS);
     this.variants = new Uint8Array(MAX_CELLS);
+  }
+  // Called at load/font changes, never by draw(): all names are ready before
+  // they reach the frame loop. Keep handles by font, spacing, and uppercase text.
+  prepareLabels(countries) {
+    const role = this.fonts.label;
+    const key = JSON.stringify([role.font, role.letterSpacing]);
+    let prepared = this.preparedLabels.get(key);
+    if (!prepared) { prepared = new Map(); this.preparedLabels.set(key, prepared); }
+    this.labelMetrics = prepared;
+    for (const country of countries) {
+      const text = country.name.toUpperCase();
+      if (prepared.has(text)) continue;
+      const pre = prepareWithSegments(text, role.font, { letterSpacing: role.letterSpacing });
+      // This vendored version includes terminal CSS spacing in natural width
+      // (line-break.js: finalizeLinePaintWidth). Add only padding/borders.
+      prepared.set(text, { pre, width: measureNaturalWidth(pre) + 22 });
+    }
   }
   resize(width, height, pixelRatio = 1) {
     const dpr = Math.min(pixelRatio, 2);
@@ -70,7 +89,7 @@ export class TextRenderer {
     const projected = performance.now();
     const ctx = this.context;
     ctx.clearRect(0, 0, width, height);
-    ctx.font = `${level.fontSize * scale}px ${MONO}`;
+    ctx.font = `${level.fontSize * scale}px ${this.fonts.mono}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     const oceanPhase = options.animateOcean ? Math.floor((options.time ?? 0) / 900) : 0;
@@ -108,11 +127,12 @@ export class TextRenderer {
         item = document.createElement('span');
         item.className = 'country-label';
         item.textContent = country.name.toUpperCase();
-        this.context.font = `10px ${MONO}`;
-        item.labelWidth = this.context.measureText(item.textContent).width + 22;
         this.labelLayer.append(item);
         this.labelNodes.set(country.id, item);
       }
+      const measured = this.labelMetrics?.get(item.textContent);
+      if (!measured) throw new Error('Country labels must be prepared before drawing.');
+      item.labelWidth = measured.width;
       const box = { x: point.x - item.labelWidth / 2, y: point.y - 12, width: item.labelWidth, height: 24 };
       if (box.x < 32 || box.y < 60 || box.x + box.width > width - 64 || box.y + box.height > height - 90) continue;
       if (occupied.some(other => box.x < other.x + other.width + 12 && box.x + box.width + 12 > other.x && box.y < other.y + other.height + 8 && box.y + box.height + 8 > other.y)) continue;

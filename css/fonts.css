@@ -1,0 +1,168 @@
+/* Shared typography for the atlas and its globe view. */
+:root {
+  /* ---------- Font role registry ----------
+     The single source of truth for every piece of text js/text.js measures.
+     Each role is a CSS font shorthand (`--font-<role>`) plus its line height
+     (`--lh-<role>`) and letter spacing (`--ls-<role>`). js/text.js reads these
+     three once at boot, resolves rem/em into px and turns `--font-<role>` into
+     a canvas font string; the rules below are written in terms of the very
+     same variables, so what the browser paints and what pretext measures
+     cannot drift apart.
+
+     Only NAMED faces appear in the stacks. A generic keyword such as
+     `ui-monospace` may resolve to a different face in a canvas 2D context
+     than in CSS, which would silently poison every measurement. */
+  --font-serif: Georgia, "Times New Roman", serif;
+  --font-sans: Verdana, Geneva, sans-serif;
+  --font-mono: SFMono-Regular, Menlo, Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace;
+
+  /* Grid card title — .card h3 */
+  --font-card-name: normal 1.15rem var(--font-serif);
+  --lh-card-name: 1.55;
+  --ls-card-name: 0px;
+
+  /* Grid card tagline — .card-tag */
+  --font-card-tagline: normal 0.92rem var(--font-serif);
+  --lh-card-tagline: 1.55;
+  --ls-card-tagline: 0px;
+
+  /* Grid card location line — .card-loc.
+     Rendered uppercase: measure the uppercased string, not the raw text. */
+  --font-card-loc: normal 0.72rem var(--font-sans);
+  --lh-card-loc: 1.55;
+  --ls-card-loc: 0.08em;
+
+  /* Grid card "read the field note" link — .card-more */
+  --font-card-link: normal 0.78rem var(--font-sans);
+  --lh-card-link: 1.55;
+  --ls-card-link: 0px;
+
+  /* Hero headline — .hero h1. The declared size is the ceiling of the fitting
+     search; js/app.js writes the chosen size into --hero-size and the matching
+     shrink-wrapped box into --hero-width, so the headline lands on exactly two
+     whole-word lines at every viewport. */
+  --font-hero-title: normal 3.2rem var(--font-serif);
+  --lh-hero-title: 1.12;
+  --ls-hero-title: 0px;
+
+  /* Long-form body copy — .dialog-story */
+  --font-story: normal 1rem var(--font-serif);
+  --lh-story: 1.55;
+  --ls-story: 0px;
+
+  /* Pulled-out italic line — .dialog-tagline */
+  --font-quote: italic 1.08rem var(--font-serif);
+  --lh-quote: 1.55;
+  --ls-quote: 0px;
+
+  /* The story's drop cap — .drop-cap. The declared size is only a fallback:
+     js/dialog.js sizes the cap to exactly DROP_CAP_LINES body lines and writes
+     the result into --dropcap-size, measuring at the same px size. */
+  --font-dropcap: normal 3rem var(--font-serif);
+  --lh-dropcap: 1;
+  --ls-dropcap: 0px;
+
+  /* Detail dialog metadata value — .field em, and the plain runs of the
+     rich inline flow that replaces it. */
+  --font-field: normal 0.9rem var(--font-serif);
+  --lh-field: 1.5;
+  --ls-field: 0px;
+
+  /* A month range or a distance lifted out of that metadata into a pill —
+     .chip-inline. The pill's own padding is caller-owned `extraWidth`. */
+  --font-field-chip: normal 0.72rem var(--font-sans);
+  --lh-field-chip: 1.5;
+  --ls-field-chip: 0.04em;
+
+  /* Filter chip label — .chip */
+  --font-chip: normal 0.82rem var(--font-sans);
+  --lh-chip: 1.55;
+  --ls-chip: 0px;
+
+  /* Name label pinned to the map grid — .map-label.
+     Rendered uppercase: measure the uppercased string, not the raw name. */
+  --font-map-label: normal 11px var(--font-mono);
+  --lh-map-label: 1.35;
+  --ls-map-label: 0.05em;
+
+  /* Sea name drawn into the water (no element uses it yet) */
+  --font-ocean-label: normal 0.62rem var(--font-mono);
+  --lh-ocean-label: 1.4;
+  --ls-ocean-label: 0.18em;
+
+  /* Marker hover card tagline — .map-card-tag */
+  --font-hover-card: normal 0.72rem var(--font-mono);
+  --lh-hover-card: 1.5;
+  --ls-hover-card: 0px;
+
+  /* Field-notebook body copy — .notebook-input (the visitor's own note) and
+     the read-only copy the reader sets at the end of a place's pages. Both are
+     laid out in pretext's `pre-wrap` mode, so the visitor's own line breaks
+     and tabs survive; the textarea's rules below must therefore declare
+     `white-space: pre-wrap` and `tab-size: 8` to match what pretext models. */
+  --font-notebook: normal 0.95rem var(--font-serif);
+  --lh-notebook: 1.6;
+  --ls-notebook: 0px;
+
+  /* ---------- Phase 6: the field guide (js/reader.js) ----------
+     The four roles the paginated reader sets. Every page's height is counted
+     in whole `book-body` lines, so --lh-book-body is the quantum the whole
+     book is measured in. */
+
+  /* The reader's body copy — .book-line */
+  --font-book-body: normal 1.02rem var(--font-serif);
+  --lh-book-body: 1.62;
+  --ls-book-body: 0px;
+
+  /* A place's name at the head of its first page — .book-title */
+  --font-book-title: normal 1.62rem var(--font-serif);
+  --lh-book-title: 1.24;
+  --ls-book-title: 0px;
+
+  /* "COUNTRY · REGION" under it — .book-meta. Rendered as-is: js/reader.js
+     uppercases the string before measuring it, so no `text-transform` here. */
+  --font-book-meta: normal 0.7rem var(--font-sans);
+  --lh-book-meta: 1.5;
+  --ls-book-meta: 0.12em;
+
+  /* The tagline that closes the heading block — .book-tagline */
+  --font-book-tagline: italic 1.02rem var(--font-serif);
+  --lh-book-tagline: 1.5;
+  --ls-book-tagline: 0px;
+
+  /* ---------- Phase 4: the name in its own script ----------
+     There are no web fonts here, so a script the serif/mono stacks do not
+     cover falls through to whatever face the system has for it. Canvas takes
+     exactly the same fallback path as CSS, which is why pretext and the
+     browser still agree on where the line breaks — on a machine with no CJK
+     or Arabic face at all the glyphs render as tofu, but they wrap in the
+     same places and the boxes are the same size. */
+
+  /* Hover card and dialog — .map-card-native, .dialog-native */
+  --font-native-name: normal 0.92rem var(--font-serif);
+  --lh-native-name: 1.6;
+  --ls-native-name: 0px;
+
+  /* Grid card, under the Latin name — .card-native */
+  --font-card-native: normal 0.8rem var(--font-serif);
+  --lh-card-native: 1.55;
+  --ls-card-native: 0px;
+
+  /* The map label's middle line — .map-label-native. The map-label font, but
+     never uppercased: `text-transform` is a Latin idea. */
+  --font-map-label-native: normal 11px var(--font-mono);
+  --lh-map-label-native: 1.35;
+  --ls-map-label-native: 0.05em;
+
+  /* The bold half of a highlighted search match — .card-tag .hl. Same family
+     and size as --font-card-tagline, one weight up, so the rich-inline flow
+     can measure the two runs against each other. */
+  --font-card-tagline-strong: bold 0.92rem var(--font-serif);
+  --lh-card-tagline-strong: 1.55;
+  --ls-card-tagline-strong: 0px;
+
+  /* Country names on the globe — .country-label, rendered uppercase. */
+  --font-globe-label: normal 10px var(--font-mono);
+  --lh-globe-label: 1;
+  --ls-globe-label: 0.05em;
+}

@@ -1,4 +1,4 @@
-> **Earthxt MVP:** The new interactive text globe lives at [`/earthxt/`](earthxt/). See the [Earthxt guide](earthxt/README.md) for architecture, controls, data, tests, and static deployment. Run `npm start`, then open `http://localhost:8000/earthxt/`.
+> **Earthxt:** The atlas’s interactive globe view lives at [`/earthxt/`](earthxt/). See the [Earthxt guide](earthxt/README.md) for architecture, controls, data, tests, and static deployment. Run `npm start`, then open `http://localhost:8000/earthxt/`.
 
 # Atlas of the Curious
 
@@ -329,10 +329,12 @@ Run it after any change to the layout, the fonts or the map.
 ## Text metrics and the font role registry
 
 Every piece of text the site needs to reason about (rather than merely paint)
-belongs to a **font role**. The roles live in `css/style.css` as three custom
+belongs to a **font role**. The roles live in shared `css/fonts.css` as three custom
 properties each — `--font-<role>` (a CSS `font` shorthand), `--lh-<role>` and
 `--ls-<role>` — and the rules that render them are written in terms of those
-same variables, so the painted font and the measured font cannot drift apart:
+same variables, so the painted font and the measured font cannot drift apart.
+The atlas imports the registry from `css/style.css`; Earthxt links it before its
+own styles and uses the `globe-label` role for country names:
 
 ```css
 --font-card-name: normal 1.15rem var(--font-serif);
@@ -591,7 +593,8 @@ Two notes before you ship:
 
 ```
 index.html        — page shell + strict CSP + Open Graph meta
-css/style.css     — all styling (no external assets)
+css/fonts.css     — shared font family and role registry for atlas and globe
+css/style.css     — atlas styling; imports fonts.css (no external assets)
 css/place.css     — styling for the generated per-place share pages
 js/data.js        — the dataset (40 places, 7 categories; every place also
                     carries nativeName + nativeLang)

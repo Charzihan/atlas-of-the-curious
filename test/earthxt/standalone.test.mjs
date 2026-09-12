@@ -43,3 +43,25 @@ test('bundled data loader loads the complete real geography using only embedded 
   geography.sample(0, -140, { id: 'planet' }, sample);
   assert.equal(sample.country, 0);
 });
+
+test('standalone embeds every pretext module and resolves the shared registry without atlas boot', async () => {
+  const { runtimeGraph } = await import('../../scripts/earthxt/graph.mjs');
+  const { registryDocument } = await import('./fonts-fixture.mjs');
+  const { html } = await buildStandalone();
+  for (const file of (await runtimeGraph()).keys()) {
+    if (file.startsWith('vendor/pretext/')) assert.ok(html.includes(`modules[${JSON.stringify(file)}] =`), file);
+  }
+  assert.ok(html.includes('function prepareWithSegments('));
+  assert.ok(html.includes('function measureNaturalWidth('));
+  const style = html.match(/<style>([\s\S]*?)<\/style>/)[1];
+  assert.ok(style.indexOf('--font-mono:') < style.indexOf('--mono:'));
+  const doc = registryDocument(style);
+  const win = {};
+  const code = await bundleEarthxt('../js/text.js');
+  const { readFontRoles, readFontFamily } = runInNewContext(code, { document: doc, window: win });
+  assert.equal(win.ATLAS_TEXT_READY, undefined, 'globe imports must not boot atlas');
+  const role = readFontRoles(doc, ['globe-label'])['globe-label'];
+  assert.equal(role.font, `normal 10px ${readFontFamily(doc, '--font-mono')}`);
+  assert.equal(role.lineHeight, 10);
+  assert.equal(role.letterSpacing, 0.5);
+});

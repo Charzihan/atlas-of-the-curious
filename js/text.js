@@ -13,7 +13,7 @@
                         lineHeight: <px>, letterSpacing: <px> } }
 
    2. A main-thread boot section that reads the font-role registry out of
-      css/style.css (the single source of truth: --font-<role>, --lh-<role>,
+      css/fonts.css (the single source of truth: --font-<role>, --lh-<role>,
       --ls-<role>), resolves rem/em into px, prepares every place's name,
       tagline and story once, and publishes the instance as `window.ATLAS_TEXT`
       plus an `atlas:text-ready` event — js/app.js is a classic script and
@@ -396,7 +396,7 @@ export function createMetrics(fontRoles) {
       if (!localizedQueue.length) return out;
       const groups = new Map();
       for (const q of localizedQueue) {
-        const key = q.locale + " " + q.wordBreak;
+        const key = q.locale + "\u0000" + q.wordBreak;
         let g = groups.get(key);
         if (!g) { g = []; groups.set(key, g); }
         g.push(q);
@@ -654,14 +654,12 @@ function lineText(l) { return l.text; }
 // Keep the existing candidate sizes and rounded 1.26 line heights together.
 export const MAP_STORY_TYPE = Object.freeze({
   familyProperty: "--font-serif",
-  familyFallback: "Georgia, serif",
   candidates: Object.freeze([14, 13, 12, 11, 10].map(size => Object.freeze({ size, lineHeight: Math.round(size * 1.26) }))),
   inset: Object.freeze({ size: 12, lineHeight: 16 })
 });
 
 export function readMapStoryFamily(doc) {
-  return doc.defaultView.getComputedStyle(doc.documentElement)
-    .getPropertyValue(MAP_STORY_TYPE.familyProperty).trim() || MAP_STORY_TYPE.familyFallback;
+  return readFontFamily(doc, MAP_STORY_TYPE.familyProperty);
 }
 
 // Every role the site knows about. Roles nothing renders yet still resolve, so
@@ -679,6 +677,7 @@ export const ROLE_NAMES = [
   "field-chip",
   "chip",
   "map-label",
+  "globe-label",
   "ocean-label",
   "hover-card",
   "notebook",
@@ -738,6 +737,12 @@ function round2(n) { return Math.round(n * 100) / 100; }
 
 // Read the whole registry out of the document's computed style. One pass at
 // boot; nothing here runs in a hot path.
+export function readFontFamily(doc, property) {
+  const family = doc.defaultView.getComputedStyle(doc.documentElement).getPropertyValue(property).trim();
+  if (!family) throw new Error('atlas/text: missing font family ' + property);
+  return family;
+}
+
 export function readFontRoles(doc, names) {
   const view = doc.defaultView;
   const rootStyle = view.getComputedStyle(doc.documentElement);
@@ -961,6 +966,7 @@ function boot(win, doc) {
   }
 }
 
-if (typeof document !== "undefined" && typeof window !== "undefined") {
+// Shared consumers can read the registry without starting the atlas application.
+if (typeof document !== "undefined" && typeof window !== "undefined" && window.ATLAS_DATA) {
   boot(window, document);
 }
