@@ -1,4 +1,4 @@
-import { readFontRoles, readFontFamily } from '../js/text.js';
+import { readFontRoles, readFontFamily, readMapStoryFamily } from '../js/text.js';
 import { HOME, EARTH_RADIUS_KM, MIN_DISTANCE, MAX_DISTANCE, clamp, wrapLongitude, distanceToZoom, zoomToDistance } from './geometry.js';
 import { LEVELS, selectLOD } from './lod.js';
 import { loadGeography, syntheticGeography } from './geography.js';
@@ -9,7 +9,7 @@ import { readCategoryColors } from '../js/category-colors.js';
 
 const $ = id => document.getElementById(id);
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
-const state = { ...HOME, targetDistance: HOME.distance, autoRotate: !reducedMotion.matches, source: 'earth', labels: true, grid: false };
+const state = { ...HOME, targetDistance: HOME.distance, autoRotate: !reducedMotion.matches, source: 'earth', labels: true, grid: false, serif: false };
 let geography = null, renderer, level = selectLOD(distanceToZoom(state.distance));
 let dirty = true, lastTime = 0, lastOceanPhase = -1, frameId = 0, metricTime = 0, renderedFrames = 0;
 let fps = 0, projectionSum = 0, renderSum = 0, averageProjection = 0, averageRender = 0;
@@ -51,8 +51,22 @@ function setSource(source) {
   $('live-status').textContent = source === 'earth' ? 'Showing Earth geography.' : 'Showing invented synthetic geography.';
   dirty = true;
 }
+function prepareSerif() {
+  if (!state.serif) return;
+  const toggle = $('serif-toggle');
+  toggle.setAttribute('aria-busy', 'true');
+  renderer.preparePalette(level).then(entry => {
+    // A late palette can populate the cache, but cannot activate a stale
+    // size/LOD or re-enable a switch the user has since turned off.
+    if (!state.serif || renderer.paletteFor(level) !== entry) return;
+    toggle.setAttribute('aria-busy', 'false');
+    $('live-status').textContent = entry.status === 'ready' ? 'Measured glyphs ready.' : entry.reason;
+    dirty = true;
+  });
+}
 function updateLOD(next) {
   level = next;
+  prepareSerif();
   for (const button of document.querySelectorAll('[data-level]')) {
     const active = Number(button.dataset.level) === next.index;
     button.classList.toggle('is-active', active);
@@ -122,7 +136,7 @@ function frame(time) {
   if (oceanPhase !== lastOceanPhase) { dirty = true; lastOceanPhase = oceanPhase; }
   if (dirty) {
     const metrics = renderer.draw(state, level, state.source === 'earth' && geography ? geography : syntheticGeography,
-      { labels: state.labels, places: state.source === 'earth', grid: state.grid, animateOcean: !reducedMotion.matches, time });
+      { labels: state.labels, places: state.source === 'earth', grid: state.grid, serif: state.serif, animateOcean: !reducedMotion.matches, time });
     renderedFrames++;
     frameNumber++;
     projectionSum += metrics.projectionMs;
@@ -207,6 +221,15 @@ function setupControls() {
   for (const button of document.querySelectorAll('[data-level]')) button.addEventListener('click', () => zoomTo(LEVELS[Number(button.dataset.level)].targetDistance));
   $('labels-toggle').addEventListener('change', event => { state.labels = event.target.checked; dirty = true; });
   $('grid-toggle').addEventListener('change', event => { state.grid = event.target.checked; dirty = true; });
+  $('serif-toggle').addEventListener('change', event => {
+    state.serif = event.target.checked;
+    event.target.setAttribute('aria-busy', 'false');
+    if (state.serif) {
+      $('live-status').textContent = 'Preparing measured glyphs…';
+      prepareSerif();
+    }
+    dirty = true;
+  });
   $('source-earth').addEventListener('click', () => setSource('earth'));
   $('source-synthetic').addEventListener('click', () => setSource('synthetic'));
   $('debug-toggle').addEventListener('click', () => toggleDebug());
@@ -231,7 +254,7 @@ async function main() {
   const roles = readFontRoles(document, ['globe-label', 'map-label', 'hover-card', 'native-name', 'hover-name', 'hover-loc', 'hover-cta']);
   if (!roles['globe-label']) throw new Error('The globe-label font role is missing.');
   renderer = new TextRenderer($('globe'), $('country-labels'), {
-    label: roles['globe-label'], mono: readFontFamily(document, '--font-mono')
+    label: roles['globe-label'], mono: readFontFamily(document, '--font-mono'), serif: readMapStoryFamily(document)
   });
   placeLayer = new PlaceLayer($('globe-stage'), $('globe-markers'), places, roles,
     readCategoryColors(document, window.ATLAS_DATA.categories), {
@@ -242,6 +265,7 @@ async function main() {
   const resize = (width, height) => {
     if (width <= 0 || height <= 0) return;
     renderer.resize(width, height, devicePixelRatio);
+    prepareSerif();
     placeLayer.resize(width, height);
     dirty = true;
   };
@@ -267,6 +291,7 @@ async function main() {
   metricTime = performance.now();
   // Read-only instrumentation for manual profiling and end-to-end verification.
   window.EARTHXT_DEBUG = Object.freeze({ snapshot: ({ includeGeometry = false } = {}) => ({ ...state, lod: level.index, lodId: level.id,
+    serifPalette: renderer.paletteSnapshot(level),
     ...renderer.metrics, ...placeLayer.snapshot(), fps, averageProjection, averageRender, averageLabels, frameNumber, loadedBytes: geography?.loadedBytes ?? 0,
     ...(includeGeometry ? renderer.labelSnapshot() : {}),
     countryCount: geography?.countries.length ?? 0, viewport: { ...renderer.viewport },
@@ -282,7 +307,7 @@ async function main() {
     state.distance = LEVELS[2].targetDistance;
     zoomTo(state.distance);
     updateLOD(LEVELS[2]);
-    renderer.draw(state, level, geography, { labels: state.labels, places: true });
+    renderer.draw(state, level, geography, { labels: state.labels, places: true, grid: state.grid, serif: state.serif });
     placeLayer.show(id);
     dirty = true;
   };

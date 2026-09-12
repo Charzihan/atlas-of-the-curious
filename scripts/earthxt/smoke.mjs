@@ -44,6 +44,54 @@ function assertSilhouetteContainment(snapshot) {
   }
 }
 
+// Instrument only explicit comparison frames; restore native submission before
+// profiling. The source of truth is the actual canvas commands, not the ramp.
+async function captureInk(page) {
+  return page.evaluate(async () => {
+    const canvas = document.getElementById('globe'), ctx = canvas.getContext('2d');
+    const fillText = ctx.fillText, clearRect = ctx.clearRect;
+    let marks = [];
+    ctx.fillText = function (text, x, y, ...rest) {
+      marks.push({ text, x, y, font: this.font });
+      return fillText.call(this, text, x, y, ...rest);
+    };
+    ctx.clearRect = function (...args) { marks = []; return clearRect.apply(this, args); };
+    try {
+      document.getElementById('grid-toggle').dispatchEvent(new Event('change'));
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const state = EARTHXT_DEBUG.snapshot({ includeGeometry: true });
+      const raster = marks.slice(0, state.visibleGlyphs);
+      return { glyphs: [...new Set(raster.map(mark => mark.text))].sort(),
+        rasterText: raster.map(mark => mark.text).join(''),
+        rasterFonts: [...new Set(raster.map(mark => mark.font))],
+        overlays: marks.slice(state.visibleGlyphs), grid: state.grid, labelPlacements: state.labelPlacements,
+        markers: state.markers, placeLabels: state.placeLabels,
+        nodes: [...document.querySelectorAll('.country-label, .globe-marker')].map(node => ({ hidden: node.hidden, transform: node.style.transform })) };
+    } finally { ctx.fillText = fillText; ctx.clearRect = clearRect; }
+  });
+}
+
+async function assertSerifToggle(page) {
+  await page.waitForFunction(() => {
+    const state = EARTHXT_DEBUG.snapshot();
+    return !state.autoRotate && state.distance === state.targetDistance;
+  });
+  const mono = await captureInk(page);
+  await page.locator('#serif-toggle').focus();
+  await page.keyboard.press('Space');
+  await page.waitForFunction(() => EARTHXT_DEBUG.snapshot().serifActive, null, { timeout: 15000 });
+  assert.ok(await page.locator('#serif-toggle').isChecked());
+  assert.equal(await page.locator('#serif-toggle').getAttribute('aria-busy'), 'false');
+  const serif = await captureInk(page);
+  assert.notDeepEqual(serif.glyphs, mono.glyphs, 'toggling changes the submitted raster glyph set');
+  assert.notDeepEqual(serif.rasterFonts, mono.rasterFonts);
+  const ramp = await page.evaluate(() => EARTHXT_DEBUG.snapshot().serifPalette.ramp.map(g => g.glyph));
+  assert.ok(serif.glyphs.every(glyph => ramp.includes(glyph)));
+  for (const key of ['overlays', 'grid', 'labelPlacements', 'markers', 'placeLabels', 'nodes']) {
+    assert.deepEqual(serif[key], mono[key], `${key} stays at the same pixels when Serif is toggled`);
+  }
+}
+
 let server, browser;
 try {
   const standalone = await buildStandalone();
@@ -123,6 +171,35 @@ try {
   console.log('Countries auto-rotation timing:', JSON.stringify(timing));
   await page.locator('#rotate-toggle').click();
   assertSilhouetteContainment(await page.evaluate(() => EARTHXT_DEBUG.snapshot({ includeGeometry: true })));
+  await assertSerifToggle(page);
+  await page.screenshot({ path: new URL('../../test-results/earthxt/countries-serif.png', import.meta.url).pathname, fullPage: true });
+  // Cached palettes must hold the Countries auto-rotation submission budget.
+  await page.locator('#rotate-toggle').click();
+  const serifRotation = await page.evaluate(async () => {
+    const samples = [], start = performance.now();
+    let frame = -1, previous = 0;
+    while (performance.now() - start < 2000) {
+      const time = await new Promise(resolve => requestAnimationFrame(resolve));
+      const state = EARTHXT_DEBUG.snapshot();
+      if (frame === state.frameNumber) continue;
+      if (previous) samples.push({ intervalMs: time - previous, cpuMs: state.projectionMs + state.renderMs,
+        labelMs: state.labelMs, serifActive: state.serifActive, lod: state.lod, labels: state.labels });
+      frame = state.frameNumber; previous = time;
+    }
+    return samples;
+  });
+  assert.ok(serifRotation.length > 1);
+  const serifP95 = key => serifRotation.map(sample => sample[key]).sort((a, b) => a - b)[Math.floor((serifRotation.length - 1) * 0.95)];
+  const serifTiming = { cpuMs: serifP95('cpuMs'), intervalMs: serifP95('intervalMs'), labelMs: serifP95('labelMs'), mono: timing };
+  await writeFile(new URL('../../test-results/earthxt/serif-timing.json', import.meta.url), JSON.stringify({ timing: serifTiming, samples: serifRotation }, null, 2) + '\n');
+  console.log('Countries Serif auto-rotation timing:', JSON.stringify(serifTiming));
+  assert.ok(serifRotation.every(sample => sample.serifActive && sample.lod === 2 && sample.labels));
+  assert.ok(serifTiming.cpuMs < 33.4, 'Serif p95 CPU submission stays below 33.4 ms');
+  assert.ok(serifTiming.intervalMs < 50, 'Serif p95 frame interval stays below 50 ms');
+  assert.ok(serifTiming.cpuMs <= Math.max(8, timing.cpuMs.p95 * 1.35), 'Serif keeps the mono CPU budget within 35% (8 ms floor)');
+  await page.locator('#rotate-toggle').click();
+  await page.locator('#serif-toggle').uncheck();
+  await page.waitForFunction(() => !EARTHXT_DEBUG.snapshot().serifActive);
   await page.locator('#labels-toggle').uncheck();
   await page.waitForFunction(() => EARTHXT_DEBUG.snapshot().visibleLabels === 0);
   const hiddenNames = await page.evaluate(() => EARTHXT_DEBUG.snapshot({ includeGeometry: true }));
@@ -154,6 +231,12 @@ try {
   assert.equal((await snapshot()).reducedMotion, true);
   // Startup with reduced motion must also remain still.
   await page.reload(); await page.waitForFunction(() => window.EARTHXT_DEBUG?.snapshot().visibleGlyphs > 0);
+  assert.equal((await snapshot()).autoRotate, false);
+  await assertSerifToggle(page);
+  const reducedInk = await captureInk(page), reducedState = await snapshot();
+  await page.waitForTimeout(1000);
+  assert.equal((await captureInk(page)).rasterText, reducedInk.rasterText, 'reduced motion keeps every ocean glyph still');
+  assert.equal((await snapshot()).longitude, reducedState.longitude);
   assert.equal((await snapshot()).autoRotate, false);
   // Place deep links set the camera and open a card before interaction.
   await page.goto(server.origin + '/dist/earthxt/#/place/salar-de-uyuni');
@@ -273,6 +356,7 @@ try {
   assert.equal(await offline.evaluate(() => EARTHXT_DEBUG.snapshot().placeCount), 40);
   const offlineCard = offline.locator('#globe-place-card');
   assert.ok(await offlineCard.isVisible());
+  await assertSerifToggle(offline);
   assert.equal(await offlineCard.locator('a').count(), 0);
   const excerpt = await offlineCard.locator('.map-card-cta').innerText();
   assert.ok(excerpt.length > 40);
@@ -283,7 +367,7 @@ try {
   assert.ok(await offlineCard.isVisible());
   assert.deepEqual(externalRequests, []);
   assert.deepEqual(errors, []);
-  console.log('PASS: deployed subpath, all LODs, drag, wheel, zoom limits, silhouette name containment, rotation timing sample, labels toggle, source modes, keyboard, dialogs, reduced motion, mobile layout, touch rotation/pinch/cancel, load-error fallback, and standalone file without HTTP access.');
+  console.log('PASS: deployed subpath, all LODs, drag, wheel, zoom limits, silhouette name containment, rotation timing, Serif glyphs/placement/performance, labels toggle, source modes, keyboard, dialogs, reduced motion, mobile layout, touch rotation/pinch/cancel, load-error fallback, and standalone file without HTTP access.');
   console.log('Browser captures: test-results/earthxt/');
 } catch (error) {
   console.error(`Earthxt browser smoke failed: ${error.message}`);

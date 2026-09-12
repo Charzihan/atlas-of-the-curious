@@ -1,6 +1,7 @@
 import { measureNaturalWidth } from '../vendor/pretext/layout.js';
 import { prepareFlowText, flowIntoSlots, boxesOverlap } from '../js/map-art.js';
 import { cameraBasis, latLonToCartesian, project, RAD } from './geometry.js';
+import { InkPaletteCache } from './ink-palette.js';
 
 const PALETTE = ['#213e42', '#2e5558', '#3c6969', '#598580', '#45695a', '#73977a', '#a0bea0', '#c6dfb3', '#dfd4a6', '#dcad79', '#3b5651'];
 const MAX_CELLS = 24000;
@@ -77,6 +78,9 @@ export class TextRenderer {
     this.metrics = { visibleGlyphs: 0, totalGlyphs: 0, projectionMs: 0, renderMs: 0, labelMs: 0, placeLabelMs: 0, placeRenderMs: 0, visibleMarkers: 0, labelledPlaces: 0, visibleLabels: 0, silhouetteLabels: 0, fallbackLabels: 0 };
     this.cells = new Uint8Array(MAX_CELLS);
     this.variants = new Uint8Array(MAX_CELLS);
+    this.tones = new Uint8Array(MAX_CELLS);
+    this.palettes = new InkPaletteCache();
+    this.dpr = 1;
     this.countryIds = new Uint8Array(MAX_CELLS);
     this.blockedCells = new Uint8Array(MAX_CELLS);
     this.labelPlacements = [];
@@ -146,16 +150,38 @@ export class TextRenderer {
   }
   resize(width, height, pixelRatio = 1) {
     const dpr = Math.min(pixelRatio, 2);
+    this.dpr = dpr;
     this.viewport = { width, height, focal: Math.min(width, height) * 1.15 };
     this.canvas.width = Math.round(width * dpr);
     this.canvas.height = Math.round(height * dpr);
     this.context.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
+  rasterGeometry(level) {
+    const { width, height } = this.viewport;
+    const scale = Math.max(1, Math.sqrt((width / level.cellWidth) * (height / level.cellHeight) / MAX_CELLS));
+    return { scale, cellWidth: level.cellWidth * scale, cellHeight: level.cellHeight * scale };
+  }
+  // Input, resize and LOD changes request preparation; draw only looks up a
+  // completed entry. The async builder never measures in the calling task.
+  preparePalette(level) {
+    const { cellWidth, cellHeight } = this.rasterGeometry(level);
+    return this.palettes.prepare(this.fonts.serif, cellWidth, cellHeight, this.dpr);
+  }
+  paletteFor(level) {
+    const { cellWidth, cellHeight } = this.rasterGeometry(level);
+    return this.palettes.get(this.fonts.serif, cellWidth, cellHeight, this.dpr);
+  }
+  paletteSnapshot(level) {
+    const entry = this.paletteFor(level);
+    return entry ? { key: entry.key, status: entry.status, reason: entry.reason,
+      font: entry.palette?.font, ramp: entry.palette?.ramp.map(glyph => ({ ...glyph })) } : { status: 'unprepared' };
+  }
   draw(camera, level, geography, options = {}) {
     const start = performance.now();
     const { width, height, focal } = this.viewport;
-    const scale = Math.max(1, Math.sqrt((width / level.cellWidth) * (height / level.cellHeight) / MAX_CELLS));
-    const cellWidth = level.cellWidth * scale, cellHeight = level.cellHeight * scale;
+    const { scale, cellWidth, cellHeight } = this.rasterGeometry(level);
+    const entry = options.serif && this.paletteFor(level);
+    const ink = entry?.status === 'ready' ? entry : null;
     const cols = Math.floor(width / cellWidth), rows = Math.floor(height / cellHeight);
     const xOffset = (width - cols * cellWidth) / 2 + cellWidth / 2;
     const yOffset = (height - rows * cellHeight) / 2 + cellHeight / 2;
@@ -192,6 +218,7 @@ export class TextRenderer {
         this.blockedCells[index] = sample.country || farX * farX + farY * farY >= focal * focal / (d2 - 1) ? 1 : 0;
         const facing = (distance * z - 1) / Math.hypot(x, y, distance - z);
         const light = Math.max(0, Math.min(3, Math.floor((facing * 0.85 - x * 0.24 + y * 0.1) * 4)));
+        this.tones[index] = sample.coast ? 4 : light;
         let color = sample.country ? 4 + (level.labels ? Math.max(1, light) : light) : light;
         let variant = sample.country ? 1 : 0;
         if (sample.coast && level.index > 0) { color = 8; variant = 2; }
@@ -205,8 +232,8 @@ export class TextRenderer {
     const projected = performance.now();
     const ctx = this.context;
     ctx.clearRect(0, 0, width, height);
-    ctx.font = `${level.fontSize * scale}px ${this.fonts.mono}`;
-    ctx.textAlign = 'center';
+    ctx.font = ink ? ink.palette.font : `${level.fontSize * scale}px ${this.fonts.mono}`;
+    ctx.textAlign = ink ? 'left' : 'center';
     ctx.textBaseline = 'middle';
     if (this.nativeSpacing) ctx.letterSpacing = '0px';
     const oceanPhase = options.animateOcean ? Math.floor((options.time ?? 0) / 900) : 0;
@@ -219,6 +246,15 @@ export class TextRenderer {
           const index = row * cols + col;
           if (this.cells[index] !== color + 1) continue;
           const variant = this.variants[index];
+          if (ink) {
+            const ripple = (row * 13 + col * 7 + oceanPhase) % 17 === 0;
+            const glyph = this.countryIds[index] ? ink.land[this.tones[index]]
+              : ink.ocean[ripple ? 1 + oceanPhase % (ink.ocean.length - 1) : 0];
+            // Match the palette probe: middle baseline, centred by measured
+            // advance. Cell geometry and every overlay remain unchanged.
+            ctx.fillText(glyph.glyph, xOffset + col * cellWidth - glyph.width / 2, yOffset + row * cellHeight);
+            continue;
+          }
           let glyph = glyphs[variant];
           if (variant === 0 && (row * 13 + col * 7 + oceanPhase) % 17 === 0) glyph = '~';
           if (variant === 1 && level.index === 0 && (row + col) % 5 === 0) glyph = '+';
@@ -244,7 +280,8 @@ export class TextRenderer {
     const silhouetteLabels = this.labelPlacements.filter(label => label.mode === 'silhouette').length;
     this.metrics = { visibleGlyphs: visible, totalGlyphs: cols * rows, projectionMs: projected - start,
       renderMs: performance.now() - projected, labelMs, visibleLabels, silhouetteLabels,
-      fallbackLabels: visibleLabels - silhouetteLabels, placeLabelMs: 0, ...placeMetrics, placeRenderMs, cellWidth, cellHeight };
+      fallbackLabels: visibleLabels - silhouetteLabels, placeLabelMs: 0, ...placeMetrics, placeRenderMs, cellWidth, cellHeight,
+      serifActive: Boolean(ink) };
     return this.metrics;
   }
   drawLabels(camera, level, geography, enabled) {

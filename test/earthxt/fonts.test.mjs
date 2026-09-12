@@ -37,7 +37,9 @@ test('Earthxt JavaScript contains no font family literals or frame-time measurem
     const source = await readFile(new URL(`earthxt/${file}`, root), 'utf8');
     for (const family of families) {
       const escaped = family.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      assert.doesNotMatch(source, new RegExp(`['"\x60][^'"\x60\\n]*\\b${escaped}\\b[^'"\x60\\n]*['"\x60]`, 'i'), file);
+      // Match whole family names, including inside CSS shorthands/stacks,
+      // without mistaking a hyphenated control id for a font family value.
+      assert.doesNotMatch(source, new RegExp(`['"\x60][^'"\x60\\n]*(?<![\\w-])${escaped}(?![\\w-])[^'"\x60\\n]*['"\x60]`, 'i'), file);
     }
     if (file === 'renderer.js') {
       // Canvas ink bounds are needed at preparation, but advances still come

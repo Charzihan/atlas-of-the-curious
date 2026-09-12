@@ -46,7 +46,7 @@ function inkContext(w, h) {
 // integer device-pixel padding preserves that cell's subpixel raster phase.
 // Fractional edge pixels contribute in proportion to their overlap with the
 // cell. `spill` counts ink outside any edge, not only the neighbouring rows.
-function measureGlyphs(font, charW, lineH, dpr, glyphs, advance) {
+function* measureGlyphs(font, charW, lineH, dpr, glyphs, advance) {
   const cellW = charW * dpr, cellH = lineH * dpr;
   const pad = Math.ceil(Math.max(charW, lineH, parseFloat(font)) * dpr) + 2;
   const w = Math.ceil(cellW) + pad * 2, h = Math.ceil(cellH) + pad * 2;
@@ -58,7 +58,8 @@ function measureGlyphs(font, charW, lineH, dpr, glyphs, advance) {
   ctx.textBaseline = 'middle';
   ctx.fillStyle = '#fff';
   try {
-    const measured = glyphs.map(glyph => {
+    const measured = [];
+    for (const glyph of glyphs) {
       const width = advance(glyph);
       ctx.clearRect(0, 0, w / dpr, h / dpr);
       ctx.fillText(glyph, pad / dpr + (charW - width) / 2, pad / dpr + lineH / 2);
@@ -73,12 +74,15 @@ function measureGlyphs(font, charW, lineH, dpr, glyphs, advance) {
           inside += alpha * share; outside += alpha * (1 - share);
         }
       }
-      return {
+      measured.push({
         glyph, width,
         coverage: inside / (cellW * cellH * 255),
         spill: outside / (inside + outside || 1)
-      };
-    });
+      });
+      // The synchronous atlas worker consumes this without yielding. The
+      // globe/standalone host resumes between glyphs in idle tasks.
+      yield;
+    }
     return { glyphs: measured, host: probe.host, measured: true };
   } catch (e) { return { glyphs: [], host: probe.host, measured: false }; }
 }
@@ -456,14 +460,14 @@ export function createMapArtEngine() {
   // cell is rejected on the font engine's own numbers.
   //
   // Built once per geometry and font and cached here; never called from a frame.
-  function palette(req) {
+  function* paletteSteps(req) {
     const font = req.size + 'px ' + req.family;
     const dpr = req.dpr || 1;
     const key = ['palette', font, req.charW, req.lineH, dpr, req.cols, req.rows].join('\n');
     const hit = cache.get(key);
     if (hit) return hit;
     const advance = glyph => prepare(glyph, font).widths.reduce((a, b) => a + b, 0);
-    const measurement = measureGlyphs(font, req.charW, req.lineH, dpr, PALETTE_CANDIDATES.concat([TOFU_PROBE]), advance);
+    const measurement = yield* measureGlyphs(font, req.charW, req.lineH, dpr, PALETTE_CANDIDATES.concat([TOFU_PROBE]), advance);
     // This only rejects likely notdef boxes: a real fallback glyph can differ
     // from U+E000, and a real supported glyph can resemble it. Canvas does not
     // identify the face supplying each glyph. We measure the resolved stack,
@@ -487,5 +491,34 @@ export function createMapArtEngine() {
     cache.set(key, out);
     return out;
   }
-  return { country, route, palette };
+  function palette(req) {
+    const steps = paletteSteps(req);
+    let next;
+    do { next = steps.next(); } while (!next.done);
+    return next.value;
+  }
+  // Same measurements, fit limits and cache as the worker's palette action.
+  // Schedule even the first step: calling this from an input/LOD change never
+  // measures synchronously. Without idle callbacks, do one glyph per task.
+  function paletteAsync(req, schedule = callback => {
+    if (typeof requestIdleCallback === 'function') requestIdleCallback(callback);
+    else setTimeout(callback, 0);
+  }) {
+    const steps = paletteSteps(req);
+    return new Promise((resolve, reject) => {
+      const step = deadline => {
+        if (deadline && deadline.timeRemaining() < 2) { schedule(step); return; }
+        const start = performance.now();
+        try {
+          let next;
+          do { next = steps.next(); }
+          while (!next.done && deadline && deadline.timeRemaining() > 2 && performance.now() - start < 2);
+          if (next.done) resolve(next.value);
+          else schedule(step);
+        } catch (error) { reject(error); }
+      };
+      schedule(step);
+    });
+  }
+  return { country, route, palette, paletteAsync };
 }

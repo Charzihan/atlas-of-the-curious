@@ -20,6 +20,8 @@ test('standalone HTML embeds executable code, styles, and matching CSP hashes', 
   assert.ok(!/<script[^>]+src=|<link[^>]+rel="stylesheet"/.test(html));
   assert.ok(!/^\s*(?:import|export)\s|\bimport\.meta/m.test(script));
   assert.ok(!html.includes('href="./"'), 'Home must not navigate out of the standalone file');
+  assert.match(html, /id="serif-toggle" type="checkbox" role="switch"/);
+  assert.ok(html.includes('function paletteAsync('));
 });
 
 test('bundled data loader loads the complete real geography using only embedded data', async () => {
