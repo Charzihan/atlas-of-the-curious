@@ -14,6 +14,7 @@ const CORE = [
   "/index.html",
   "/css/style.css",
   "/css/fonts.css",
+  "/css/tokens.css",
   "/earthxt/",
   "/earthxt/index.html",
   "/earthxt/styles.css",

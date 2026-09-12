@@ -1,0 +1,12 @@
+/* Shared atlas and globe palette. Keep the atlas colour values unchanged. */
+:root {
+  --bg: #0b1020;
+  --bg-soft: #101733;
+  --panel: #141c3a;
+  --panel-2: #1a2450;
+  --ink: #e8ecf8;
+  --ink-dim: #9aa4c8;
+  --gold: #e8b45a;
+  --gold-soft: rgba(232, 180, 90, 0.16);
+  --line: rgba(154, 164, 200, 0.18);
+}

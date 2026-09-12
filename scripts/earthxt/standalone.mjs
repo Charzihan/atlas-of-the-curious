@@ -76,7 +76,8 @@ export async function buildStandalone() {
   let html = template.replace(/(<meta http-equiv="Content-Security-Policy" content=")[^"]+(">)/, `$1${policy}$2`);
   for (const [index, link] of links.entries()) html = html.replace(link.statement, () => index === 0 ? `<style>${style}</style>` : '');
   html = html.replace('<script type="module" src="./app.js"></script>', '')
-    .replace('href="./"', 'href="#"')
+    // The generated file lives beside the atlas entry, one level above the globe.
+    .replace('href="../"', 'href="./index.html"')
     .replace('</body>', () => `<script>${script}</script>\n</body>`);
   if (/<script[^>]+src=|<link[^>]+rel="stylesheet"/.test(html)) throw new Error('An external runtime dependency remains.');
   const output = new URL('earthxt-standalone.html', root);

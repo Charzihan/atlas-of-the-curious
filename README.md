@@ -1,4 +1,4 @@
-> **Earthxt:** The atlas’s interactive globe view lives at [`/earthxt/`](earthxt/). See the [Earthxt guide](earthxt/README.md) for architecture, controls, data, tests, and static deployment. Run `npm start`, then open `http://localhost:8000/earthxt/`.
+> **Globe:** The spherical view of Atlas of the Curious lives at [`/earthxt/`](earthxt/), sharing its text foundation and colour palette. See the [globe guide](earthxt/README.md) for architecture, controls, data, tests, and static deployment. Run `npm start`, then open `http://localhost:8000/earthxt/`.
 
 # Atlas of the Curious
 

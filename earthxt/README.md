@@ -1,6 +1,6 @@
-# Earthxt — the atlas globe view
+# Globe · Atlas of the Curious
 
-The globe view of Atlas of the Curious: a client-side, text-native globe with mathematical 3D projection, real offline geography, mouse/touch rotation, smooth zoom, three geographic detail levels, and live performance instrumentation.
+The spherical view of Atlas of the Curious, built on the atlas’s shared text foundation and colour palette: a client-side, text-native globe with mathematical 3D projection, real offline geography, mouse/touch rotation, smooth zoom, three geographic detail levels, and live performance instrumentation.
 
 Run from the repository root:
 
@@ -9,7 +9,7 @@ npm start
 # Open http://localhost:8000/earthxt/
 ```
 
-The existing Atlas of the Curious remains available at `/`. Its header links to Earthxt. Earthxt shares the atlas’s CSS font registry, text metrics module, and vendored `@chenglou/pretext` measurement library. It uses no external fonts, map services, API keys, or backend. The development server is only a static file server.
+The atlas remains available at `/`. Its header links to **Globe**, and the globe’s **✦ Atlas of the Curious** brand link returns to the atlas. The globe shares the atlas’s CSS font registry, text metrics module, and vendored `@chenglou/pretext` measurement library. It uses no external fonts, map services, API keys, or backend. The development server is only a static file server.
 
 If localhost is unavailable, generate the standalone edition:
 
@@ -17,7 +17,7 @@ If localhost is unavailable, generate the standalone edition:
 npm run build:earthxt-standalone
 ```
 
-Open `earthxt-standalone.html` from the repository root directly in your browser (or drag it into a browser window). This single file embeds the same app, shared font registry, vendored pretext modules, styles, and geographic data, with no HTTP server or network connection required. The generated file is ignored by Git and can be regenerated at any time. Its content security policy permits only its own hashed script/styles and embedded data.
+Open `earthxt-standalone.html` from the repository root directly in your browser (or drag it into a browser window). This single file embeds the same app, shared font registry and colour tokens, vendored pretext modules, styles, and geographic data, with no HTTP server or network connection required. The generated file is ignored by Git and can be regenerated at any time. Its content security policy permits only its own hashed script/styles and embedded data. The brand link opens the adjacent atlas `index.html` when the file stays in the repository root; the atlas itself is not embedded.
 
 ## Interaction
 
@@ -37,6 +37,7 @@ Open `earthxt-standalone.html` from the repository root directly in your browser
 | `geography.js` | Load and validate local country grids; classify land/ocean, coasts, and borders; provide label anchors; synthetic provider |
 | `lod.js` | Extensible ordered detail registry, thresholds, glyph choices, and hysteresis |
 | `renderer.js` | Screen-space sampling and reusable country-id buffer, inset row slots, cached country-name advances/ink bounds, Canvas 2D silhouette names, collision-filtered DOM pill fallback |
+| `../css/tokens.css` | Shared ground, ink, accent, panel, and line colours, preserving the atlas palette |
 | `../css/fonts.css` | Single font family and role registry for atlas and globe; `globe-label` controls country-name font, line height, and spacing |
 | `../js/text.js` | Read computed font roles and families for the renderer, without starting atlas boot code on the globe page |
 | `../js/map-art.js` | Shared `prepareFlowText` cache and `flowIntoSlots` line breaking used by atlas stories and globe names |
@@ -83,6 +84,8 @@ Publish **the entire `dist/` directory**, then open `earthxt/` beneath the host 
 
 For GitHub Pages from a branch, the repository's existing static root exposes `/earthxt/` directly. For a separate static deployment, use `dist/` as the publish directory. Enable gzip/Brotli if available. No public deployment is automatically triggered by building.
 
+The globe-only `dist/` graph does not copy the atlas page: the brand link needs an atlas at the publish root. Deploy the combined repository site for navigation between both views.
+
 `scripts/earthxt/graph.mjs` is shared by both packagers. The standalone packager uses a scoped module registry supporting this graph's multiline named imports, trailing commas, parent-relative paths, and exported function/async function/class/const declarations. Modules are emitted in dependency order; unsupported module syntax and cycles fail loudly. It embeds geographic data as data URLs and expands the stylesheet chain in cascade order, including the shared registry. Vendored pretext is inlined too. The standalone CSP permits only the generated script/style hashes and embedded data, with no `eval` or network access.
 
 ## Validation
@@ -91,8 +94,12 @@ For GitHub Pages from a branch, the repository's existing static root exposes `/
 npm run test:earthxt        # Geometry, real data, renderer, and packaging checks
 npm run build:earthxt
 npm run smoke:earthxt       # Real Chromium; requires Playwright + installed browser
+npm run build
+node scripts/earthxt/smoke-nav.mjs # Both views at the combined repository root
 ```
 
 The unit checks cover spherical projection round trips, perspective occlusion, pole/dateline handling, zoom endpoints, LOD hysteresis, known geographic locations, dataset integrity and budget, progressively finer coasts, synthetic data, glyph silhouettes, rotation, draw-count bounds, country-label culling/collisions, shared registry roles, absence of JavaScript font-family literals, cached measurement outside frames, graph-based static paths, service-worker coverage/fallbacks, and executable standalone pretext/registry/data loading. Renderer tests use stubbed metrics to check run detection, country-cell containment, spacing with and without the canvas API, multiline fitting, pill fallback, and the shared atlas/globe flow. They do not verify browser font rasterization or frame rate.
 
 The browser suite exercises the **built output under `/dist/earthxt/`**, drag and wheel input, all LODs, country labels, source modes, zoom limits, keyboard controls, dialog focus restoration, reduced motion, mobile width, actual touch drag/pinch/cancellation, and data-loading failure. Over Africa it requires at least three silhouette names, verifies each submitted ink box against its country's cells through the debug hook, and samples two seconds of auto-rotation with names enabled. Median/p95 frame intervals, CPU submission and label cost are printed and saved with raw samples to `test-results/earthxt/countries-timing.json`; these are measurements, not a device-independent performance guarantee. It rejects unexpected external requests and browser errors and saves captures to `test-results/earthxt/`. It fails rather than silently skipping if Chromium or local sockets cannot run. A full browser performance evaluation still needs representative desktop and mobile devices.
+
+`nav.test.mjs` checks source markup, unchanged atlas palette values, shared stylesheet loading and packaging, standalone identity, and cache coverage. It does not prove browser rendering. `smoke-nav.mjs` checks the actual header links in both directions at desktop and mobile sizes, keyboard activation of the brand link, shared computed tokens, rendered views, and absence of console/page errors.
