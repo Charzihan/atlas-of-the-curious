@@ -230,10 +230,15 @@ export function countrySlots(poly, top, bottom, lineHeight, minRun) {
 }
 
 const flowCache = new Map();
+let flowPreparationCalls = 0;
+// Count calls including warm hits: zero measurements does not prove a frame
+// avoided preparation. Inspection itself never changes this counter.
+export function flowPreparationCount() { return flowPreparationCalls; }
 
 // Both silhouette adapters share preparation and line breaking. Animation
 // callers warm this cache before their loop and pass the handle to the flow.
 export function prepareFlowText(text, font, { letterSpacing = 0 } = {}) {
+  flowPreparationCalls++;
   const key = JSON.stringify([font, letterSpacing, text]);
   if (!flowCache.has(key)) flowCache.set(key, prepareWithSegments(text, font, { letterSpacing }));
   return flowCache.get(key);

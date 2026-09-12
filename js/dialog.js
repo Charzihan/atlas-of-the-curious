@@ -1069,10 +1069,10 @@ function boot(win, doc) {
   function fillChrome(place) {
     const cat = categoryById.get(place.category);
     $("dialog-symbol").textContent = place.symbol;
-    $("dialog-symbol").style.setProperty("color", cat ? cat.accent : "#e8b45a");
+    $("dialog-symbol").style.setProperty("color", cat ? "var(--category-" + cat.id + ", var(--gold))" : "var(--gold)");
     const badge = $("dialog-category");
     badge.textContent = cat ? cat.label : "";
-    badge.style.setProperty("--card-accent", cat ? cat.accent : "#e8b45a");
+    badge.style.setProperty("--card-accent", cat ? "var(--category-" + cat.id + ", var(--gold))" : "var(--gold)");
     // The title carries soft hyphens so a long name can break where a
     // typesetter would; they are zero-width and stripped from the search /
     // accessible copies below.

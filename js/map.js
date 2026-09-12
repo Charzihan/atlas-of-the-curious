@@ -3263,8 +3263,8 @@ import {
       cardH = fit.height;
       card.style.setProperty("width", cardW + "px");
       cardCat.textContent = cat ? cat.label : "";
-      cardCat.style.color = x.accent;
-      cardCat.style.borderColor = x.accent;
+      cardCat.style.color = `var(--category-${x.p.category}, var(--gold))`;
+      cardCat.style.borderColor = `var(--category-${x.p.category}, var(--gold))`;
       cardName.textContent = x.p.name;
       const native = fit.native;
       if (native && native.text) {
@@ -3282,7 +3282,7 @@ import {
       cardLoc.textContent = x.p.country + " — " + x.p.region;
       cardTag.textContent = fit.lines.join("\n");
       cardCoords.textContent = "≈ " + x.p.coordinates;
-      card.style.setProperty("--accent", x.accent);
+      card.style.setProperty("--accent", `var(--category-${x.p.category}, var(--gold))`);
       positionCard(x);
       card.classList.add("is-visible");
     }
@@ -3362,7 +3362,7 @@ import {
       m.className = "map-marker";
       m.style.left = x.dx + "px";
       m.style.top = x.dy + "px";
-      m.style.color = x.accent;
+      m.style.color = `var(--category-${p.category}, var(--gold))`;
       m.style.animationDelay = (Math.random() * 0.6).toFixed(2) + "s";
       m.setAttribute("data-place-id", p.id);
       m.setAttribute("aria-label", p.name + ", " + p.country + " — open field note");
@@ -4001,7 +4001,7 @@ import {
       const n = DATA.places.filter((p) => p.category === c.id).length;
       const el = document.createElement("span");
       el.className = "legend-item";
-      el.style.setProperty("--chip-accent", c.accent);
+      el.style.setProperty("--chip-accent", `var(--category-${c.id}, var(--gold))`);
       const dot = document.createElement("i"); dot.className = "legend-dot";
       const t = document.createElement("span");
       t.textContent = c.label + " " + n;

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { TextRenderer, countryRunSlots, placeSilhouetteName } from '../../earthxt/renderer.js';
-import { prepareFlowText, flowIntoSlots, createMapArtEngine, boxesOverlap } from '../../js/map-art.js';
+import { prepareFlowText, flowPreparationCount, flowIntoSlots, createMapArtEngine, boxesOverlap } from '../../js/map-art.js';
 import { measureNaturalWidth } from '../../vendor/pretext/layout.js';
 import { Geography } from '../../earthxt/geography.js';
 import { HOME, latLonToCartesian, project } from '../../earthxt/geometry.js';
@@ -93,7 +93,7 @@ test('projected country labels are visible, in bounds, and do not overlap', () =
       if (!node || node.hidden) continue;
       const screen = project(latLonToCartesian(country.latitude, country.longitude), camera, renderer.viewport);
       assert.ok(screen.visible);
-      const box = { x: screen.x - node.labelWidth / 2, y: screen.y - 12, w: node.labelWidth, h: 24 };
+      const box = { x: Math.round(screen.x) - node.labelWidth / 2, y: Math.round(screen.y) - 12, w: node.labelWidth, h: 24 };
       assert.ok(box.x >= 32 && box.y >= 60 && box.x + box.w <= 936 && box.y + box.h <= 710);
       for (const b of boxes) assert.ok(box.x + box.w <= b.x || b.x + b.w <= box.x || box.y + box.h <= b.y || b.y + b.h <= box.y);
       boxes.push(box);
@@ -138,7 +138,9 @@ for (const nativeSpacing of [false, true]) test(`name ink stays over its own cel
     const ids = renderer.countryIds;
     const before = measurements;
     for (const longitude of [15, 25, -106, 130]) {
+      const preparations = flowPreparationCount();
       const result = renderer.draw({ latitude: 18, longitude, distance: 1.4 }, LEVELS[2], data, { labels: true });
+      assert.equal(flowPreparationCount(), preparations, 'draw makes zero preparation calls, including warm hits');
       const { grid, labelPlacements } = renderer.labelSnapshot();
       if (longitude === 15) assert.ok(result.silhouetteLabels >= 3);
       const boxes = [];
@@ -201,6 +203,40 @@ test('too-tall ink falls back to collision-filtered pills, and toggle hides both
   } finally { globalThis.document = previousDocument; }
 });
 
+test('Australia pill is dropped at the south Pacific limb; every pill corner stays on the disc', () => {
+  const previousDocument = globalThis.document;
+  globalThis.document = { createElement: () => ({ style: {}, hidden: true }) };
+  try {
+    const { renderer } = recorder();
+    renderer.resize(1440, 600);
+    const camera = { latitude: -60, longitude: -170, distance: 1.65 };
+    const radius = renderer.viewport.focal / Math.sqrt(camera.distance ** 2 - 1);
+    const australia = data.labels().find(country => country.name === 'Australia');
+    const anchor = project(latLonToCartesian(australia.latitude, australia.longitude), camera, renderer.viewport);
+    const halfWidth = renderer.labelMetrics.get('AUSTRALIA').width / 2;
+    assert.ok(anchor.visible);
+    assert.ok(Math.hypot(Math.abs(Math.round(anchor.x) - 720) + halfWidth,
+      Math.abs(Math.round(anchor.y) - 300) + 12) > radius, 'fixture actually straddles the limb');
+    renderer.draw(camera, LEVELS[2], data, { labels: true });
+    assert.ok(!renderer.labelPlacements.some(label => label.id === australia.id && label.mode === 'pill'));
+    for (const label of renderer.labelPlacements) {
+      if (label.mode !== 'pill') continue;
+      const { x, y, width, height } = label.box;
+      for (const px of [x, x + width]) for (const py of [y, y + height]) {
+        assert.ok(Math.hypot(px - 720, py - 300) <= radius);
+      }
+    }
+  } finally { globalThis.document = previousDocument; }
+});
+
+test('preparation counter counts warm cache entry calls even without measurements', () => {
+  const first = prepareFlowText('CANADA', fonts.label.font, fonts.label);
+  const before = flowPreparationCount(), measured = measurements;
+  assert.equal(prepareFlowText('CANADA', fonts.label.font, fonts.label), first);
+  assert.equal(flowPreparationCount(), before + 1);
+  assert.equal(measurements, measured);
+});
+
 test('shared flow keeps whole words, counts terminal spacing once, and limits names to three lines', () => {
   const { renderer } = recorder();
   const text = 'UNITED STATES OF AMERICA', role = fonts.label;
@@ -249,7 +285,9 @@ test('country names are prepared once per font and draw uses cached widths with 
     renderer.prepareLabels(data.labels());
     renderer.resize(1000, 800);
     for (const longitude of [15, 25, -106]) {
+      const preparations = flowPreparationCount();
       renderer.draw({ latitude: 20, longitude, distance: 1.4 }, LEVELS[2], data, { labels: true });
+      assert.equal(flowPreparationCount(), preparations, 'draw never enters the shared prepare cache');
     }
     assert.equal(measurements, measuredBefore, 'no text measurement during repeated preparation or frames');
     assert.equal(first.get('CANADA'), handle);

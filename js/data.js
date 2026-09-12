@@ -4,6 +4,8 @@
 (function () {
   "use strict";
 
+  // Accents document css/tokens.css and are validated against it; rendering
+  // reads CSS tokens exclusively.
   var CATEGORIES = [
     { id: "geology", label: "Geology & Landforms", accent: "#e8b45a" },
     { id: "coastal", label: "Coastal & Marine", accent: "#4fc3f7" },

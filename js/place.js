@@ -5,11 +5,11 @@
 (function () {
   "use strict";
 
-  // Per-category accent color, carried in a data attribute and applied via
+  // Category token reference, carried in a data attribute and applied via
   // CSSOM (which the CSP does not restrict).
-  document.querySelectorAll("[data-accent]").forEach(function (el) {
-    var a = el.getAttribute("data-accent");
-    if (a) el.style.setProperty("--accent", a);
+  document.querySelectorAll("[data-category]").forEach(function (el) {
+    var category = el.getAttribute("data-category");
+    if (category) el.style.setProperty("--accent", "var(--category-" + category + ", var(--gold))");
   });
 
   // "Copy link" button.

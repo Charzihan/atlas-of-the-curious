@@ -166,6 +166,8 @@ export function createLabelEngine(options) {
   const tagHandles = new Map();     // place id -> handle
   const oceanHandles = new Map();   // name + "|" + step -> handle
   let localizedPrepared = false;
+  let preparationCalls = 0;
+  const widths = [], visibleIds = new Set(), retained = new Map();
 
   function tick() { if (onLayout) onLayout(1); }
 
@@ -173,6 +175,7 @@ export function createLabelEngine(options) {
   const toGridRow = (lat) => Math.max(0, Math.min(ROWS - 1, Math.round(((90 - lat) / 180) * ROWS)));
 
   function makeHandle(text, role, extraOptions) {
+    preparationCalls++;
     const str = String(text == null ? "" : text).replace(/\s+/g, " ").trim();
     const o = {};
     if (role.letterSpacing) o.letterSpacing = role.letterSpacing;
@@ -293,7 +296,7 @@ export function createLabelEngine(options) {
   // survived. A candidate that would have to break a word mid-word comes back
   // incomplete and is discarded.
   function routeAt(handle, anchorCol, dir, cellW, maxLines, startRow) {
-    const widths = [];
+    widths.length = 0;
     for (let i = 0; i < maxLines; i++) {
       let run = runLimit;
       for (let dr = 0; dr < rowSpan; dr++) run = Math.min(run, freeRun(startRow + i * rowSpan + dr, anchorCol, dir, runLimit));
@@ -381,24 +384,28 @@ export function createLabelEngine(options) {
   // Preserve the previous line breaks and marker-relative offset if every
   // occupied cell is still free. Reserve all surviving records before finding
   // replacements so a new search cannot displace a still-valid neighbour.
-  function retainAnchor(x, rec, cellW) {
+  function retainAnchor(x, rec, cellW, reuse) {
     if (!rec?.anchor || rec.cellW !== cellW || rec.rowSpan !== rowSpan) return null;
     const { dc, dr, off } = rec.anchor;
     if (off > maxOffset) return null;
     const col = x.col + dc * off, row = x.row + dr * off;
     const dx = col - rec.col, dy = row - rec.row;
-    const next = { ...rec, col: col, row: row, lines: rec.lines.map(line => ({
-      ...line, row: line.row + dy, y: line.y + dy,
-      ...(line.col == null ? {} : { col: line.col + dx })
-    })) };
-    next.cells = cellsOf(next);
-    for (const span of next.cells) {
-      if (span.row < 0 || span.row >= ROWS || span.c0 < 0 || span.c1 >= COLS) return null;
-      for (let col = span.c0; col <= span.c1; col++) {
-        const i = span.row * COLS + col;
+    for (const span of rec.cells) {
+      if (span.row + dy < 0 || span.row + dy >= ROWS || span.c0 + dx < 0 || span.c1 + dx >= COLS) return null;
+      for (let col = span.c0 + dx; col <= span.c1 + dx; col++) {
+        const i = (span.row + dy) * COLS + col;
         if (kind[i] || occupancy[i]) return null;
       }
     }
+    // Only an animation host lends mutable records. Default atlas results
+    // remain independent, including when passed back as preferred anchors.
+    const next = reuse ? rec : { ...rec, lines: rec.lines.map(line => ({ ...line })), cells: rec.cells.map(span => ({ ...span })) };
+    next.col = col; next.row = row;
+    for (const line of next.lines) {
+      line.row += dy; line.y += dy;
+      if (line.col != null) line.col += dx;
+    }
+    for (const span of next.cells) { span.row += dy; span.c0 += dx; span.c1 += dx; }
     return next;
   }
 
@@ -486,15 +493,23 @@ export function createLabelEngine(options) {
        nativeNames the label carries the name in its own script from tier 2
        visible     array of visible place ids, or null for "everything"
        preferred   optional Map of id -> previous label record, from the same
-                   strings, font roles and tier; offsets follow each marker */
+                   strings, font roles and tier; offsets follow each marker
+       output      optional reusable result with labels/ oceans arrays; also
+                   permits updating retained records in place */
   function place(params) {
     const p = params || {};
     const tier = p.tier | 0;
     const cellW = Number(p.cellW) || 1;
     const dotCells = Math.max(0, p.dotCells | 0);
-    const visible = p.visible ? new Set(p.visible) : null;
-    const labels = [];
-    const oceanRecs = [];
+    visibleIds.clear();
+    if (p.visible) for (const id of p.visible) visibleIds.add(id);
+    const visible = p.visible ? visibleIds : null;
+    // The atlas owns each returned result. Animation hosts may instead lend
+    // output arrays whose contents are valid only until the next placement.
+    const labels = p.output?.labels || [];
+    const oceanRecs = p.output?.oceans || [];
+    labels.length = 0;
+    oceanRecs.length = 0;
 
     occupancy.fill(0);
 
@@ -528,10 +543,10 @@ export function createLabelEngine(options) {
     if (p.oceanOn) placeOceanLabels(cellW, Number(p.zoom) || 1, oceanRecs);
 
     if (tier > 0) {
-      const retained = new Map();
+      retained.clear();
       if (p.preferred) for (const x of places) {
         if (visible && !visible.has(x.id)) continue;
-        const rec = retainAnchor(x, p.preferred.get(x.id), cellW);
+        const rec = retainAnchor(x, p.preferred.get(x.id), cellW, Boolean(p.output));
         if (!rec) continue;
         markCells(rec.cells);
         retained.set(x.id, rec);
@@ -556,11 +571,15 @@ export function createLabelEngine(options) {
       }
     }
 
-    return { labels: labels, oceans: oceanRecs, tier: tier, zoom: Number(p.zoom) || 1 };
+    const result = p.output || {};
+    result.labels = labels; result.oceans = oceanRecs;
+    result.tier = tier; result.zoom = Number(p.zoom) || 1;
+    return result;
   }
 
   return {
     setGrid: function (cfg) {
+      const sameSize = COLS === (cfg.cols | 0) && ROWS === (cfg.rows | 0);
       COLS = cfg.cols | 0;
       ROWS = cfg.rows | 0;
       rowSpan = Math.max(1, cfg.rowSpan | 0);
@@ -568,7 +587,8 @@ export function createLabelEngine(options) {
       runLimit = scaleCells(LABEL_RUN_LIMIT, COLS);
       oceanSlide = scaleCells(OCEAN_SLIDE, COLS);
       kind = cfg.land;
-      occupancy = new Uint8Array(COLS * ROWS);
+      if (!sameSize) occupancy = new Uint8Array(COLS * ROWS);
+      else occupancy.fill(0);
     },
     setRoles: function (r) { roles = r || {}; },
     setOceans: function (list) { oceans = list || OCEANS; },
@@ -589,6 +609,7 @@ export function createLabelEngine(options) {
     preparePlaces: function () {
       for (const x of places) { nameHandleFor(x); nativeHandleFor(x); tagHandleFor(x); }
     },
+    preparationCount: function () { return preparationCalls; },
     place: place,
     // The live occupancy mask, so js/sea.js can route around this pass's labels.
     occupancy: function () { return occupancy; },

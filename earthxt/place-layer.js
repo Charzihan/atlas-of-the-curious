@@ -18,6 +18,8 @@ export class PlaceLayer {
     this.nodes = new Map();
     this.labels = [];
     this.markers = [];
+    this.markerCells = new Set();
+    this.drawMetrics = { visibleMarkers: 0, labelledPlaces: 0, placeLabelMs: 0 };
     this.activeId = null;
     this.dismissTimer = 0;
     this.fits = new Map();
@@ -46,7 +48,7 @@ export class PlaceLayer {
       button.dataset.id = place.id;
       button.setAttribute('aria-label', `${place.name}, ${place.country}`);
       button.setAttribute('aria-describedby', 'globe-place-card');
-      button.style.setProperty('--accent', colors.get(place.category));
+      button.style.setProperty('--accent', `var(--category-${place.category}, var(--gold))`);
       button.hidden = true;
       const inspect = () => { onInspect(); this.show(place.id); };
       button.addEventListener('pointerenter', inspect);
@@ -112,7 +114,7 @@ export class PlaceLayer {
     clearTimeout(this.dismissTimer);
     this.activeId = id;
     this.card.dataset.id = id;
-    this.card.style.setProperty('--accent', this.colors.get(place.category));
+    this.card.style.setProperty('--accent', `var(--category-${place.category}, var(--gold))`);
     this.card.style.width = `${fit.width}px`;
     this.parts.name.textContent = place.name;
     this.parts.native.textContent = fit.native;
@@ -152,11 +154,11 @@ export class PlaceLayer {
     this.card.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
   }
   draw(ctx, camera, level, viewport, grid, blocked, enabled, earth) {
-    this.markers = projectPlaces(this.places, camera, viewport, grid);
+    projectPlaces(this.places, camera, viewport, grid, this.markers);
     if (!earth) for (const marker of this.markers) marker.visible = false;
     const out = this.router.update(camera, level, viewport, grid, blocked, this.markers, enabled && earth);
     this.labels = out.labels;
-    this.markerCells = Array.from(out.markerCells);
+    this.markerCells = out.markerCells;
     const role = this.roles['map-label'];
     ctx.font = role.font;
     ctx.textAlign = 'left';
@@ -172,10 +174,12 @@ export class PlaceLayer {
         else for (const glyph of this.plans.get(line.text) || []) ctx.fillText(glyph.text, x + glyph.x, y);
       }
     }
+    let visibleMarkers = 0;
     for (const marker of this.markers) {
       const node = this.nodes.get(marker.id);
       node.hidden = !marker.visible;
       if (!marker.visible) continue;
+      visibleMarkers++;
       node.style.transform = `translate(${marker.x}px, ${marker.y}px) translate(-50%, -50%)`;
       ctx.fillStyle = this.colors.get(this.byId.get(marker.id).category);
       ctx.beginPath();
@@ -183,12 +187,14 @@ export class PlaceLayer {
       ctx.fill();
     }
     this.positionCard();
-    return { visibleMarkers: this.markers.filter(point => point.visible).length,
-      labelledPlaces: this.labels.length, placeLabelMs: out.placeLabelMs };
+    this.drawMetrics.visibleMarkers = visibleMarkers;
+    this.drawMetrics.labelledPlaces = this.labels.length;
+    this.drawMetrics.placeLabelMs = out.placeLabelMs;
+    return this.drawMetrics;
   }
   snapshot() {
     return structuredClone({ placeCount: this.places.length, placeLabels: this.labels,
       labelCells: this.labels.map(label => ({ id: label.id, cells: label.cells })),
-      markerCells: this.markerCells || [], markers: this.markers, placeLayoutPasses: this.router.passes() });
+      markerCells: Array.from(this.markerCells), markers: this.markers, placeLayoutPasses: this.router.passes() });
   }
 }

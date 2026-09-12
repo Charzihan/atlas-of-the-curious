@@ -29,10 +29,10 @@ export class InkPaletteCache {
       entry.status = palette.usable ? 'ready' : 'unavailable';
       entry.reason = palette.reason;
       if (palette.usable) {
-        // Interior density follows the existing four lighting bands. Coasts
-        // always own the darkest entry, including where a border meets them.
-        entry.land = [0.8, 0.63, 0.47, 0.3, 1].map(tone => palette.ramp[Math.round(tone * (palette.levels - 1))]);
-        entry.ocean = palette.ramp.slice(0, Math.max(2, Math.ceil(palette.levels * 0.1)));
+        // On dark ground, ink density is brightness: light=0 is the dim limb,
+        // light=3 the bright interior. Coasts always carry the densest ink.
+        entry.land = [0.3, 0.47, 0.63, 0.8, 1].map(tone => palette.ramp[Math.round(tone * (palette.levels - 1))]);
+        entry.ocean = palette.ramp.slice(0, Math.floor((palette.levels - 1) * 0.1) + 1);
       }
       return entry;
     }).catch(error => {

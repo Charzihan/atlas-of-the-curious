@@ -28,16 +28,15 @@ export function cameraBasis(latitude, longitude) {
 
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 
-export function project(point, camera, viewport) {
+export function project(point, camera, viewport, out = {}) {
   const basis = camera.basis ?? cameraBasis(camera.latitude, camera.longitude);
   const x = dot(point, basis.east), y = dot(point, basis.north), z = dot(point, basis.front);
   const depth = camera.distance - z;
-  return {
-    x: viewport.width / 2 + viewport.focal * x / depth,
-    y: viewport.height / 2 - viewport.focal * y / depth,
-    visible: camera.distance * z > 1,
-    distance: Math.hypot(x, y, depth),
-  };
+  out.x = viewport.width / 2 + viewport.focal * x / depth;
+  out.y = viewport.height / 2 - viewport.focal * y / depth;
+  out.visible = camera.distance * z > 1;
+  out.distance = Math.hypot(x, y, depth);
+  return out;
 }
 
 /** Near ray/sphere intersection in camera space; the far side is never sampled. */

@@ -54,9 +54,23 @@ function parseCoords(s) {
   };
 }
 
+// Optional dataset accents are documentation only; CSS is authoritative.
+export function validateCategoryColors(categories, css) {
+  const tokens = new Map(Array.from(css.matchAll(/--category-([a-z-]+)\s*:\s*([^;{}]+);/g), match => [match[1], match[2].trim().toLowerCase()]));
+  const errors = [];
+  for (const category of categories) {
+    const token = tokens.get(category.id);
+    if (!token) errors.push(`category ${category.id}: missing CSS token --category-${category.id}`);
+    if (Object.hasOwn(category, 'accent') && String(category.accent).trim().toLowerCase() !== token) {
+      errors.push(`category ${category.id}: dataset accent ${category.accent} differs from CSS token ${token}`);
+    }
+  }
+  return errors;
+}
+
 function main() {
   const { categories, places } = load();
-  const errors = [];
+  const errors = validateCategoryColors(categories, readFileSync(path.join(root, 'css', 'tokens.css'), 'utf8'));
   const warnings = [];
   const catIds = new Set(categories.map((c) => c.id));
 
@@ -64,7 +78,7 @@ function main() {
   const catLabels = new Map();
   for (const c of categories) {
     catLabels.set(c.id, c.label);
-    if (!c.id || !c.label || !c.accent) errors.push(`category missing id/label/accent: ${JSON.stringify(c)}`);
+    if (!c.id || !c.label) errors.push(`category missing id/label: ${JSON.stringify(c)}`);
   }
 
   const seen = new Set();
@@ -131,4 +145,4 @@ function main() {
   console.log(`\nOK: all ${places.length} places valid.`);
 }
 
-main();
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();

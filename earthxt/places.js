@@ -20,14 +20,17 @@ export function globePlaces(places) {
   });
 }
 
-export function projectPlaces(places, camera, viewport, grid) {
+export function projectPlaces(places, camera, viewport, grid, out = []) {
   const view = { ...camera, basis: cameraBasis(camera.latitude, camera.longitude) };
-  return places.map(place => {
-    const point = project(place.point, view, viewport);
-    return { id: place.id, ...point,
-      visible: point.visible && point.x >= 12 && point.x < viewport.width - 12 && point.y >= 12 && point.y < viewport.height - 12,
-      col: Math.floor((point.x - grid.x) / grid.cellWidth), row: Math.floor((point.y - grid.y) / grid.cellHeight) };
-  });
+  for (let i = 0; i < places.length; i++) {
+    const place = places[i], point = project(place.point, view, viewport, out[i] ||= {});
+    point.id = place.id;
+    point.visible = point.visible && point.x >= 12 && point.x < viewport.width - 12 && point.y >= 12 && point.y < viewport.height - 12;
+    point.col = Math.floor((point.x - grid.x) / grid.cellWidth);
+    point.row = Math.floor((point.y - grid.y) / grid.cellHeight);
+  }
+  out.length = places.length;
+  return out;
 }
 
 // Every rendered frame routes against the current land/off-disc mask. Previous
@@ -36,33 +39,48 @@ export function projectPlaces(places, camera, viewport, grid) {
 export function createPlaceRouter(places, role) {
   const engine = createLabelEngine();
   engine.setRoles({ 'map-label': role });
-  engine.setPlaces(places.map(place => ({ id: place.id, name: place.name, col: 0, row: 0 })));
+  const routingPlaces = places.map(place => ({ id: place.id, name: place.name, col: 0, row: 0 }));
+  const byId = new Map(routingPlaces.map(place => [place.id, place]));
+  engine.setPlaces(routingPlaces);
   engine.preparePlaces();
-  let signature = null, preferred = new Map(), passes = 0;
+  const preferred = new Map(), visible = [], markerCells = new Set();
+  const output = { labels: [], oceans: [] };
+  const result = { labels: output.labels, markerCells, placeLabelMs: 0 };
+  let signature = null, passes = 0;
   function update(camera, level, viewport, grid, blocked, markers, enabled) {
-    const visible = markers.filter(marker => marker.visible);
+    visible.length = 0;
+    markerCells.clear();
     const dotCells = 1;
-    const markerCells = new Set();
-    for (const marker of visible) for (let dr = -dotCells; dr <= dotCells; dr++) for (let dc = -dotCells; dc <= dotCells; dc++) {
-      const col = marker.col + dc, row = marker.row + dr;
-      if (col >= 0 && col < grid.cols && row >= 0 && row < grid.rows) markerCells.add(row * grid.cols + col);
+    for (const marker of markers) {
+      if (!marker.visible) continue;
+      visible.push(marker.id);
+      const place = byId.get(marker.id);
+      place.col = marker.col; place.row = marker.row;
+      for (let dr = -dotCells; dr <= dotCells; dr++) for (let dc = -dotCells; dc <= dotCells; dc++) {
+        const col = marker.col + dc, row = marker.row + dr;
+        if (col >= 0 && col < grid.cols && row >= 0 && row < grid.rows) markerCells.add(row * grid.cols + col);
+      }
     }
     if (!enabled || level.index < 1 || !visible.length) {
       signature = null; preferred.clear();
-      return { labels: [], markerCells, placeLabelMs: 0 };
+      output.labels.length = 0;
+      result.placeLabelMs = 0;
+      return result;
     }
     const start = performance.now();
-    const nextSignature = [level.index, grid.cols, grid.rows, grid.cellWidth, grid.cellHeight].join('/');
+    const nextSignature = `${level.index}/${grid.cols}/${grid.rows}/${grid.cellWidth}/${grid.cellHeight}`;
     if (signature !== nextSignature) preferred.clear();
     signature = nextSignature;
     engine.setGrid({ cols: grid.cols, rows: grid.rows, land: blocked,
       rowSpan: Math.ceil(role.lineHeight / grid.cellHeight), maxOffset: 12 });
-    engine.setMarkerCells(Object.fromEntries(visible.map(marker => [marker.id, [marker.col, marker.row]])));
     const labels = engine.place({ tier: 1, zoom: 1, cellW: grid.cellWidth, dotCells,
-      visible: visible.map(marker => marker.id), oceanOn: false, preferred }).labels;
-    preferred = new Map(labels.map(rec => [rec.id, rec]));
+      visible, oceanOn: false, preferred, output }).labels;
+    preferred.clear();
+    for (const rec of labels) preferred.set(rec.id, rec);
     passes++;
-    return { labels, markerCells, placeLabelMs: performance.now() - start };
+    result.placeLabelMs = performance.now() - start;
+    return result;
   }
-  return { update, passes: () => passes };
+  // Results are live until update(); take a copy for history or inspection.
+  return { update, passes: () => passes, preparationCount: engine.preparationCount };
 }

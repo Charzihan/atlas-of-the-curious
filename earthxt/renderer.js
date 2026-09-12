@@ -249,7 +249,7 @@ export class TextRenderer {
           if (ink) {
             const ripple = (row * 13 + col * 7 + oceanPhase) % 17 === 0;
             const glyph = this.countryIds[index] ? ink.land[this.tones[index]]
-              : ink.ocean[ripple ? 1 + oceanPhase % (ink.ocean.length - 1) : 0];
+              : ink.ocean[ripple && ink.ocean.length > 1 ? 1 + oceanPhase % (ink.ocean.length - 1) : 0];
             // Match the palette probe: middle baseline, centred by measured
             // advance. Cell geometry and every overlay remain unchanged.
             ctx.fillText(glyph.glyph, xOffset + col * cellWidth - glyph.width / 2, yOffset + row * cellHeight);
@@ -288,7 +288,8 @@ export class TextRenderer {
     for (const node of this.labelNodes.values()) node.hidden = true;
     this.labelPlacements = [];
     if (!enabled || !level.labels) return 0;
-    const occupied = [], { width, height } = this.viewport;
+    const occupied = [], { width, height, focal } = this.viewport;
+    const radiusSquared = focal * focal / (camera.distance * camera.distance - 1);
     const { cols, rows } = this.grid;
     const slots = countryRunSlots(this.countryIds, cols, rows, this.grid);
     const fallback = [];
@@ -321,8 +322,13 @@ export class TextRenderer {
     // Silhouette ink owns its ground first. Pills retain the existing viewport
     // margins and collision padding, including against all canvas name lines.
     for (const { country, point, measured } of fallback) {
-      const box = { x: point.x - measured.width / 2, y: point.y - 12, width: measured.width, height: 24 };
+      // Test the actual rounded DOM position, including its farthest corner.
+      const px = Math.round(point.x), py = Math.round(point.y);
+      const box = { x: px - measured.width / 2, y: py - 12, width: measured.width, height: 24 };
       if (!inside(box, safe)) continue;
+      const farX = Math.abs(px - width / 2) + box.width / 2;
+      const farY = Math.abs(py - height / 2) + box.height / 2;
+      if (farX * farX + farY * farY > radiusSquared) continue;
       if (occupied.some(other => box.x < other.x + other.width + 12 && box.x + box.width + 12 > other.x && box.y < other.y + other.height + 8 && box.y + box.height + 8 > other.y)) continue;
       let item = this.labelNodes.get(country.id);
       if (!item) {
@@ -334,7 +340,7 @@ export class TextRenderer {
       }
       item.labelWidth = measured.width;
       occupied.push(box);
-      item.style.transform = `translate(${Math.round(point.x)}px, ${Math.round(point.y)}px) translate(-50%, -50%)`;
+      item.style.transform = `translate(${px}px, ${py}px) translate(-50%, -50%)`;
       item.hidden = false;
       this.labelPlacements.push({ id: country.id, name: item.textContent, mode: 'pill', box });
     }

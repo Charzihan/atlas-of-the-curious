@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
-import { createMapArtEngine } from '../../js/map-art.js';
+import { createMapArtEngine, flowPreparationCount } from '../../js/map-art.js';
 import { readFontRoles, readFontFamily, readMapStoryFamily } from '../../js/text.js';
 import { InkPaletteCache } from '../../earthxt/ink-palette.js';
 import { TextRenderer } from '../../earthxt/renderer.js';
@@ -185,8 +185,11 @@ for (const nativeSpacing of [false, true]) test(`only raster glyphs change; all 
       assert.deepEqual(marks, mono, 'pending palette leaves mono visible');
       assert.deepEqual({ measurements, inkReads }, prepared);
       const entry = await finish(pending), warm = { measurements, inkReads };
+      const preparations = flowPreparationCount(), labelPreparations = renderer.places.router.preparationCount();
       for (const time of [0, 1900, 5000]) {
         const result = renderer.draw(camera, level, geography, { ...options, serif: true, time });
+        assert.equal(flowPreparationCount(), preparations, 'Serif frames never enter preparation, even on a warm cache');
+        assert.equal(renderer.places.router.preparationCount(), labelPreparations);
         assert.equal(result.serifActive, true);
         assert.equal(result.visibleGlyphs, original.visibleGlyphs);
         assert.deepEqual(renderer.labelSnapshot(), geometry, 'classification, masks, names and pills stay identical');
@@ -217,7 +220,7 @@ for (const nativeSpacing of [false, true]) test(`only raster glyphs change; all 
   } finally { if (previous === undefined) delete globalThis.document; else globalThis.document = previous; }
 });
 
-test('coasts use the darkest tone even at Planet detail; oceans including grid cells use the light band', async () => {
+test('coasts use the densest tone even at Planet detail; oceans including grid cells use the sparse band', async () => {
   const { cache, finish } = scheduledEngine();
   const draws = [], samples = [];
   const context = { setTransform() {}, clearRect() { draws.length = 0; },
@@ -226,6 +229,10 @@ test('coasts use the darkest tone even at Planet detail; oceans including grid c
   renderer.palettes = cache;
   renderer.resize(400, 400);
   const entry = await finish(renderer.preparePalette(LEVELS[0]));
+  assert.ok(entry.land[0].inkCoverage < entry.land[3].inkCoverage, 'the limb is sparser than the centre');
+  for (let band = 1; band < entry.land.length; band++) assert.ok(entry.land[band].inkCoverage >= entry.land[band - 1].inkCoverage);
+  assert.equal(entry.land[4], entry.palette.ramp.at(-1));
+  assert.ok(entry.ocean.every(glyph => entry.palette.ramp.indexOf(glyph) / (entry.palette.levels - 1) <= 0.1));
   const provider = { sample(latitude, longitude, level, out) {
     out.country = latitude > 0 ? 1 : 0;
     out.coast = out.country && latitude < 5;
@@ -244,4 +251,21 @@ test('coasts use the darkest tone even at Planet detail; oceans including grid c
     else inland.add(draws[i].text);
   }
   assert.ok(inland.size >= 2, 'lighting varies inland ink density');
+});
+
+test('a six-entry palette keeps oceans in the sparsest tenth, including animated ripple cells', async () => {
+  const ramp = Array.from({ length: 6 }, (_, i) => ({ glyph: String(i), width: 6, inkCoverage: (i + 1) / 10 }));
+  const cache = new InkPaletteCache(() => ({ usable: true, levels: 6, ramp, font: roles['globe-label'].font }));
+  const entry = await cache.prepare(fonts.serif, 8, 11, 1);
+  assert.deepEqual(entry.ocean, [ramp[0]]);
+  const draws = [];
+  const ctx = { setTransform() {}, clearRect() {}, fillText(text) { draws.push(text); } };
+  const renderer = new TextRenderer({ getContext: () => ctx }, new Node(), fonts);
+  renderer.palettes = cache;
+  renderer.resize(400, 400);
+  const level = { ...LEVELS[0], cellWidth: 8, cellHeight: 11 };
+  const water = { sample(lat, lon, lod, out) { out.country = 0; out.coast = false; out.border = false; } };
+  renderer.draw({ latitude: 0, longitude: 0, distance: 3.2 }, level, water, { serif: true, animateOcean: true, time: 1900 });
+  assert.ok(draws.length > 100);
+  assert.ok(draws.every(glyph => glyph === '0'));
 });

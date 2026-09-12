@@ -50,18 +50,63 @@ async function captureInk(page) {
   return page.evaluate(async () => {
     const canvas = document.getElementById('globe'), ctx = canvas.getContext('2d');
     const fillText = ctx.fillText, clearRect = ctx.clearRect;
-    let marks = [];
+    const expectedGlyphs = EARTHXT_DEBUG.snapshot().visibleGlyphs;
+    let marks = [], surface;
     ctx.fillText = function (text, x, y, ...rest) {
       marks.push({ text, x, y, font: this.font });
-      return fillText.call(this, text, x, y, ...rest);
+      const result = fillText.call(this, text, x, y, ...rest);
+      // Read the actual surface before country/place overlays are submitted.
+      // This expensive readback happens only in explicit comparison captures.
+      if (marks.length === expectedGlyphs) surface = this.getImageData(0, 0, canvas.width, canvas.height);
+      return result;
     };
-    ctx.clearRect = function (...args) { marks = []; return clearRect.apply(this, args); };
+    ctx.clearRect = function (...args) { marks = []; surface = null; return clearRect.apply(this, args); };
     try {
       document.getElementById('grid-toggle').dispatchEvent(new Event('change'));
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       const state = EARTHXT_DEBUG.snapshot({ includeGeometry: true });
       const raster = marks.slice(0, state.visibleGlyphs);
+      if (!surface || raster.length !== expectedGlyphs) throw new Error('A complete, stable raster capture is required');
+      const { grid, viewport } = state;
+      const radius = viewport.focal / Math.sqrt(state.distance ** 2 - 1);
+      const dprX = canvas.width / viewport.width, dprY = canvas.height / viewport.height;
+      const ramp = new Map(state.serifPalette.ramp?.map(g => [g.glyph, g]));
+      let centralLandCells = 0, luminance = 0, limbLandCells = 0, maxLimbCoverage = 0;
+      const linear = Array.from({ length: 256 }, (_, i) => i / 255 <= 0.04045 ? i / 255 / 12.92 : ((i / 255 + 0.055) / 1.055) ** 2.4);
+      for (const mark of raster) {
+        const glyph = state.serifActive ? ramp.get(mark.text) : null;
+        const x = mark.x + (glyph ? glyph.width / 2 : 0), y = mark.y;
+        const col = Math.round((x - grid.x) / grid.cellWidth - 0.5);
+        const row = Math.round((y - grid.y) / grid.cellHeight - 0.5);
+        if (!grid.countryIds[row * grid.cols + col]) continue;
+        const distance = Math.hypot(x - viewport.width / 2, y - viewport.height / 2);
+        if (distance >= radius * 0.9) {
+          limbLandCells++;
+          if (state.serifActive) {
+            if (!glyph) throw new Error('Limb glyph is missing from the measured ramp');
+            maxLimbCoverage = Math.max(maxLimbCoverage, glyph.inkCoverage);
+          }
+        }
+        if (distance > radius / 3) continue;
+        let sum = 0, area = 0;
+        const left = (grid.x + col * grid.cellWidth) * dprX, right = left + grid.cellWidth * dprX;
+        const top = (grid.y + row * grid.cellHeight) * dprY, bottom = top + grid.cellHeight * dprY;
+        for (let py = Math.max(0, Math.floor(top)); py < Math.min(canvas.height, Math.ceil(bottom)); py++) {
+          for (let px = Math.max(0, Math.floor(left)); px < Math.min(canvas.width, Math.ceil(right)); px++) {
+            const share = Math.max(0, Math.min(px + 1, right) - Math.max(px, left)) * Math.max(0, Math.min(py + 1, bottom) - Math.max(py, top));
+            const i = (py * canvas.width + px) * 4, data = surface.data;
+            // Alpha-weighted relative luminance of the emitted surface ink.
+            // Page background and labels cannot hide sparse land in this test.
+            sum += share * data[i + 3] / 255 * (0.2126 * linear[data[i]] + 0.7152 * linear[data[i + 1]] + 0.0722 * linear[data[i + 2]]);
+            area += share;
+          }
+        }
+        luminance += sum / area;
+        centralLandCells++;
+      }
       return { glyphs: [...new Set(raster.map(mark => mark.text))].sort(),
+        centralLandCells, centralLuminance: luminance / centralLandCells, limbLandCells, maxLimbCoverage,
+        coastCoverage: state.serifPalette.ramp?.at(-1).inkCoverage,
         rasterText: raster.map(mark => mark.text).join(''),
         rasterFonts: [...new Set(raster.map(mark => mark.font))],
         overlays: marks.slice(state.visibleGlyphs), grid: state.grid, labelPlacements: state.labelPlacements,
@@ -71,7 +116,7 @@ async function captureInk(page) {
   });
 }
 
-async function assertSerifToggle(page) {
+async function assertSerifToggle(page, { requireLimb = false } = {}) {
   await page.waitForFunction(() => {
     const state = EARTHXT_DEBUG.snapshot();
     return !state.autoRotate && state.distance === state.targetDistance;
@@ -90,6 +135,26 @@ async function assertSerifToggle(page) {
   for (const key of ['overlays', 'grid', 'labelPlacements', 'markers', 'placeLabels', 'nodes']) {
     assert.deepEqual(serif[key], mono[key], `${key} stays at the same pixels when Serif is toggled`);
   }
+  if (await page.evaluate(() => EARTHXT_DEBUG.snapshot().lod === 2)) {
+    assert.ok(mono.centralLandCells >= 20, 'Countries comparison samples central land');
+    assert.equal(serif.centralLandCells, mono.centralLandCells);
+    assert.ok(mono.centralLuminance > 0);
+    assert.ok(serif.centralLuminance >= mono.centralLuminance * 0.7,
+      `central land luminance: Serif ${serif.centralLuminance}, mono ${mono.centralLuminance}; minimum ratio 70%`);
+    if (requireLimb) assert.ok(serif.limbLandCells > 0, 'wide Countries fixture includes land in the outer tenth of the disc');
+    assert.ok(serif.maxLimbCoverage <= serif.coastCoverage, 'no submitted limb land glyph is denser than the coast glyph');
+    console.log('Countries land ink:', JSON.stringify({ mono: mono.centralLuminance, serif: serif.centralLuminance,
+      ratio: serif.centralLuminance / mono.centralLuminance, centralLandCells: serif.centralLandCells,
+      limbLandCells: serif.limbLandCells, maxLimbCoverage: serif.maxLimbCoverage, coastCoverage: serif.coastCoverage }));
+  }
+}
+
+function summarizeTiming(samples) {
+  const percentile = (key, p) => samples.map(sample => sample[key]).sort((a, b) => a - b)[Math.floor((samples.length - 1) * p)];
+  return { frames: samples.length, fps: 1000 * samples.length / samples.reduce((sum, sample) => sum + sample.intervalMs, 0),
+    intervalMs: { median: percentile('intervalMs', 0.5), p95: percentile('intervalMs', 0.95) },
+    cpuMs: { median: percentile('cpuMs', 0.5), p95: percentile('cpuMs', 0.95) },
+    labelMs: { median: percentile('labelMs', 0.5), p95: percentile('labelMs', 0.95) } };
 }
 
 let server, browser;
@@ -162,11 +227,7 @@ try {
     for (const key of ['intervalMs', 'cpuMs', 'labelMs']) assert.ok(Number.isFinite(sample[key]) && sample[key] >= 0);
     assert.ok(sample.labelMs <= sample.cpuMs);
   }
-  const percentile = (key, p) => rotation.samples.map(sample => sample[key]).sort((a, b) => a - b)[Math.floor((rotation.samples.length - 1) * p)];
-  const timing = { frames: rotation.samples.length,
-    intervalMs: { median: percentile('intervalMs', 0.5), p95: percentile('intervalMs', 0.95) },
-    cpuMs: { median: percentile('cpuMs', 0.5), p95: percentile('cpuMs', 0.95) },
-    labelMs: { median: percentile('labelMs', 0.5), p95: percentile('labelMs', 0.95) } };
+  const timing = summarizeTiming(rotation.samples);
   await writeFile(new URL('../../test-results/earthxt/countries-timing.json', import.meta.url), JSON.stringify({ timing, ...rotation }, null, 2) + '\n');
   console.log('Countries auto-rotation timing:', JSON.stringify(timing));
   await page.locator('#rotate-toggle').click();
@@ -189,17 +250,32 @@ try {
     return samples;
   });
   assert.ok(serifRotation.length > 1);
-  const serifP95 = key => serifRotation.map(sample => sample[key]).sort((a, b) => a - b)[Math.floor((serifRotation.length - 1) * 0.95)];
-  const serifTiming = { cpuMs: serifP95('cpuMs'), intervalMs: serifP95('intervalMs'), labelMs: serifP95('labelMs'), mono: timing };
-  await writeFile(new URL('../../test-results/earthxt/serif-timing.json', import.meta.url), JSON.stringify({ timing: serifTiming, samples: serifRotation }, null, 2) + '\n');
-  console.log('Countries Serif auto-rotation timing:', JSON.stringify(serifTiming));
+  const serifTiming = summarizeTiming(serifRotation);
+  await writeFile(new URL('../../test-results/earthxt/serif-timing.json', import.meta.url), JSON.stringify({ mono: timing, serif: serifTiming, samples: serifRotation }, null, 2) + '\n');
+  console.log('Countries auto-rotation comparison:', JSON.stringify({ mono: timing, serif: serifTiming }));
   assert.ok(serifRotation.every(sample => sample.serifActive && sample.lod === 2 && sample.labels));
-  assert.ok(serifTiming.cpuMs < 33.4, 'Serif p95 CPU submission stays below 33.4 ms');
-  assert.ok(serifTiming.intervalMs < 50, 'Serif p95 frame interval stays below 50 ms');
-  assert.ok(serifTiming.cpuMs <= Math.max(8, timing.cpuMs.p95 * 1.35), 'Serif keeps the mono CPU budget within 35% (8 ms floor)');
+  // Report observed fps for each mode; 52 fps Serif versus 60 fps mono is not
+  // equivalent performance. Gate the tail latency, not a rounded fps display.
+  for (const [mode, measured] of [['Mono', timing], ['Serif', serifTiming]]) {
+    assert.ok(measured.cpuMs.p95 < 33.4, `${mode} p95 CPU submission stays below 33.4 ms`);
+    assert.ok(measured.intervalMs.p95 < 50, `${mode} p95 frame interval stays below 50 ms`);
+  }
+  assert.ok(serifTiming.cpuMs.p95 <= Math.max(8, timing.cpuMs.p95 * 1.35), 'Serif keeps the mono p95 CPU budget within 35% (8 ms floor)');
   await page.locator('#rotate-toggle').click();
   await page.locator('#serif-toggle').uncheck();
   await page.waitForFunction(() => !EARTHXT_DEBUG.snapshot().serifActive);
+  // Countries' default close-up can crop away the limb. Widen the stage and
+  // use the outer edge of this LOD so the limb-density assertion is nonvacuous.
+  const originalViewport = page.viewportSize();
+  await page.setViewportSize({ width: 1920, height: 800 });
+  await page.locator('#zoom-slider').evaluate(slider => {
+    slider.value = '55'; slider.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await settled();
+  await assertSerifToggle(page, { requireLimb: true });
+  await page.locator('#serif-toggle').uncheck();
+  await page.setViewportSize(originalViewport);
+  await page.locator('[data-level="2"]').click(); await settled();
   await page.locator('#labels-toggle').uncheck();
   await page.waitForFunction(() => EARTHXT_DEBUG.snapshot().visibleLabels === 0);
   const hiddenNames = await page.evaluate(() => EARTHXT_DEBUG.snapshot({ includeGeometry: true }));

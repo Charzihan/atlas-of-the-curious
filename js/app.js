@@ -724,7 +724,7 @@
     var prevNode = null;
     places.forEach(function (p) {
       var cat = categoryById.get(p.category);
-      var el = cardFor(p, cat ? cat.accent : "#e8b45a");
+      var el = cardFor(p, cat ? "var(--category-" + cat.id + ", var(--gold))" : "var(--gold)");
       var slot = next.get(p.id);
       var old = slots.get(p.id);
       var isNew = !attached.has(p.id);
@@ -865,7 +865,7 @@
     var entries = [];
     places.forEach(function (p) {
       var cat = categoryById.get(p.category);
-      var el = cardFor(p, cat ? cat.accent : "#e8b45a");
+      var el = cardFor(p, cat ? "var(--category-" + cat.id + ", var(--gold))" : "var(--gold)");
       el.style.width = colW + "px";
       grid.appendChild(el); // pooled: re-appending moves the node
       attached.set(p.id, el);
@@ -1094,7 +1094,7 @@
       b.type = "button";
       b.className = "chip" + (state.category === c.id ? " active" : "");
       b.textContent = c.label + " · " + count;
-      b.style.setProperty("--chip-accent", c.accent);
+      b.style.setProperty("--chip-accent", "var(--category-" + c.id + ", var(--gold))");
       b.setAttribute("aria-pressed", String(state.category === c.id));
       b.addEventListener("click", function () { setCategory(c.id); });
       chipsEl.appendChild(b);
@@ -1153,7 +1153,7 @@
     var cat = categoryById.get(p.category);
     var card = $("daily-card");
     card.textContent = "";
-    card.style.setProperty("--card-accent", cat ? cat.accent : "#e8b45a");
+    card.style.setProperty("--card-accent", cat ? "var(--category-" + cat.id + ", var(--gold))" : "var(--gold)");
 
     var sym = document.createElement("span");
     sym.className = "card-symbol daily-symbol";
@@ -1228,10 +1228,10 @@
     var cat = categoryById.get(p.category);
 
     $("dialog-symbol").textContent = p.symbol;
-    $("dialog-symbol").style.color = cat ? cat.accent : "#e8b45a";
+    $("dialog-symbol").style.color = cat ? "var(--category-" + cat.id + ", var(--gold))" : "var(--gold)";
     var badge = $("dialog-category");
     badge.textContent = cat ? cat.label : "";
-    badge.style.setProperty("--card-accent", cat ? cat.accent : "#e8b45a");
+    badge.style.setProperty("--card-accent", cat ? "var(--category-" + cat.id + ", var(--gold))" : "var(--gold)");
     $("dialog-title").textContent = p.name;
     $("dialog-loc").textContent = p.country + " — " + p.region;
     $("dialog-tagline").textContent = p.tagline;

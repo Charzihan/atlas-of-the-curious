@@ -7,7 +7,9 @@ import { PlaceLayer } from '../../earthxt/place-layer.js';
 import { TextRenderer } from '../../earthxt/renderer.js';
 import { Geography } from '../../earthxt/geography.js';
 import { LEVELS } from '../../earthxt/lod.js';
-import { cellsOf } from '../../js/labels.js';
+import { cellsOf, createLabelEngine } from '../../js/labels.js';
+import { flowPreparationCount } from '../../js/map-art.js';
+import { validateCategoryColors } from '../../scripts/validate-data.mjs';
 import { readFontRoles, readFontFamily, createMetrics } from '../../js/text.js';
 import { readCategoryColors } from '../../js/category-colors.js';
 import { fitHoverTagline } from '../../js/hover-card.js';
@@ -45,6 +47,32 @@ test('all 40 atlas coordinates project; perspective horizon hides the far side',
   assert.equal(markers.find(marker => marker.id === 'zhangjiajie').visible, false);
   const antipode = projectPlaces([home], { latitude: -home.latitude, longitude: home.longitude + 180, distance: 2.05 }, viewport, grid)[0];
   assert.equal(antipode.visible, false);
+  const record = markers[0];
+  assert.equal(projectPlaces(places, { ...home, longitude: home.longitude + 20, distance: 2.05 }, viewport, grid, markers), markers);
+  assert.equal(markers[0], record, 'projection reuses marker records as well as the array');
+});
+
+test('setGrid reuses equal dimensions, refreshes land and clears occupancy without changing atlas results', () => {
+  const engine = createLabelEngine();
+  engine.setRoles({ 'map-label': role });
+  engine.setPlaces([{ id: 'test', name: 'Test Island', col: 50, row: 35 }]);
+  const land = new Uint8Array(grid.cols * grid.rows);
+  engine.setGrid({ ...grid, land });
+  const buffer = engine.occupancy();
+  const first = engine.place({ tier: 1, cellW: 10, dotCells: 1 });
+  const saved = structuredClone(first);
+  assert.ok(buffer.some(Boolean));
+  const nextLand = land.slice();
+  engine.setGrid({ ...grid, land: nextLand });
+  assert.equal(engine.occupancy(), buffer);
+  assert.equal(engine.land(), nextLand);
+  assert.ok(buffer.every(value => value === 0));
+  const next = engine.place({ tier: 1, cellW: 10, dotCells: 1 });
+  assert.deepEqual(next, saved);
+  assert.notEqual(next.labels, first.labels, 'default atlas outputs are independent');
+  assert.deepEqual(first, saved);
+  engine.setGrid({ cols: grid.rows, rows: grid.cols, land });
+  assert.notEqual(engine.occupancy(), buffer, 'changed shape resizes even at the same cell count');
 });
 
 function assertClear(out, blocked, grid) {
@@ -73,14 +101,20 @@ test('routed labels stay on a synthetic disc, clear land and markers, and reserv
   const markers = [{ id: 'island', col: 50, row: 35, visible: true }, { id: 'water', col: 58, row: 40, visible: true }];
   const camera = { latitude: 0, longitude: 0, distance: 2.05 };
   const router = createPlaceRouter(items, role), prepared = measurements;
+  const preparations = router.preparationCount(), flowCalls = flowPreparationCount();
   const out = router.update(camera, LEVELS[1], viewport, grid, blocked, markers, true);
+  const saved = structuredClone(out.labels), record = out.labels[0], line = record.lines[0], cell = record.cells[0];
   assert.equal(out.labels.length, 2);
   assertClear(out, blocked, grid);
   assert.ok(out.labels.every(label => label.rowSpan === 2));
   for (const label of out.labels) for (let i = 1; i < label.lines.length; i++) assert.ok(label.lines[i].row - label.lines[i - 1].row >= 2);
   const held = router.update({ ...camera, longitude: 0.001 }, LEVELS[1], viewport, grid, blocked, markers, true);
   assert.equal(router.passes(), 2, 'even subcell camera travel gets a placement pass');
-  assert.deepEqual(held.labels, out.labels);
+  assert.deepEqual(held.labels, saved);
+  assert.equal(held, out, 'frame result and its arrays are reused');
+  assert.equal(held.labels[0], record);
+  assert.equal(record.lines[0], line);
+  assert.equal(record.cells[0], cell);
   assert.ok(Number.isFinite(held.placeLabelMs) && held.placeLabelMs >= 0);
   const span = out.labels[0].cells[0];
   blocked[span.row * grid.cols + span.c0] = 1;
@@ -91,7 +125,9 @@ test('routed labels stay on a synthetic disc, clear land and markers, and reserv
   assert.equal(router.passes(), 4);
   blocked.fill(1);
   assert.equal(router.update(camera, LEVELS[1], viewport, grid, blocked, markers, true).labels.length, 0, 'no labels when there is no free water');
-  assert.equal(measurements, prepared, 'frames never prepare text or measure glyphs');
+  assert.equal(measurements, prepared, 'frames never measure glyphs');
+  assert.equal(router.preparationCount(), preparations, 'frames never prepare label handles');
+  assert.equal(flowPreparationCount(), flowCalls, 'frames never enter the shared prepare cache');
   assert.equal(router.update(camera, LEVELS[0], viewport, grid, blocked, markers, true).labels.length, 0);
   assert.equal(router.update(camera, LEVELS[2], viewport, grid, blocked, markers, false).labels.length, 0);
 });
@@ -121,7 +157,7 @@ test('a mask shifting one column per frame under fixed markers never drops a nam
         assert.equal(label.col, before.col + 1, 'the replacement follows the moving coast on the same side');
       }
     }
-    previous = out.labels;
+    previous = structuredClone(out.labels);
     // Move the entire mask one column right, including into the old labels.
     for (let row = 0; row < movingGrid.rows; row++) {
       const base = row * movingGrid.cols;
@@ -139,7 +175,7 @@ test('valid previous lines and offsets follow their marker even when a preferred
   const blocked = new Uint8Array(grid.cols * grid.rows);
   for (let row = 20; row < 50; row++) blocked.fill(1, row * grid.cols + 52, row * grid.cols + 60);
   const router = createPlaceRouter(items, role), camera = { latitude: 0, longitude: 0, distance: 2.05 };
-  const first = router.update(camera, LEVELS[1], viewport, grid, blocked, markers, true).labels[0];
+  const first = structuredClone(router.update(camera, LEVELS[1], viewport, grid, blocked, markers, true).labels[0]);
   assert.equal(first.anchor.dc, -1);
   blocked.fill(0);
   markers[0].col++; markers[0].row++;
@@ -205,6 +241,19 @@ test('both marker adapters resolve the atlas category palette from shared CSS', 
   const colors = readCategoryColors(registryDocument(registryCSS + css), win.ATLAS_DATA.categories);
   for (const category of win.ATLAS_DATA.categories) assert.equal(colors.get(category.id), category.accent);
   for (const file of ['js/map.js', 'earthxt/app.js']) assert.match(await readFile(new URL('../../' + file, import.meta.url), 'utf8'), /readCategoryColors/);
+  assert.deepEqual(validateCategoryColors(win.ATLAS_DATA.categories, css), []);
+  const category = { ...win.ATLAS_DATA.categories[0], accent: '#000000' };
+  assert.match(validateCategoryColors([category], css).join('\n'), /differs from CSS token/);
+  delete category.accent;
+  assert.deepEqual(validateCategoryColors([category], css), [], 'documentation field is optional');
+  assert.match(validateCategoryColors([category], '').join('\n'), /missing CSS token/);
+  const changedCSS = css.replace('--category-geology: #e8b45a', '--category-geology: #123456');
+  assert.equal(readCategoryColors(registryDocument(changedCSS), [category]).get(category.id), '#123456');
+  for (const file of ['js/app.js', 'js/dialog.js', 'js/place.js', 'scripts/build-place-pages.mjs']) {
+    const source = await readFile(new URL('../../' + file, import.meta.url), 'utf8');
+    assert.doesNotMatch(source, /\.accent\b|data-accent/);
+    assert.match(source, /--category-|data-category/);
+  }
 });
 
 
@@ -237,7 +286,10 @@ test('place adapter mirrors visibility, paints tracked names without preparation
       const camera = { ...here, distance: 2.05 };
       const blocked = new Uint8Array(grid.cols * grid.rows);
       const prepared = measurements;
+      const preparations = flowPreparationCount(), labelPreparations = adapter.router.preparationCount();
+      const markerArray = adapter.markers;
       adapter.draw(ctx, camera, LEVELS[1], viewport, grid, blocked, true, true);
+      const labelArray = adapter.labels, markerRecord = adapter.markers[0], markerCells = adapter.markerCells;
       const visible = adapter.markers.filter(marker => marker.visible);
       assert.equal(dots.length, visible.length);
       for (const marker of adapter.markers) assert.equal(adapter.nodes.get(marker.id).hidden, !marker.visible);
@@ -257,11 +309,17 @@ test('place adapter mirrors visibility, paints tracked names without preparation
       delete ctx.letterSpacing;
       marks.length = 0;
       adapter.draw(ctx, camera, LEVELS[1], viewport, grid, blocked, true, true);
+      assert.equal(adapter.markers, markerArray);
+      assert.equal(adapter.markers[0], markerRecord);
+      assert.equal(adapter.labels, labelArray);
+      assert.equal(adapter.markerCells, markerCells);
       assert.equal(marks.map(mark => mark.text).join(''), lines.join(''), 'fallback submits cached graphemes for every routed line');
       adapter.draw(ctx, camera, LEVELS[1], viewport, grid, blocked, true, false);
       assert.equal(adapter.card.hidden, true);
       assert.ok([...adapter.nodes.values()].every(node => node.hidden));
       assert.equal(measurements, prepared, 'show/draw/activation do not prepare or measure text');
+      assert.equal(flowPreparationCount(), preparations, 'draw/show never enter the shared prepare cache, including warm hits');
+      assert.equal(adapter.router.preparationCount(), labelPreparations);
       assert.equal(destinations.length, count);
     }
     assert.equal(destinations.length, 1, 'standalone click did not navigate');

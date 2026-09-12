@@ -4,6 +4,8 @@
    shared link reads as part of the same site, and link straight back to the
    interactive atlas. Kept self-contained (no JS required to read a place). */
 
+@import url("./tokens.css");
+
 :root {
   --bg: #0b1020;
   --bg-soft: #101733;

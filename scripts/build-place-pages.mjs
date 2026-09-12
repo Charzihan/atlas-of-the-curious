@@ -52,7 +52,6 @@ function nativeBlock(p) {
 }
 
 function pageFor(p, cat) {
-  const accent = cat ? cat.accent : "#e8b45a";
   const title = `${p.name}, ${p.country} — Atlas of the Curious`;
   const desc = p.tagline;
   return `<!DOCTYPE html>
@@ -79,9 +78,9 @@ function pageFor(p, cat) {
     <a class="back" href="../../">&#8592; Back to the atlas</a>
     <p class="kicker">Hand-curated field note</p>
     <div class="head">
-      <span class="symbol" data-accent="${esc(accent)}" aria-hidden="true">${esc(p.symbol)}</span>
+      <span class="symbol" data-category="${esc(p.category)}" aria-hidden="true">${esc(p.symbol)}</span>
       <div>
-        <span class="badge" data-accent="${esc(accent)}">${esc(cat ? cat.label : "")}</span>
+        <span class="badge" data-category="${esc(p.category)}">${esc(cat ? cat.label : "")}</span>
         <h1>${esc(p.name)}</h1>${nativeBlock(p)}
         <p class="loc">${esc(p.country)} &mdash; ${esc(p.region)}</p>
       </div>
