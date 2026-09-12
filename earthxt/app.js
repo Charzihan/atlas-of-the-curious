@@ -10,6 +10,7 @@ const state = { ...HOME, targetDistance: HOME.distance, autoRotate: !reducedMoti
 let geography = null, renderer, level = selectLOD(distanceToZoom(state.distance));
 let dirty = true, lastTime = 0, lastOceanPhase = -1, frameId = 0, metricTime = 0, renderedFrames = 0;
 let fps = 0, projectionSum = 0, renderSum = 0, averageProjection = 0, averageRender = 0;
+let labelSum = 0, averageLabels = 0, frameNumber = 0;
 const pointers = new Map();
 let pinchDistance = 0;
 
@@ -80,7 +81,8 @@ function updateMetrics() {
       'Camera distance': `${state.distance.toFixed(3)} R⊕`,
       'Projection + lookup': `${averageProjection.toFixed(2)} ms`,
       'Text render + labels': `${averageRender.toFixed(2)} ms`,
-      'Country labels': metrics.visibleLabels,
+      'Name layout + drawing': `${metrics.labelMs.toFixed(2)} ms (avg ${averageLabels.toFixed(2)})`,
+      'Silhouette / pill names': `${metrics.silhouetteLabels} / ${metrics.fallbackLabels}`,
       'Resident geography': geography ? `${(geography.loadedBytes / 1024).toFixed(1)} KiB` : 'None',
       'JS heap': performance.memory ? `${(performance.memory.usedJSHeapSize / 1024 / 1024).toFixed(1)} MiB` : 'Unavailable',
       'Source': state.source === 'earth' ? 'Natural Earth 110m' : 'Synthetic field',
@@ -113,16 +115,19 @@ function frame(time) {
     const metrics = renderer.draw(state, level, state.source === 'earth' && geography ? geography : syntheticGeography,
       { labels: state.labels, grid: state.grid, animateOcean: !reducedMotion.matches, time });
     renderedFrames++;
+    frameNumber++;
     projectionSum += metrics.projectionMs;
     renderSum += metrics.renderMs;
+    labelSum += metrics.labelMs;
     dirty = false;
   }
   if (time - metricTime >= 600) {
     fps = renderedFrames * 1000 / (time - metricTime);
     averageProjection = renderedFrames ? projectionSum / renderedFrames : 0;
     averageRender = renderedFrames ? renderSum / renderedFrames : 0;
+    averageLabels = renderedFrames ? labelSum / renderedFrames : 0;
     updateMetrics();
-    renderedFrames = 0; projectionSum = 0; renderSum = 0; metricTime = time;
+    renderedFrames = 0; projectionSum = 0; renderSum = 0; labelSum = 0; metricTime = time;
   }
   frameId = requestAnimationFrame(frame);
 }
@@ -210,7 +215,7 @@ function setupControls() {
   reducedMotion.addEventListener('change', () => { if (reducedMotion.matches) setRotation(false); dirty = true; });
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) { cancelAnimationFrame(frameId); frameId = 0; }
-    else { lastTime = 0; metricTime = performance.now(); renderedFrames = 0; projectionSum = 0; renderSum = 0; dirty = true; if (!frameId) frameId = requestAnimationFrame(frame); }
+    else { lastTime = 0; metricTime = performance.now(); renderedFrames = 0; projectionSum = 0; renderSum = 0; labelSum = 0; dirty = true; if (!frameId) frameId = requestAnimationFrame(frame); }
   });
 }
 async function main() {
@@ -241,8 +246,9 @@ async function main() {
   updateLOD(level);
   metricTime = performance.now();
   // Read-only instrumentation for manual profiling and end-to-end verification.
-  window.EARTHXT_DEBUG = Object.freeze({ snapshot: () => ({ ...state, lod: level.index, lodId: level.id,
-    ...renderer.metrics, fps, averageProjection, averageRender, loadedBytes: geography?.loadedBytes ?? 0,
+  window.EARTHXT_DEBUG = Object.freeze({ snapshot: ({ includeGeometry = false } = {}) => ({ ...state, lod: level.index, lodId: level.id,
+    ...renderer.metrics, fps, averageProjection, averageRender, averageLabels, frameNumber, loadedBytes: geography?.loadedBytes ?? 0,
+    ...(includeGeometry ? renderer.labelSnapshot() : {}),
     countryCount: geography?.countries.length ?? 0, viewport: { ...renderer.viewport },
     reducedMotion: reducedMotion.matches, activePointers: pointers.size, ready: true }) });
   updateMetrics();

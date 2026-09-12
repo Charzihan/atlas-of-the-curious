@@ -13,7 +13,7 @@ test('static output contains the whole graph and resolves within dist at a neste
   const graph = await runtimeGraph();
   const builtGraph = await runtimeGraph(undefined, output);
   assert.deepEqual([...builtGraph.keys()], [...graph.keys()]);
-  for (const required of ['earthxt/app.js', 'js/text.js', 'vendor/pretext/layout.js', 'vendor/pretext/generated/bidi-data.js', 'css/fonts.css']) {
+  for (const required of ['earthxt/app.js', 'js/map-art.js', 'js/labels.js', 'js/text-route.js', 'js/text.js', 'vendor/pretext/layout.js', 'vendor/pretext/generated/bidi-data.js', 'css/fonts.css']) {
     assert.ok(graph.has(required), required);
   }
   const servedRoot = new URL('https://static.example/project/');

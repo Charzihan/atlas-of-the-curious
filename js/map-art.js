@@ -225,13 +225,18 @@ export function countrySlots(poly, top, bottom, lineHeight, minRun) {
   return slots;
 }
 
-export function createMapArtEngine() {
-  const cache = new Map();
-  function prepare(text, font) {
-    const key = font + '\n' + text;
-    if (!cache.has(key)) cache.set(key, prepareWithSegments(text, font));
-    return cache.get(key);
-  }
+const flowCache = new Map();
+
+// Both silhouette adapters share preparation and line breaking. Animation
+// callers warm this cache before their loop and pass the handle to the flow.
+export function prepareFlowText(text, font, { letterSpacing = 0 } = {}) {
+  const key = JSON.stringify([font, letterSpacing, text]);
+  if (!flowCache.has(key)) flowCache.set(key, prepareWithSegments(text, font, { letterSpacing }));
+  return flowCache.get(key);
+}
+
+export function flowIntoSlots(text, font, slots, { wholeWords = false, letterSpacing = 0, prepared, maxLines = Infinity } = {}) {
+  const pre = prepared || prepareFlowText(text, font, { letterSpacing });
   // The width of the next whole word still to be set. pretext breaks a word at
   // grapheme boundaries when it cannot fit, which is right for a paragraph and
   // wrong for a shape: a run too narrow for the coming word stays empty.
@@ -239,24 +244,28 @@ export function createMapArtEngine() {
     if (cursor.graphemeIndex > 0) return 0; // already inside a word: finish it
     let i = cursor.segmentIndex;
     while (i < pre.kinds.length && pre.kinds[i] !== 'text') i++;
-    return i < pre.widths.length ? pre.widths[i] : 0;
+    return i < pre.widths.length ? pre.widths[i] + pre.letterSpacing : 0;
   }
-  function flow(text, font, slots, wholeWords) {
-    const pre = prepare(text, font);
-    let cursor = { segmentIndex: 0, graphemeIndex: 0 };
-    const lines = [];
-    for (const slot of slots) {
-      if (slot.width < 20) continue;
-      if (wholeWords && slot.width < nextWordWidth(pre, cursor)) continue;
-      const range = layoutNextLineRange(pre, cursor, slot.width);
-      if (!range) break;
-      const line = materializeLineRange(pre, range);
-      if (line.width > slot.width + 0.01) continue;
-      lines.push({ ...slot, text: line.text, width: line.width });
-      cursor = range.end;
-    }
-    return { lines, complete: layoutNextLineRange(pre, cursor, 1e7) === null };
+  let cursor = { segmentIndex: 0, graphemeIndex: 0 };
+  const lines = [];
+  for (const slot of slots) {
+    if (lines.length >= maxLines) break;
+    if (slot.width < 20) continue;
+    if (wholeWords && slot.width < nextWordWidth(pre, cursor)) continue;
+    const range = layoutNextLineRange(pre, cursor, slot.width);
+    if (!range) break;
+    const line = materializeLineRange(pre, range);
+    if (line.width > slot.width + 0.01) continue;
+    lines.push({ ...slot, text: line.text, width: line.width });
+    cursor = range.end;
   }
+  return { lines, complete: layoutNextLineRange(pre, cursor, 1e7) === null };
+}
+
+export function createMapArtEngine() {
+  const cache = new Map();
+  const prepare = prepareFlowText;
+  const flow = (text, font, slots, wholeWords) => flowIntoSlots(text, font, slots, { wholeWords });
   /* ---- The silhouette --------------------------------------------------
      A country arrives as simplified lon/lat rings (js/landmap.js `outlines`),
      not as grid cells: even the 240x62 land grid is far too coarse to hold

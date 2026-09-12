@@ -27,7 +27,7 @@ test('atlas and globe share one complete CSS font registry', async () => {
   assert.ok(html.indexOf('../css/fonts.css') < html.indexOf('./styles.css'));
 });
 
-test('Earthxt JavaScript contains no font family literals or direct label measurement', async () => {
+test('Earthxt JavaScript contains no font family literals or frame-time measurement', async () => {
   const families = ['serif', 'sans-serif', 'monospace', 'ui-monospace', 'Arial', 'Helvetica'];
   for (const match of registryCSS.matchAll(/--font-(?:mono|serif|sans):([^;]+);/g)) {
     families.push(...match[1].split(',').map(name => name.trim().replaceAll('"', '')));
@@ -39,6 +39,10 @@ test('Earthxt JavaScript contains no font family literals or direct label measur
       const escaped = family.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       assert.doesNotMatch(source, new RegExp(`['"\x60][^'"\x60\\n]*\\b${escaped}\\b[^'"\x60\\n]*['"\x60]`, 'i'), file);
     }
-    assert.doesNotMatch(source, /\.measureText\(/, file);
+    if (file === 'renderer.js') {
+      // Canvas ink bounds are needed at preparation, but advances still come
+      // from pretext. The recorder separately counts both kinds of measurement.
+      assert.doesNotMatch(source.slice(source.indexOf('  draw(camera')), /\.measureText\(|prepareFlowText\(/, file);
+    } else assert.doesNotMatch(source, /\.measureText\(/, file);
   }
 });

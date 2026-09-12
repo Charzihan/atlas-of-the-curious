@@ -2,9 +2,47 @@
  * Run npm run build:earthxt first, then npm run smoke:earthxt.
  */
 import assert from 'node:assert/strict';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { startServer, launchChromium } from '../browser-harness.mjs';
 import { buildStandalone } from './standalone.mjs';
+
+function assertSilhouetteContainment(snapshot) {
+  const { grid, labelPlacements } = snapshot;
+  const silhouettes = labelPlacements.filter(label => label.mode === 'silhouette');
+  assert.ok(silhouettes.length >= 3, 'at least three country names are silhouette-set over Africa');
+  assert.equal(silhouettes.length, snapshot.silhouetteLabels);
+  const inside = (box, slot) => box.x >= slot.x - 1e-7 && box.y >= slot.y - 1e-7 &&
+    box.x + box.width <= slot.x + slot.width + 1e-7 && box.y + box.height <= slot.y + slot.height + 1e-7;
+  const ownCells = (box, id) => {
+    const left = Math.floor((box.x - grid.x + 1e-7) / grid.cellWidth);
+    const right = Math.ceil((box.x + box.width - grid.x - 1e-7) / grid.cellWidth);
+    const top = Math.floor((box.y - grid.y + 1e-7) / grid.cellHeight);
+    const bottom = Math.ceil((box.y + box.height - grid.y - 1e-7) / grid.cellHeight);
+    assert.ok(left >= 0 && right <= grid.cols && top >= 0 && bottom <= grid.rows);
+    for (let row = top; row < bottom; row++) for (let col = left; col < right; col++) {
+      assert.equal(grid.countryIds[row * grid.cols + col], id, `country ${id} owns drawn cell ${col},${row}`);
+    }
+  };
+  const boxes = [];
+  for (const label of labelPlacements) {
+    if (label.mode === 'pill') { boxes.push(label.box); continue; }
+    assert.ok(label.lines.length > 0 && label.lines.length <= 3);
+    for (const line of label.lines) {
+      assert.ok(inside(line.box, line.slot), `${label.name} ink stays in its slot`);
+      ownCells(line.slot, label.id);
+      ownCells(line.box, label.id);
+      for (const glyph of line.glyphs) {
+        assert.ok(inside(glyph.box, line.slot), `${label.name}: ${glyph.text} stays in its slot`);
+        ownCells(glyph.box, label.id);
+      }
+      boxes.push(line.box);
+    }
+  }
+  for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+    const a = boxes[i], b = boxes[j];
+    assert.ok(a.x + a.width <= b.x || b.x + b.width <= a.x || a.y + a.height <= b.y || b.y + b.height <= a.y, 'names do not overlap');
+  }
+}
 
 let server, browser;
 try {
@@ -47,10 +85,50 @@ try {
   await page.locator('#globe').focus();
   for (let i = 0; i < 8; i++) await page.keyboard.press('ArrowRight');
   await page.locator('[data-level="2"]').click(); await settled();
-  assert.ok((await snapshot()).visibleLabels >= 2);
+  await page.waitForFunction(() => EARTHXT_DEBUG.snapshot().silhouetteLabels >= 3);
+  assertSilhouetteContainment(await page.evaluate(() => EARTHXT_DEBUG.snapshot({ includeGeometry: true })));
   await page.screenshot({ path: new URL('../../test-results/earthxt/countries.png', import.meta.url).pathname, fullPage: true });
+  // Sample actual rendered frames with names enabled. CPU submission and rAF
+  // intervals are reported separately; this is not a GPU completion benchmark.
+  await page.locator('#rotate-toggle').click();
+  await page.waitForFunction(() => EARTHXT_DEBUG.snapshot().autoRotate);
+  const rotation = await page.evaluate(async () => {
+    const samples = [];
+    const start = performance.now(), initial = EARTHXT_DEBUG.snapshot();
+    let previousFrame = initial.frameNumber, previousTime = 0;
+    while (performance.now() - start < 2000) {
+      const time = await new Promise(resolve => requestAnimationFrame(resolve));
+      const state = EARTHXT_DEBUG.snapshot();
+      if (state.frameNumber === previousFrame) continue;
+      if (previousTime) samples.push({ intervalMs: time - previousTime, cpuMs: state.projectionMs + state.renderMs,
+        labelMs: state.labelMs, silhouetteLabels: state.silhouetteLabels, lod: state.lod, labels: state.labels });
+      previousFrame = state.frameNumber; previousTime = time;
+    }
+    return { samples, fromLongitude: initial.longitude, toLongitude: EARTHXT_DEBUG.snapshot().longitude };
+  });
+  assert.ok(rotation.samples.length > 1, 'rotation produced multiple rendered frames');
+  assert.ok(rotation.toLongitude > rotation.fromLongitude);
+  for (const sample of rotation.samples) {
+    assert.equal(sample.lod, 2); assert.equal(sample.labels, true);
+    assert.ok(sample.silhouetteLabels >= 3);
+    for (const key of ['intervalMs', 'cpuMs', 'labelMs']) assert.ok(Number.isFinite(sample[key]) && sample[key] >= 0);
+    assert.ok(sample.labelMs <= sample.cpuMs);
+  }
+  const percentile = (key, p) => rotation.samples.map(sample => sample[key]).sort((a, b) => a - b)[Math.floor((rotation.samples.length - 1) * p)];
+  const timing = { frames: rotation.samples.length,
+    intervalMs: { median: percentile('intervalMs', 0.5), p95: percentile('intervalMs', 0.95) },
+    cpuMs: { median: percentile('cpuMs', 0.5), p95: percentile('cpuMs', 0.95) },
+    labelMs: { median: percentile('labelMs', 0.5), p95: percentile('labelMs', 0.95) } };
+  await writeFile(new URL('../../test-results/earthxt/countries-timing.json', import.meta.url), JSON.stringify({ timing, ...rotation }, null, 2) + '\n');
+  console.log('Countries auto-rotation timing:', JSON.stringify(timing));
+  await page.locator('#rotate-toggle').click();
+  assertSilhouetteContainment(await page.evaluate(() => EARTHXT_DEBUG.snapshot({ includeGeometry: true })));
   await page.locator('#labels-toggle').uncheck();
   await page.waitForFunction(() => EARTHXT_DEBUG.snapshot().visibleLabels === 0);
+  const hiddenNames = await page.evaluate(() => EARTHXT_DEBUG.snapshot({ includeGeometry: true }));
+  assert.equal(hiddenNames.silhouetteLabels, 0); assert.equal(hiddenNames.fallbackLabels, 0);
+  assert.deepEqual(hiddenNames.labelPlacements, []);
+  assert.equal(await page.locator('.country-label:visible').count(), 0);
   await page.locator('#labels-toggle').check();
   await page.locator('#grid-toggle').check(); assert.equal((await snapshot()).grid, true);
   await page.locator('#source-synthetic').click();
@@ -123,7 +201,7 @@ try {
   await offline.waitForFunction(() => EARTHXT_DEBUG.snapshot().lod === 2);
   assert.deepEqual(externalRequests, []);
   assert.deepEqual(errors, []);
-  console.log('PASS: deployed subpath, all LODs, drag, wheel, zoom limits, labels, source modes, keyboard, dialogs, reduced motion, mobile layout, touch rotation/pinch/cancel, load-error fallback, and standalone file without HTTP access.');
+  console.log('PASS: deployed subpath, all LODs, drag, wheel, zoom limits, silhouette name containment, rotation timing sample, labels toggle, source modes, keyboard, dialogs, reduced motion, mobile layout, touch rotation/pinch/cancel, load-error fallback, and standalone file without HTTP access.');
   console.log('Browser captures: test-results/earthxt/');
 } catch (error) {
   console.error(`Earthxt browser smoke failed: ${error.message}`);
