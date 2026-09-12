@@ -15,6 +15,7 @@
     "test:earthxt": "node --test test/earthxt/*.test.mjs",
     "smoke:earthxt": "node scripts/earthxt/smoke.mjs",
     "build:earthxt": "node scripts/earthxt/build.mjs",
+    "build:earthxt-standalone": "node scripts/earthxt/standalone.mjs",
     "build:earthxt-data": "node scripts/earthxt/build-data.mjs",
     "postinstall": "node scripts/vendor.mjs"
   },

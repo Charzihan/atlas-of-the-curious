@@ -2,6 +2,7 @@
 node_modules/
 dist/
 test-results/
+/earthxt-standalone.html
 
 # The Natural Earth sources are only inputs to pnpm build-map; they are not
 # needed at runtime and are large, so keep them out of deploys/exports.

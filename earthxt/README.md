@@ -11,6 +11,14 @@ npm start
 
 The existing Atlas of the Curious remains available at `/`. Its header links to Earthxt. Earthxt itself uses no runtime dependencies, external fonts, map services, API keys, or backend. The development server is only a static file server.
 
+If localhost is unavailable, generate the standalone edition:
+
+```sh
+npm run build:earthxt-standalone
+```
+
+Open `earthxt-standalone.html` from the repository root directly in your browser (or drag it into a browser window). This single file embeds the same app, styles, and geographic data, with no HTTP server or network connection required. The generated file is ignored by Git and can be regenerated at any time. Its content security policy permits only its own hashed script/styles and embedded data.
+
 ## Interaction
 
 - Drag with a mouse or one finger to rotate. A drag pauses automatic rotation.

@@ -4,9 +4,11 @@
 import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
 import { startServer, launchChromium } from '../browser-harness.mjs';
+import { buildStandalone } from './standalone.mjs';
 
 let server, browser;
 try {
+  const standalone = await buildStandalone();
   server = await startServer();
   const launch = await launchChromium();
   if (!launch.browser) throw new Error(launch.reason);
@@ -105,9 +107,23 @@ try {
   assert.equal(await fallback.evaluate(() => EARTHXT_DEBUG.snapshot().source), 'synthetic');
   assert.ok(await fallback.locator('#data-error').isVisible());
   assert.ok(await fallback.locator('#source-earth').isDisabled());
+  // Opening the standalone file must work with all HTTP access blocked.
+  const offline = await context.newPage();
+  offline.on('pageerror', error => errors.push(error.message));
+  offline.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+  await offline.route(/^https?:/, route => {
+    externalRequests.push(route.request().url());
+    return route.abort();
+  });
+  await offline.goto(standalone.output.href);
+  await offline.waitForFunction(() => window.EARTHXT_DEBUG?.snapshot().visibleGlyphs > 500);
+  assert.equal(await offline.evaluate(() => EARTHXT_DEBUG.snapshot().countryCount), 177);
+  assert.equal(await offline.evaluate(() => EARTHXT_DEBUG.snapshot().source), 'earth');
+  await offline.locator('[data-level="2"]').click();
+  await offline.waitForFunction(() => EARTHXT_DEBUG.snapshot().lod === 2);
   assert.deepEqual(externalRequests, []);
   assert.deepEqual(errors, []);
-  console.log('PASS: deployed subpath, all LODs, drag, wheel, zoom limits, labels, source modes, keyboard, dialogs, reduced motion, mobile layout, touch rotation/pinch/cancel, and load-error fallback.');
+  console.log('PASS: deployed subpath, all LODs, drag, wheel, zoom limits, labels, source modes, keyboard, dialogs, reduced motion, mobile layout, touch rotation/pinch/cancel, load-error fallback, and standalone file without HTTP access.');
   console.log('Browser captures: test-results/earthxt/');
 } catch (error) {
   console.error(`Earthxt browser smoke failed: ${error.message}`);
