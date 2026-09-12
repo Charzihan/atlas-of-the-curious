@@ -1,17 +1,9 @@
 @import url("fonts.css");
+@import url("tokens.css");
 
 /* Atlas of the Curious — styles. No external fonts, no external assets. */
 
 :root {
-  --bg: #0b1020;
-  --bg-soft: #101733;
-  --panel: #141c3a;
-  --panel-2: #1a2450;
-  --ink: #e8ecf8;
-  --ink-dim: #9aa4c8;
-  --gold: #e8b45a;
-  --gold-soft: rgba(232, 180, 90, 0.16);
-  --line: rgba(154, 164, 200, 0.18);
   --radius: 14px;
   --shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
 

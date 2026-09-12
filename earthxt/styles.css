@@ -1,12 +1,5 @@
 :root{
   color-scheme:dark;
-  --bg:#101512;
-  --panel:#121915;
-  --ink:#e1e6da;
-  --muted:#919e91;
-  --subtle:#69796c;
-  --accent:#c6dfb3;
-  --line:#29332b;
   --mono:var(--font-mono);
   font-family:var(--font-sans);
   background:var(--bg);
@@ -39,7 +32,7 @@ a{
   text-decoration:none
 }
 button:focus-visible,a:focus-visible,input:focus-visible,canvas:focus-visible{
-  outline:2px solid var(--accent);
+  outline:2px solid var(--gold);
   outline-offset:5px
 }
 button:disabled{
@@ -50,7 +43,7 @@ button:disabled{
   display:none!important
 }
 button:hover{
-  color:var(--accent)
+  color:var(--gold)
 }
 .app-shell{
   max-width:1920px;
@@ -66,34 +59,38 @@ button:hover{
   border-bottom:1px solid var(--line);
   gap:25px
 }
-.wordmark{
-  font-size:29px;
-  font-weight:600;
-  letter-spacing:-1.8px;
+.header-identity{
   display:flex;
   align-items:center;
-  gap:9px
+  gap:12px
+}
+.brand{
+  font-family:var(--font-serif);
+  font-size:1.15rem;
+  letter-spacing:.02em;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  white-space:nowrap
 }
 .brand-icon{
-  font-size:35px;
-  font-weight:400;
-  color:var(--accent);
+  font-size:1.3rem;
+  color:var(--gold);
   line-height:1
 }
-.version{
+.view-label{
   font:9px var(--mono);
   letter-spacing:.4px;
-  color:var(--muted);
+  color:var(--ink-dim);
   border:1px solid var(--line);
   border-radius:3px;
-  padding:5px 6px;
-  margin:3px 0 0 10px
+  padding:5px 6px
 }
 .header-note{
   margin:auto;
   font:9px var(--mono);
   letter-spacing:1.6px;
-  color:var(--subtle)
+  color:var(--ink-dim)
 }
 .text-button{
   font-size:12px;
@@ -104,7 +101,7 @@ button:hover{
 }
 .text-button span{
   font-size:17px;
-  color:var(--accent)
+  color:var(--gold)
 }
 .workspace{
   display:grid;
@@ -120,7 +117,7 @@ button:hover{
 .eyebrow{
   font:9px var(--mono);
   letter-spacing:1.4px;
-  color:var(--muted);
+  color:var(--ink-dim);
   display:flex;
   align-items:center;
   gap:8px;
@@ -131,7 +128,7 @@ button:hover{
   width:5px;
   height:5px;
   border-radius:50%;
-  background:var(--accent);
+  background:var(--gold);
   flex:none
 }
 .intro h1{
@@ -144,11 +141,11 @@ button:hover{
 .intro h1 em{
   font-family:var(--font-serif);
   font-weight:400;
-  color:var(--accent);
+  color:var(--gold);
   letter-spacing:-3px
 }
 .intro-copy{
-  color:var(--muted);
+  color:var(--ink-dim);
   font-size:12px;
   line-height:1.85;
   margin:0;
@@ -164,7 +161,7 @@ button:hover{
   gap:15px;
   font:9px var(--mono);
   letter-spacing:1px;
-  color:var(--subtle)
+  color:var(--ink-dim)
 }
 .section-heading h2{
   font:inherit;
@@ -188,15 +185,15 @@ button:hover{
   transition:background .2s,border-color .2s
 }
 .level-button.is-active{
-  background:#202b21;
-  border-color:#3a4b36
+  background:var(--gold-soft);
+  border-color:var(--gold)
 }
 .level-index{
   font:10px var(--mono);
-  color:var(--subtle)
+  color:var(--ink-dim)
 }
 .is-active .level-index{
-  color:var(--accent)
+  color:var(--gold)
 }
 .level-button strong{
   display:block;
@@ -206,19 +203,19 @@ button:hover{
 .level-button small{
   display:block;
   font-size:10px;
-  color:var(--subtle);
+  color:var(--ink-dim);
   margin-top:5px
 }
 .level-symbol{
   margin-left:auto;
   font:22px var(--mono);
-  color:var(--subtle)
+  color:var(--ink-dim)
 }
 .is-active .level-symbol{
-  color:var(--accent)
+  color:var(--gold)
 }
 .detail-note{
-  color:var(--subtle);
+  color:var(--ink-dim);
   font-size:10px;
   margin:12px 0 0
 }
@@ -236,11 +233,11 @@ button:hover{
   min-height:33px;
   cursor:pointer;
   font-size:11px;
-  color:#b0bbae
+  color:var(--ink-dim)
 }
 .setting-row small{
   font-size:9px;
-  color:var(--subtle);
+  color:var(--ink-dim);
   margin-left:5px
 }
 .setting-row input{
@@ -254,7 +251,7 @@ button:hover{
 .switch{
   height:14px;
   width:26px;
-  background:#354035;
+  background:var(--panel-2);
   border-radius:10px;
   pointer-events:none
 }
@@ -263,20 +260,20 @@ button:hover{
   display:block;
   width:10px;
   height:10px;
-  background:#92a08e;
+  background:var(--ink-dim);
   border-radius:50%;
   margin:2px;
   transition:transform .15s
 }
 .setting-row input:checked+.switch{
-  background:#a2bd8f
+  background:var(--gold)
 }
 .setting-row input:checked+.switch:before{
-  background:#263623;
+  background:var(--bg);
   transform:translateX(12px)
 }
 .setting-row input:focus-visible+.switch{
-  outline:2px solid var(--accent);
+  outline:2px solid var(--gold);
   outline-offset:4px
 }
 .source-control{
@@ -299,15 +296,15 @@ button:hover{
   font-size:10px;
   padding:6px 10px;
   border-radius:3px;
-  color:var(--muted)
+  color:var(--ink-dim)
 }
 .segmented button[aria-pressed=true]{
-  background:#2b372b;
-  color:var(--accent)
+  background:var(--gold-soft);
+  color:var(--gold)
 }
 .source-note{
   font-size:9px;
-  color:var(--subtle);
+  color:var(--ink-dim);
   margin:15px 0 18px
 }
 .globe-panel{
@@ -317,7 +314,7 @@ button:hover{
   overflow:hidden;
   border:1px solid var(--line);
   border-radius:8px;
-  background:radial-gradient(ellipse at 48% 45%,#18231b80,transparent 65%),#111713
+  background:radial-gradient(ellipse at 48% 45%,color-mix(in srgb,var(--panel) 50%,transparent),transparent 65%),var(--bg-soft)
 }
 .globe-panel:before{
   content:"";
@@ -325,7 +322,7 @@ button:hover{
   inset:0;
   pointer-events:none;
   opacity:.16;
-  background-image:radial-gradient(#9aaa91 0.6px,transparent .6px);
+  background-image:radial-gradient(var(--ink-dim) 0.6px,transparent .6px);
   background-size:26px 26px
 }
 .view-topline{
@@ -340,7 +337,7 @@ button:hover{
   gap:10px;
   font:9px var(--mono);
   letter-spacing:1px;
-  color:var(--subtle);
+  color:var(--ink-dim);
   pointer-events:none
 }
 .view-topline>span:first-child{
@@ -371,7 +368,7 @@ button:hover{
   position:absolute;
   left:50%;
   font:9px var(--mono);
-  color:var(--subtle);
+  color:var(--ink-dim);
   pointer-events:none
 }
 .axis-n{
@@ -385,7 +382,7 @@ button:hover{
   display:block;
   height:12px;
   width:1px;
-  background:#42503e;
+  background:var(--line);
   margin:7px auto
 }
 .axis-s:after{
@@ -396,7 +393,7 @@ button:hover{
   display:block;
   height:12px;
   width:1px;
-  background:#42503e;
+  background:var(--line);
   margin:0 auto 7px
 }
 .loading-state{
@@ -408,12 +405,12 @@ button:hover{
   flex-direction:column;
   gap:15px;
   font:11px var(--mono);
-  color:var(--muted);
-  background:#111713
+  color:var(--ink-dim);
+  background:var(--bg-soft)
 }
 .loading-glyph{
   font-size:50px;
-  color:var(--accent)
+  color:var(--gold)
 }
 #country-labels{
   position:absolute;
@@ -426,13 +423,13 @@ button:hover{
   top:0;
   left:0;
   white-space:nowrap;
-  color:#e4e4ca;
+  color:var(--ink);
   font:var(--font-globe-label);
   line-height:var(--lh-globe-label);
   letter-spacing:var(--ls-globe-label);
   text-transform:uppercase;
-  background:#111713dd;
-  border:1px solid #51614966;
+  background:color-mix(in srgb,var(--bg-soft) 87%,transparent);
+  border:1px solid var(--line);
   border-radius:2px;
   padding:6px 10px;
   will-change:transform
@@ -451,14 +448,14 @@ button:hover{
   align-items:center;
   gap:8px;
   font:9px var(--mono);
-  color:var(--muted);
+  color:var(--ink-dim);
   padding:10px 9px;
-  background:#111713dc;
+  background:color-mix(in srgb,var(--bg-soft) 86%,transparent);
   border:1px solid var(--line);
   border-radius:4px
 }
 .rotation-button[aria-pressed=true]{
-  color:var(--accent)
+  color:var(--gold)
 }
 .rotation-button>span:first-child{
   font-size:12px
@@ -466,9 +463,9 @@ button:hover{
 .zoom-buttons{
   display:flex;
   flex-direction:column;
-  border:1px solid #3a4738;
+  border:1px solid var(--line);
   border-radius:5px;
-  background:#172017e8;
+  background:color-mix(in srgb,var(--panel) 91%,transparent);
   overflow:hidden
 }
 .zoom-buttons button{
@@ -479,13 +476,13 @@ button:hover{
   place-items:center
 }
 .zoom-buttons button+button{
-  border-top:1px solid #3a4738
+  border-top:1px solid var(--line)
 }
 .zoom-buttons button:last-child{
   font-size:21px
 }
 .zoom-buttons button:hover{
-  background:#2a3828
+  background:var(--panel-2)
 }
 .view-bottomline{
   position:absolute;
@@ -500,11 +497,11 @@ button:hover{
 }
 .view-caption .eyebrow{
   font-size:8px;
-  color:var(--accent)
+  color:var(--gold)
 }
 .view-caption p{
   font-size:10px;
-  color:var(--muted);
+  color:var(--ink-dim);
   margin:9px 0 0
 }
 .legend{
@@ -512,7 +509,7 @@ button:hover{
   gap:15px;
   align-items:center;
   font:9px var(--mono);
-  color:var(--muted)
+  color:var(--ink-dim)
 }
 .legend>span{
   white-space:nowrap
@@ -522,13 +519,13 @@ button:hover{
   margin-right:4px
 }
 .land-key{
-  color:var(--accent)
+  color:var(--gold)
 }
 .water-key{
-  color:#598580
+  color:var(--ink-dim)
 }
 .border-key{
-  color:#dcad79
+  color:var(--gold)
 }
 .error-notice{
   position:absolute;
@@ -536,9 +533,9 @@ button:hover{
   left:20px;
   right:20px;
   top:50px;
-  background:#30281c;
-  color:#e0caa0;
-  border:1px solid #6e5934;
+  background:var(--panel);
+  color:var(--gold);
+  border:1px solid var(--gold);
   border-radius:4px;
   padding:12px;
   font-size:12px;
@@ -553,7 +550,7 @@ button:hover{
 }
 .interaction-bar p{
   font-size:10px;
-  color:var(--subtle);
+  color:var(--ink-dim);
   display:flex;
   align-items:center;
   gap:10px;
@@ -561,19 +558,19 @@ button:hover{
 }
 .interaction-bar p>span{
   font-size:17px;
-  color:var(--muted)
+  color:var(--ink-dim)
 }
 .interaction-bar i{
   font-style:normal;
-  color:#475545
+  color:var(--line)
 }
 .inline-button{
   padding:0;
   font:inherit;
-  color:var(--muted)
+  color:var(--ink-dim)
 }
 .inline-button span{
-  color:var(--accent)
+  color:var(--gold)
 }
 .zoom-slider-label{
   display:flex;
@@ -581,11 +578,11 @@ button:hover{
   gap:10px;
   font:8px var(--mono);
   letter-spacing:1px;
-  color:var(--subtle)
+  color:var(--ink-dim)
 }
 input[type=range]{
   width:112px;
-  accent-color:var(--accent);
+  accent-color:var(--gold);
   height:14px;
   cursor:pointer
 }
@@ -602,7 +599,7 @@ input[type=range]{
   gap:9px;
   font:9px var(--mono);
   letter-spacing:1px;
-  color:var(--muted)
+  color:var(--ink-dim)
 }
 .metric{
   display:flex;
@@ -612,17 +609,17 @@ input[type=range]{
 .metric>span{
   font:8px var(--mono);
   letter-spacing:1px;
-  color:var(--subtle)
+  color:var(--ink-dim)
 }
 .metric strong{
   font:16px var(--mono);
   font-weight:400;
-  color:#c5cebd;
+  color:var(--ink);
   font-variant-numeric:tabular-nums
 }
 .metric small{
   font-size:9px;
-  color:var(--subtle)
+  color:var(--ink-dim)
 }
 .debug-toggle{
   font-size:10px
@@ -636,15 +633,15 @@ input[type=range]{
   bottom:90px;
   right:40px;
   width:310px;
-  background:#192219f5;
-  border:1px solid #45543e;
+  background:color-mix(in srgb,var(--panel) 96%,transparent);
+  border:1px solid var(--line);
   border-radius:7px;
   padding:20px;
-  box-shadow:0 10px 40px #0007;
+  box-shadow:0 10px 40px color-mix(in srgb,var(--bg) 47%,transparent);
   backdrop-filter:blur(12px)
 }
 .debug-panel .section-heading{
-  color:var(--accent)
+  color:var(--gold)
 }
 .debug-panel dl{
   font:11px/1.8 var(--mono)
@@ -654,7 +651,7 @@ input[type=range]{
   justify-content:space-between
 }
 .debug-panel dt{
-  color:var(--muted)
+  color:var(--ink-dim)
 }
 .debug-panel dd{
   margin:0;
@@ -662,7 +659,7 @@ input[type=range]{
 }
 .debug-panel p{
   font:9px/1.7 var(--mono);
-  color:var(--subtle);
+  color:var(--ink-dim);
   margin-bottom:0
 }
 .debug-panel button{
@@ -674,15 +671,15 @@ dialog{
   width:calc(100% - 40px);
   max-height:calc(100svh - 50px);
   overflow-y:auto;
-  background:#192219;
+  background:var(--panel);
   color:var(--ink);
-  border:1px solid #46543e;
+  border:1px solid var(--line);
   border-radius:10px;
   padding:42px;
-  box-shadow:0 20px 100px #0008
+  box-shadow:0 20px 100px color-mix(in srgb,var(--bg) 53%,transparent)
 }
 dialog::backdrop{
-  background:#070b08bb;
+  background:color-mix(in srgb,var(--bg) 73%,transparent);
   backdrop-filter:blur(6px)
 }
 .dialog-close{
@@ -690,7 +687,7 @@ dialog::backdrop{
   right:17px;
   top:12px;
   font-size:25px;
-  color:var(--muted)
+  color:var(--ink-dim)
 }
 dialog h2{
   font-size:42px;
@@ -700,7 +697,7 @@ dialog h2{
   margin:20px 0
 }
 dialog p{
-  color:#aab8a3;
+  color:var(--ink-dim);
   font-size:13px;
   line-height:1.8
 }
@@ -711,12 +708,12 @@ dialog p{
   border-block:1px solid var(--line);
   padding:15px 0;
   font:9px var(--mono);
-  color:var(--accent)
+  color:var(--gold)
 }
 .about-facts span+span:before{
   content:"/";
   margin-right:9px;
-  color:var(--subtle)
+  color:var(--ink-dim)
 }
 dialog .attribution{
   font-size:10px
@@ -736,11 +733,11 @@ dialog a{
   border-bottom:1px solid var(--line)
 }
 .shortcuts dt{
-  color:var(--muted)
+  color:var(--ink-dim)
 }
 .shortcuts dd{
   font-family:var(--mono);
-  color:var(--accent)
+  color:var(--gold)
 }
 .sr-only{
   position:absolute;
@@ -756,8 +753,8 @@ dialog a{
   left:20px;
   right:20px;
   padding:20px;
-  background:#303e2a;
-  color:#fff;
+  background:var(--panel-2);
+  color:var(--ink);
   z-index:10
 }
 @media(min-width:1500px){
@@ -856,12 +853,17 @@ dialog a{
     height:73px;
     flex:none
   }
-  .wordmark{
-    font-size:27px
+  .header-identity{
+    flex-direction:column;
+    align-items:flex-start;
+    gap:4px
   }
-  .version{
+  .brand{
+    font-size:1rem
+  }
+  .view-label{
     font-size:8px;
-    margin-left:5px
+    padding:2px 5px
   }
   .text-button{
     font-size:10px;
