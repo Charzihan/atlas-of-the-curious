@@ -1,3 +1,5 @@
+> **Earthxt MVP:** The new interactive text globe lives at [`/earthxt/`](earthxt/). See the [Earthxt guide](earthxt/README.md) for architecture, controls, data, tests, and static deployment. Run `npm start`, then open `http://localhost:8000/earthxt/`.
+
 # Atlas of the Curious
 
 A hand-curated atlas of 40 extraordinary places on Earth — salt mirrors, sunken

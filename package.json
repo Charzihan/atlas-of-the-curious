@@ -12,6 +12,10 @@
     "build-pages": "node scripts/build-place-pages.mjs",
     "build": "node scripts/validate-data.mjs && node scripts/build-place-pages.mjs",
     "smoke": "node scripts/smoke.mjs",
+    "test:earthxt": "node --test test/earthxt/*.test.mjs",
+    "smoke:earthxt": "node scripts/earthxt/smoke.mjs",
+    "build:earthxt": "node scripts/earthxt/build.mjs",
+    "build:earthxt-data": "node scripts/earthxt/build-data.mjs",
     "postinstall": "node scripts/vendor.mjs"
   },
   "packageManager": "pnpm@12.3.4",

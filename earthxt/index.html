@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101512">
+  <meta name="description" content="A planet made of characters. Rotate a text-native Earth and zoom from continents to country borders, entirely in your browser.">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <title>Earthxt — A planet made of characters</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23101512'/%3E%3Ctext x='32' y='45' text-anchor='middle' font-family='monospace' font-size='48' fill='%23c6dfb3'%3E%E2%8A%95%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="./styles.css">
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="site-header">
+      <a class="wordmark" href="./" aria-label="Earthxt home"><span class="brand-icon" aria-hidden="true">⊕</span>earthxt<span class="version">MVP / 001</span></a>
+      <span class="header-note">ONE PLANET. COUNTLESS CHARACTERS.</span>
+      <button class="text-button" id="about-open" type="button">About the experiment <span aria-hidden="true">↗</span></button>
+    </header>
+
+    <main class="workspace">
+      <aside class="sidebar" aria-label="Globe settings">
+        <div class="intro">
+          <p class="eyebrow"><span class="status-dot"></span> A TEXT-NATIVE EXPLORATION</p>
+          <h1>Earth,<br> written<br> <em>in text.</em></h1>
+          <p class="intro-copy">A familiar world. A different language.<br>Go closer. There’s more to every character.</p>
+        </div>
+        <section class="detail-control" aria-labelledby="detail-title">
+          <div class="section-heading"><h2 id="detail-title">LEVEL OF DETAIL</h2><span id="level-number">00 / 02</span></div>
+          <div class="level-list" role="group" aria-label="Zoom to a level of detail">
+            <button class="level-button is-active" data-level="0" type="button" aria-pressed="true"><span class="level-index">00</span><span><strong>Planet</strong><small>The bigger picture</small></span><span class="level-symbol" aria-hidden="true">#</span></button>
+            <button class="level-button" data-level="1" type="button" aria-pressed="false"><span class="level-index">01</span><span><strong>Coastlines</strong><small>Where land meets water</small></span><span class="level-symbol" aria-hidden="true">≡</span></button>
+            <button class="level-button" data-level="2" type="button" aria-pressed="false"><span class="level-index">02</span><span><strong>Countries</strong><small>Lines that tell a story</small></span><span class="level-symbol" aria-hidden="true">:</span></button>
+          </div>
+          <p class="detail-note">Detail unfolds automatically as you zoom.</p>
+        </section>
+        <div class="display-settings">
+          <label class="setting-row" for="labels-toggle"><span>Country labels <small>at close range</small></span><input id="labels-toggle" type="checkbox" checked role="switch"><span class="switch" aria-hidden="true"></span></label>
+          <label class="setting-row" for="grid-toggle"><span>Coordinate grid</span><input id="grid-toggle" type="checkbox" role="switch"><span class="switch" aria-hidden="true"></span></label>
+        </div>
+        <div class="source-control"><span class="eyebrow">GEOGRAPHY</span><div class="segmented" role="group" aria-label="Geography source"><button id="source-earth" type="button" aria-pressed="true">Earth</button><button id="source-synthetic" type="button" aria-pressed="false">Synthetic</button></div></div>
+        <p class="source-note">Made of text. Grounded in geography.</p>
+      </aside>
+
+      <section class="globe-panel" aria-label="Interactive text Earth">
+        <div class="view-topline"><span><span class="status-dot"></span> <span id="view-name">EARTH / LIVE VIEW</span></span><span id="coordinates">18.00° N &nbsp; 24.00° W</span></div>
+        <div class="globe-stage" id="globe-stage">
+          <canvas id="globe" tabindex="0" role="img" aria-label="Interactive globe made of text characters" aria-describedby="globe-instructions">An interactive text globe. Use the level buttons to zoom, or focus this globe and use the arrow keys to rotate.</canvas>
+          <div id="country-labels" aria-hidden="true"></div>
+          <div class="axis-label axis-n" aria-hidden="true">N</div><div class="axis-label axis-s" aria-hidden="true">S</div>
+          <div class="loading-state" id="loading" role="status"><span class="loading-glyph" aria-hidden="true">⊕</span>Assembling a world of characters…</div>
+        </div>
+        <div class="view-controls">
+          <button id="rotate-toggle" class="rotation-button" type="button" aria-pressed="false" aria-label="Start automatic rotation"><span id="rotate-icon" aria-hidden="true">▷</span><span id="rotate-text">Auto-rotate</span></button>
+          <div class="zoom-buttons" role="group" aria-label="Zoom controls"><button id="zoom-in" type="button" aria-label="Zoom in" title="Zoom in (+)">+</button><button id="zoom-out" type="button" aria-label="Zoom out" title="Zoom out (−)">−</button><button id="reset-view" type="button" aria-label="Reset view" title="Reset view (0)">⌖</button></div>
+        </div>
+        <div class="view-bottomline"><div class="view-caption"><span class="eyebrow" id="view-level">00 — PLANET VIEW</span><p id="view-description">The whole world. A few thousand characters.</p></div><div class="legend" aria-label="Map legend"><span><b class="land-key">#</b> Land</span><span><b class="water-key">~</b> Ocean</span><span id="border-legend" hidden><b class="border-key">·</b> Border</span></div></div>
+        <p class="error-notice" id="data-error" role="status" hidden></p>
+      </section>
+    </main>
+
+    <div class="interaction-bar"><p id="globe-instructions"><span aria-hidden="true">↔</span> Drag to rotate <i>·</i> Scroll or pinch to zoom <i>·</i> <button id="help-open" class="inline-button" type="button">Keyboard controls <span aria-hidden="true">↗</span></button></p><label class="zoom-slider-label" for="zoom-slider"><span>ORBIT</span><input id="zoom-slider" type="range" min="0" max="100" value="16" step="0.1" aria-label="Zoom toward the surface"><span>SURFACE</span></label></div>
+
+    <footer class="telemetry" aria-label="Live performance metrics">
+      <div class="telemetry-brand"><span class="status-dot"></span> ENGINE LIVE</div>
+      <div class="metric"><span>FRAME RATE</span><strong><span id="metric-fps">—</span> <small>fps</small></strong></div>
+      <div class="metric"><span>VISIBLE GLYPHS</span><strong id="metric-glyphs">—</strong></div>
+      <div class="metric"><span>ALTITUDE</span><strong><span id="metric-altitude">14,016</span> <small>km</small></strong></div>
+      <div class="metric"><span>LOCAL DATA</span><strong id="metric-data">Loading</strong></div>
+      <button id="debug-toggle" class="text-button debug-toggle" type="button" aria-expanded="false" aria-controls="debug-panel"><span aria-hidden="true">⌘</span> Diagnostics</button>
+    </footer>
+  </div>
+
+  <section class="debug-panel" id="debug-panel" aria-label="Earthxt diagnostics" hidden><div class="section-heading"><h2>EARTHXT / DIAGNOSTICS</h2><button id="debug-close" class="inline-button" aria-label="Close diagnostics" type="button">×</button></div><dl id="debug-values"></dl><p>Frame rate counts rendered frames.<br>Memory is shown when the browser provides it.</p></section>
+  <dialog id="about-dialog" aria-labelledby="about-title"><button class="dialog-close" data-close type="button" aria-label="Close about">×</button><p class="eyebrow">EXPERIMENT 001</p><h2 id="about-title">A planet.<br>An alphabet.</h2><p>Earthxt asks a simple question: what if the world was made of text?</p><p>Every mark on this globe is a character, positioned with the mathematics of a 3D sphere. As you approach the surface, coarse land gives way to coastlines, country borders, and names.</p><p>The globe runs entirely in your browser, with a small local dataset and no mapping services. Synthetic mode lets you explore the same engine with invented geography.</p><div class="about-facts"><span>177 country features</span><span>3 levels of detail</span><span>Zero runtime dependencies</span></div><p class="attribution">Geography: <a href="https://www.naturalearthdata.com/about/terms-of-use/" target="_blank" rel="noreferrer">Natural Earth, public domain ↗</a>. Simplified 1:110m data; borders reflect the source dataset. This experiment stops at country scale.</p></dialog>
+  <dialog id="help-dialog" aria-labelledby="help-title"><button class="dialog-close" data-close type="button" aria-label="Close keyboard controls">×</button><p class="eyebrow">TAKE A LOOK AROUND</p><h2 id="help-title">Your world to explore.</h2><p>Focus the globe to use these shortcuts.</p><dl class="shortcuts"><div><dt>Rotate</dt><dd>↑ ↓ ← →</dd></div><div><dt>Zoom in / out</dt><dd>+ / −</dd></div><div><dt>Reset view</dt><dd>0</dd></div><div><dt>Pause / resume rotation</dt><dd>Space</dd></div><div><dt>Diagnostics</dt><dd>D</dd></div></dl><p>On touchscreens, drag with one finger to rotate and pinch with two fingers to zoom.</p></dialog>
+  <p class="sr-only" id="live-status" role="status" aria-live="polite"></p>
+  <noscript><p class="noscript">Earthxt needs JavaScript to calculate and render the text globe. Enable it and reload this page.</p></noscript>
+</body>
+</html>
