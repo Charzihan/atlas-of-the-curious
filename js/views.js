@@ -82,7 +82,7 @@ if (section && globeView) {
     document.documentElement.dataset.motion = paused ? "paused" : "running";
     motion?.setAttribute("aria-pressed", String(paused));
     const label = motion?.querySelector(".motion-label");
-    if (label) label.textContent = paused ? "Resume motion" : "Pause motion";
+    if (label) label.textContent = paused ? "Resume all motion" : "Pause all motion";
     const glyph = motion?.querySelector(".motion-glyph");
     if (glyph) glyph.textContent = paused ? "▷" : "❚❚";
     try { localStorage.setItem("atlas-motion", paused ? "paused" : "running"); } catch (error) { /* private mode */ }

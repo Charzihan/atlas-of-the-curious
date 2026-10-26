@@ -225,8 +225,6 @@ body {
   border-radius: var(--radius);
   padding: 18px;
   overflow: hidden;
-  opacity: 0;
-  transform: translateY(14px);
   transition:
     opacity 0.42s ease,
     transform 0.18s ease,
@@ -235,15 +233,34 @@ body {
   will-change: transform;
 }
 
+/* Cards are always visible: the reveal is only a short rise as each one
+   first scrolls into view, so a card's content never waits on it. */
+.card.is-pending:not(.is-in) { transform: translateY(14px); }
+.card.is-pending:focus-within { transform: none; }
+@media print { .card.is-pending { transform: none; } }
 .card.is-in { opacity: 1; transform: none; }
 
 /* Filtered out: fades where it stands, then app.js detaches it. */
 .card.is-leaving { opacity: 0; pointer-events: none; z-index: 0; }
 
-/* Expandable cards are real buttons for the keyboard (role/tabindex are set
-   by app.js only on the viewports where the in-place expansion is offered). */
-.card[role="button"] { cursor: pointer; }
-.card[role="button"]:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+/* In-place expansion has its own button (app.js shows it only where the
+   expansion is offered), on the field-note link's line at the card's foot. */
+.card-toggle {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  padding: 0;
+  font: var(--font-card-link);
+  line-height: var(--lh-card-link);
+  letter-spacing: var(--ls-card-link);
+  color: var(--ink-dim);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.card-toggle:hover { color: var(--gold); }
+.card-toggle:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; border-radius: 4px; color: var(--gold); }
+.card-toggle[hidden] { display: none; }
 
 .card::before {
   content: "";
@@ -261,7 +278,7 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
-  .card { transition: none; opacity: 1; transform: none; }
+  .card, .card.is-pending:not(.is-in) { transition: none; opacity: 1; transform: none; }
   .atlas-hint { animation: none; }
   .map-marker { animation: none; }
   .map-marker-ring { animation: none; }

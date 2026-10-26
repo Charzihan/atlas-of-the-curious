@@ -63,13 +63,13 @@
           Descend from the planet to coastlines to named countries; where rings crowd, a numbered ring zooms in.
         </p>
         <p class="atlas-hint for-flat hint-pointer">drift over the water · click to splash · hover or click a ring</p>
-        <p class="atlas-hint for-flat hint-touch">tap the water to splash · tap a ring to open it</p>
+        <p class="atlas-hint for-flat hint-touch">numbered rings zoom in · symbol rings open notes</p>
         <p class="atlas-hint for-globe hint-pointer">drag to turn · ctrl + scroll to zoom · hover or click a ring</p>
-        <p class="atlas-hint for-globe hint-touch">swipe sideways to turn · pinch to zoom · tap a ring</p>
+        <p class="atlas-hint for-globe hint-touch">swipe sideways to turn · numbered rings zoom in · symbol rings open notes</p>
       </div>
       <div class="map-viewport" role="group" aria-label="The atlas map, shown as a flat character map or as a turning character globe, with 40 marked places.">
         <div class="view-tools">
-        <button class="motion-btn" id="motion-toggle" type="button" aria-pressed="false" title="Pause the moving sea, clouds and rotation"><span class="motion-glyph" aria-hidden="true">❚❚</span><span class="motion-label">Pause motion</span></button>
+        <button class="motion-btn" id="motion-toggle" type="button" aria-pressed="false" title="Pause the moving sea, clouds, rings and globe rotation"><span class="motion-glyph" aria-hidden="true">❚❚</span><span class="motion-label">Pause all motion</span></button>
         <div class="view-switch" role="group" aria-label="Map projection">
           <button class="view-btn" type="button" data-view-target="flat" aria-pressed="true" title="Flat map"><span class="view-glyph" aria-hidden="true">▭</span><span class="view-label">Flat</span></button>
           <button class="view-btn" type="button" data-view-target="globe" aria-pressed="false" title="Globe"><span class="view-glyph" aria-hidden="true">◍</span><span class="view-label">Globe</span></button>
@@ -107,7 +107,13 @@
           </div>
           <button class="map-btn" id="serif-toggle" type="button" aria-pressed="false">Serif globe</button>
           <button class="map-btn" id="labels-toggle" type="button" aria-pressed="true" title="Place and country names at close range">Names</button>
-          <button class="map-btn" id="rotate-toggle" type="button" aria-pressed="false" aria-label="Start automatic rotation"><span id="rotate-icon" aria-hidden="true">▷</span> <span id="rotate-text">Auto-rotate</span></button>
+          <div class="turn-pad" role="group" aria-label="Turn the globe">
+            <button class="map-btn" id="turn-left" type="button" aria-label="Turn west" title="Turn west (←)">←</button>
+            <button class="map-btn" id="turn-up" type="button" aria-label="Turn north" title="Turn north (↑)">↑</button>
+            <button class="map-btn" id="turn-down" type="button" aria-label="Turn south" title="Turn south (↓)">↓</button>
+            <button class="map-btn" id="turn-right" type="button" aria-label="Turn east" title="Turn east (→)">→</button>
+          </div>
+          <button class="map-btn" id="rotate-toggle" type="button" aria-pressed="false" aria-label="Auto-rotate"><span id="rotate-icon" aria-hidden="true">▷</span> <span id="rotate-text">Auto-rotate</span></button>
           <button class="map-btn" id="zoom-in" type="button" aria-label="Zoom in" title="Zoom in (+)">＋</button>
           <button class="map-btn" id="zoom-out" type="button" aria-label="Zoom out" title="Zoom out (−)">−</button>
           <button class="map-btn" id="reset-view" type="button" aria-label="Reset globe view" title="Reset view (0)">⤢</button>

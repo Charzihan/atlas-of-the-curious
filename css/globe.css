@@ -228,6 +228,8 @@
 
 /* ---------- Globe controls (in the shared .map-controls bar) ---------- */
 .globe-controls { align-items: center; }
+.turn-pad { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 999px; background: rgba(9, 13, 28, 0.82); }
+.turn-pad .map-btn { border-color: transparent; background: transparent; padding: 4px 8px; }
 .lod-switch {
   display: flex;
   border: 1px solid var(--line);

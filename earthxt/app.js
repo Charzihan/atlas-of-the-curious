@@ -43,14 +43,15 @@ const places = globePlaces(window.ATLAS_DATA?.places || []);
 function setRotation(enabled) {
   // The atlas page's Pause motion outranks every way of starting rotation.
   if (enabled && document.documentElement.dataset.motion === 'paused') {
-    setText('live-status', 'Motion is paused. Use Resume motion to rotate the globe.');
+    setText('live-status', 'All motion is paused. Use Resume all motion to rotate the globe.');
     enabled = false;
   }
   state.autoRotate = enabled;
   $('rotate-toggle')?.setAttribute('aria-pressed', String(enabled));
-  $('rotate-toggle')?.setAttribute('aria-label', enabled ? 'Pause automatic rotation' : 'Start automatic rotation');
+  // One name for one setting; the pressed state and the icon say whether it is on.
+  $('rotate-toggle')?.setAttribute('aria-label', 'Auto-rotate');
   setText('rotate-icon', enabled ? 'Ⅱ' : '▷');
-  setText('rotate-text', enabled ? 'Pause rotation' : 'Auto-rotate');
+  setText('rotate-text', 'Auto-rotate');
   dirty = true;
 }
 function zoomTo(distance) {
@@ -251,6 +252,16 @@ function setupControls() {
   listen('zoom-out', 'click', () => zoomBy(1 / 0.72));
   listen('reset-view', 'click', reset);
   listen('rotate-toggle', 'click', () => setRotation(!state.autoRotate));
+  // Button turns for anyone who cannot drag: a quarter of a key-press view each.
+  for (const [id, east, north] of [['turn-left', -1, 0], ['turn-right', 1, 0], ['turn-up', 0, 1], ['turn-down', 0, -1]]) {
+    listen(id, 'click', () => {
+      const step = 15 * (state.distance - 1) / 2.2;
+      setRotation(false);
+      state.longitude = wrapLongitude(state.longitude + east * step);
+      state.latitude = clamp(state.latitude + north * step, -89, 89);
+      dirty = true;
+    });
+  }
   listen('zoom-slider', 'input', event => zoomTo(zoomToDistance(Number(event.target.value) / 100)));
   for (const button of document.querySelectorAll('[data-level]')) button.addEventListener('click', () => zoomTo(LEVELS[Number(button.dataset.level)].targetDistance));
   bindToggle('labels-toggle', on => { state.labels = on; dirty = true; });
@@ -358,7 +369,7 @@ async function main({ embedded = false } = {}) {
       else if (rotateIntent && !reducedMotion.matches) setRotation(true);
       if (toggle) {
         toggle.disabled = paused;
-        toggle.title = paused ? 'Motion is paused — use Resume motion' : '';
+        toggle.title = paused ? 'All motion is paused — Resume all motion turns rotation back on' : 'Turn the globe on its own';
       }
       dirty = true;
     };

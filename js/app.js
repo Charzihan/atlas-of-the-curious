@@ -288,9 +288,22 @@
     card.appendChild(expand);
     card.appendChild(link);
 
+    // The card stays an article; expanding it in place is its own button, set
+    // on the field-note link's line so it adds no height to the card.
+    expand.id = "card-expand-" + p.id;
+    var toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "card-toggle";
+    toggle.hidden = true;
+    toggle.setAttribute("aria-controls", expand.id);
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.setAttribute("aria-label", "Show the story of " + p.name + " here");
+    toggle.textContent = "More ↓";
+    card.appendChild(toggle);
+
     return {
       card: card, sym: sym, h3: h, native: native, loc: loc, tag: tag,
-      expand: expand, story: story, note: note, noteLabel: noteLabel, link: link
+      expand: expand, story: story, note: note, noteLabel: noteLabel, link: link, toggle: toggle
     };
   }
 
@@ -305,7 +318,7 @@
     card.style.setProperty("--card-accent", accent);
     card._atlas = parts;
     cardPool.set(p.id, card);
-    if (masonryIO) masonryIO.observe(card);
+    if (masonryIO) { card.classList.add("is-pending"); masonryIO.observe(card); }
     else card.classList.add("is-in");
     return card;
   }
@@ -807,21 +820,17 @@
         );
       }
 
-      // Expandable cards are buttons for the keyboard, on the viewports that
-      // offer the in-place expansion at all.
-      if (canExpand()) {
-        if (el.getAttribute("role") !== "button") {
-          el.setAttribute("role", "button");
-          el.setAttribute("tabindex", "0");
-        }
+      // The in-place expansion has its own button, on the viewports that
+      // offer it at all; the card itself stays an article.
+      var toggleEl = el.querySelector(".card-toggle");
+      if (toggleEl) {
+        var expandable = canExpand();
+        if (toggleEl.hidden === expandable) toggleEl.hidden = !expandable;
         var ariaNow = slot.expanded ? "true" : "false";
-        if (el.getAttribute("aria-expanded") !== ariaNow) {
-          el.setAttribute("aria-expanded", ariaNow);
+        if (toggleEl.getAttribute("aria-expanded") !== ariaNow) {
+          toggleEl.setAttribute("aria-expanded", ariaNow);
+          toggleEl.textContent = slot.expanded ? "Less ↑" : "More ↓";
         }
-      } else if (el.hasAttribute("role")) {
-        el.removeAttribute("role");
-        el.removeAttribute("tabindex");
-        el.removeAttribute("aria-expanded");
       }
     });
 
