@@ -1960,11 +1960,58 @@ import {
     // Counter-scale so markers and labels keep a constant on-screen size at any
     // zoom (CSS uses 1 / var(--zoom) for their dimensions).
     zoomEl.style.setProperty("--zoom", String(view.zoom));
+    reclusterFlat(false);
     // Panning moves labels with the map and changes nothing about where they
     // fit; only a zoom does. Re-route when the tier flips or the zoom has
     // drifted past a step — debounced to one placement per frame.
     if (tierFor(view.zoom) !== lastTier || Math.abs(view.zoom - lastPlaceZoom) > ZOOM_STEP) {
       requestPlacement();
+    }
+  }
+  /* Phone overview: rings closer than a ring's width merge into one numbered
+     ring, as on the globe, and tapping it zooms in until they separate. The
+     merged dots stay in the DOM (hidden), so filtering and routing see them. */
+  const CLUSTER_PX = 21, CLUSTER_UNTIL = 2.2;
+  let clusterEls = [], clusterZoom = -1;
+  function reclusterFlat(force) {
+    if (!isMobile || !markersEl) return;
+    const z = (view && view.zoom) || 1;
+    if (!force && (z >= CLUSTER_UNTIL) === (clusterZoom >= CLUSTER_UNTIL) && Math.abs(z - clusterZoom) < 0.05) return;
+    clusterZoom = z;
+    for (const el of clusterEls) el.remove();
+    clusterEls = [];
+    for (const ref of markerRefs) ref.el.classList.remove("is-clustered");
+    if (z >= CLUSTER_UNTIL) return;
+    const groups = [];
+    for (const ref of markerRefs) {
+      if (ref.el.classList.contains("is-dimmed")) continue;
+      const near = groups.find((g) => Math.hypot(g.x - ref.x, g.y - ref.y) * z < CLUSTER_PX);
+      if (near) {
+        near.refs.push(ref);
+        near.x = near.refs.reduce((sum, r) => sum + r.x, 0) / near.refs.length;
+        near.y = near.refs.reduce((sum, r) => sum + r.y, 0) / near.refs.length;
+      } else groups.push({ x: ref.x, y: ref.y, refs: [ref] });
+    }
+    for (const g of groups) {
+      if (g.refs.length < 2) continue;
+      for (const ref of g.refs) ref.el.classList.add("is-clustered");
+      const names = g.refs.map((ref) => (placeById.get(ref.id) || { p: { name: ref.id } }).p.name);
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "map-cluster";
+      b.style.left = g.x + "px";
+      b.style.top = g.y + "px";
+      b.textContent = String(g.refs.length);
+      b.setAttribute("aria-label", g.refs.length + " places close together: " + names.join(", ") + ". Zoom in to separate them.");
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const zoom = (view && view.zoom) || 1;
+        const sx = panX + mapW / 2 + (g.x - mapW / 2) * zoom;
+        const sy = panY + mapH / 2 + (g.y - mapH / 2) * zoom;
+        zoomTo(Math.max(CLUSTER_UNTIL + 0.1, zoom * 2.4), sx, sy);
+      });
+      markersEl.appendChild(b);
+      clusterEls.push(b);
     }
   }
   // Pan a zoomed map just enough that a focused element sits inside the
@@ -2043,6 +2090,7 @@ import {
   // and category filtering dim the ones that don't match, so the map mirrors
   // the grid instead of always showing every dot.
   let markerRefs = [];
+  let restoringFocus = false; // focus handed back by a dismissed card opens nothing
 
   /* How big one grid cell is, which is the whole question of "how large is the
      map".
@@ -3347,7 +3395,11 @@ import {
       clearTimeout(cardHideTimer);
       if (card.contains(document.activeElement)) {
         if (force !== true) return;
-        document.activeElement.blur();
+        // Give focus back to the dot the card came from, or to the map.
+        const origin = markerRefs.find((ref) => ref.id === cardVisibleId);
+        restoringFocus = true;
+        (origin && !origin.el.classList.contains("is-dimmed") ? origin.el : stage).focus({ preventScroll: true });
+        restoringFocus = false;
       }
       cardVisibleId = null;
       card.inert = true;
@@ -3434,7 +3486,7 @@ import {
       const g = document.createElement("span"); g.className = "map-marker-glyph";
       m.appendChild(ring); m.appendChild(g);
       markersEl.appendChild(m);
-      markerRefs.push({ id: p.id, el: m });
+      markerRefs.push({ id: p.id, el: m, x: x.dx, y: x.dy });
 
       const labelEl = () => {
         const entry = labelEls.get(p.id);
@@ -3472,7 +3524,7 @@ import {
       x.leave = leave;
       m.addEventListener("mouseenter", enter);
       m.addEventListener("mouseleave", leave);
-      m.addEventListener("focus", enter);
+      m.addEventListener("focus", () => { if (!restoringFocus) enter(); });
       m.addEventListener("focus", () => revealInView(m));
       m.addEventListener("blur", leave);
       // One click always opens the info card (previously the first click only
@@ -3487,6 +3539,8 @@ import {
         else window.dispatchEvent(new HashChangeEvent("hashchange"));
       });
     }
+    clusterEls = [];
+    reclusterFlat(true);
     showCardRef = showCard;
     hideCardRef = hideCard;
     cardNativeLinesRef = function (x) {
@@ -4105,6 +4159,8 @@ import {
   // the hero map responds to the search box, not just the grid below.
   function setMarkersVisible(ids) {
     visibleIds = ids || null;
+    // Dimmed dots leave their clusters (applied below, after the dimming).
+    queueMicrotask(() => reclusterFlat(true));
     // A filtered-out dot must not keep its name in the sea, and the cells it
     // gives up are then free for its neighbours — so re-route.
     requestPlacement();

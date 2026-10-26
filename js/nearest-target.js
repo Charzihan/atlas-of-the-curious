@@ -9,7 +9,7 @@ export function routeToNearest(container, selector) {
     if (!hit || event.detail === 0) return;
     let best = hit, bestDistance = Infinity;
     for (const el of container.querySelectorAll(selector)) {
-      if (el.hidden || el.classList.contains("is-dimmed")) continue;
+      if (el.hidden || el.classList.contains("is-dimmed") || el.classList.contains("is-clustered")) continue;
       const r = el.getBoundingClientRect();
       if (!r.width) continue;
       const d = Math.hypot(r.left + r.width / 2 - event.clientX, r.top + r.height / 2 - event.clientY);

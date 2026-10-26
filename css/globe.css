@@ -60,7 +60,8 @@
 /* Paused motion stills the CSS loops of both projections too. */
 :root[data-motion="paused"] .map-marker,
 :root[data-motion="paused"] .map-marker-ring,
-:root[data-motion="paused"] .loading-glyph { animation: none; }
+:root[data-motion="paused"] .loading-glyph,
+:root[data-motion="paused"] .atlas-hint { animation: none; }
 .view-switch {
   display: flex;
   padding: 3px;
@@ -377,9 +378,33 @@
   #map-locate::first-letter { font-size: 0.8rem; }
   .atlas[data-view="globe"] .map-viewport { height: min(100vw, 420px); }
   .globe-stage { top: 0; bottom: 0; }
-  .globe-controls #labels-toggle, .globe-controls #rotate-text { display: none; }
+  .globe-controls #labels-toggle { display: none; }
   .lod-switch .map-btn { padding: 5px 9px; }
 }
+/* The phone flat map's merged rings (js/map.js reclusterFlat). */
+/* A merged dot is transparent, not gone: Tab still reaches each place, and
+   the focused one shows itself above its cluster. */
+.map-marker.is-clustered { opacity: 0; pointer-events: none; animation: none; }
+.map-marker.is-clustered:focus-visible { opacity: 1; z-index: 9; }
+.map-cluster {
+  position: absolute;
+  z-index: 5;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  transform: translate(-50%, -50%) scale(calc(1 / var(--zoom, 1)));
+  display: grid;
+  place-items: center;
+  font: 600 0.68rem var(--font-sans);
+  color: var(--gold);
+  background: var(--bg);
+  border: 1.5px solid var(--gold);
+  border-radius: 50%;
+  cursor: pointer;
+}
+.map-cluster::after { content: ""; position: absolute; inset: -9px; border-radius: 50%; }
+.map-cluster:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+
 /* Fingers need bigger targets than cursors: 44px controls, and markers whose
    hit area reaches past the drawn ring. */
 @media (pointer: coarse) {

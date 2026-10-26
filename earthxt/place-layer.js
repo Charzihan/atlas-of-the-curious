@@ -62,7 +62,7 @@ export class PlaceLayer {
       button.setAttribute('aria-describedby', 'globe-place-card');
       button.style.setProperty('--accent', `var(--category-${place.category}, var(--gold))`);
       button.hidden = true;
-      const inspect = () => { onInspect(); this.show(place.id); };
+      const inspect = () => { if (this.restoring) return; onInspect(); this.show(place.id); };
       button.addEventListener('pointerenter', inspect);
       button.addEventListener('focus', inspect);
       button.addEventListener('pointerleave', () => this.scheduleHide());
@@ -154,6 +154,14 @@ export class PlaceLayer {
   }
   hide() {
     clearTimeout(this.dismissTimer);
+    // Never strand keyboard focus in a vanishing card: hand it back to the
+    // ring it came from, or to the globe when that ring has gone.
+    if (this.card.contains(document.activeElement)) {
+      const origin = this.nodes.get(this.activeId);
+      this.restoring = true;
+      (origin && !origin.hidden ? origin : this.stage.querySelector('canvas'))?.focus({ preventScroll: true });
+      this.restoring = false;
+    }
     this.activeId = null;
     this.card.hidden = true;
   }
@@ -304,8 +312,13 @@ export class PlaceLayer {
   setFilter(ids) {
     this.dimmed = new Set(ids ? this.places.filter(place => !ids.has(place.id)).map(place => place.id) : []);
     for (const [id, node] of this.nodes) {
-      node.tabIndex = this.dimmed.has(id) ? -1 : 0;
-      node.classList.toggle('is-dimmed', this.dimmed.has(id));
+      const out = this.dimmed.has(id);
+      node.tabIndex = out ? -1 : 0;
+      node.classList.toggle('is-dimmed', out);
+      // Filtered out means out of the accessibility tree too.
+      node.inert = out;
+      if (out) node.setAttribute('aria-hidden', 'true');
+      else node.removeAttribute('aria-hidden');
     }
     if (this.activeId && this.dimmed.has(this.activeId)) this.hide();
   }
