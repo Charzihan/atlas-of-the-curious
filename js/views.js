@@ -110,11 +110,11 @@ if (section && globeView) {
   showFilter(window.ATLAS_FILTER_STATE);
   document.getElementById("atlas-filter-clear")?.addEventListener("click", () => window.ATLAS_CLEAR_FILTER?.());
 
-  // On a phone the map is a short band, so its switch, filter readout and
-  // control bars leave it for toolbar rows above and below rather than
-  // covering the geography; wider screens float them over the map again.
+  // Below the wide layout (phones and tablets) the switch, filter readout
+  // and control bars leave the map for toolbar rows above and below rather
+  // than covering or overflowing it; wide screens float them over the map.
   const viewport = section.querySelector(".map-viewport");
-  const phone = matchMedia("(max-width: 640px)");
+  const phone = matchMedia("(max-width: 1099px)"); // where the globe bar no longer fits over the map
   const topBar = document.createElement("div");
   topBar.className = "map-toolbar map-toolbar-top";
   const bottomBar = document.createElement("div");

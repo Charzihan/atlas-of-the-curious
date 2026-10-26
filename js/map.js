@@ -1960,6 +1960,9 @@ import {
     // Counter-scale so markers and labels keep a constant on-screen size at any
     // zoom (CSS uses 1 / var(--zoom) for their dimensions).
     zoomEl.style.setProperty("--zoom", String(view.zoom));
+    // Touch policy: at 1x a vertical swipe scrolls the page (the map has
+    // nothing to pan); a zoomed map takes one-finger pans as its own.
+    if (stage) stage.style.touchAction = view.zoom > 1.001 ? "none" : "pan-y";
     reclusterFlat(false);
     // Panning moves labels with the map and changes nothing about where they
     // fit; only a zoom does. Re-route when the tier flips or the zoom has
@@ -3753,6 +3756,8 @@ import {
       drag.lastX = sx; drag.lastY = sy;
       drag.active = true; drag.moved = false;
     });
+    // A gesture the browser took over (a page scroll) ends the drag cleanly.
+    listen("pointercancel", () => { drag.active = false; drag.moved = false; });
     listen("pointerup", (e) => {
       const wasTap = drag.active && !drag.moved;
       drag.active = false;
