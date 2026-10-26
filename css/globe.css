@@ -255,7 +255,7 @@
   .globe-controls .turn-pad .map-btn { padding: 4px 10px; }
   .globe-controls .zoom-group { gap: 6px; }
 }
-.zoom-group { display: flex; gap: 6px; }
+.zoom-group, .appearance-group { display: flex; gap: 6px; }
 .turn-pad { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 999px; background: rgba(9, 13, 28, 0.82); }
 .turn-pad .map-btn { border-color: transparent; background: transparent; padding: 4px 8px; }
 .lod-switch {
@@ -423,7 +423,8 @@
   #map-locate::first-letter { font-size: 0.8rem; }
   .atlas[data-view="globe"] .map-viewport { height: min(100vw, 420px); }
   .globe-stage { top: 0; bottom: 0; }
-  .globe-controls #labels-toggle { display: none; }
+  /* Three even rows: detail and zoom, movement, appearance. */
+  .globe-controls .appearance-group { flex: 1 0 100%; justify-content: flex-end; }
   /* Two deliberate rows, in DOM (and focus) order: what to see (detail,
      zoom), then how to move it. */
   .map-toolbar .globe-controls { justify-content: space-between; row-gap: 8px; }

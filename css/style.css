@@ -782,8 +782,8 @@ dialog::backdrop {
 }
 /* The sea and clouds sit a step behind the land and the dots, so the flat
    map has the same quiet ground as the globe beside it. */
-.map-sea:not(.map-clouds) { opacity: 0.5; }
-.map-clouds { opacity: 0.32; }
+.map-sea:not(.map-clouds) { opacity: 0.42; }
+.map-clouds { opacity: 0.26; }
 
 /* Crosshair: a subtle tracking reticle that follows the pointer. */
 .map-crosshair {

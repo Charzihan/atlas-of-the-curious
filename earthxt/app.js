@@ -280,8 +280,12 @@ function setupControls() {
     const next = LEVELS[Number(button.dataset.level)];
     // Close detail over open ocean shows nothing: frame the open card's place,
     // or else the atlas place nearest the centre of the view.
-    if (embeddedMode && next.labels && state.source === 'earth' && places.length) {
-      const target = places.find(place => place.id === placeLayer?.activeId) || nearestPlace(state.latitude, state.longitude);
+    // Under a search, only matching places are candidates; with no match at
+    // all the camera stays where the visitor left it.
+    const ids = window.ATLAS_VISIBLE;
+    const candidates = ids && ids.size !== places.length ? places.filter(place => ids.has(place.id)) : places;
+    if (embeddedMode && next.labels && state.source === 'earth' && candidates.length) {
+      const target = candidates.find(place => place.id === placeLayer?.activeId) || nearestPlace(state.latitude, state.longitude, candidates);
       state.latitude = target.latitude;
       state.longitude = target.longitude;
       setText('live-status', `${next.name} detail around ${target.name}.`);
