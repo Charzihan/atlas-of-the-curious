@@ -782,8 +782,8 @@ dialog::backdrop {
 }
 /* The sea and clouds sit a step behind the land and the dots, so the flat
    map has the same quiet ground as the globe beside it. */
-.map-sea:not(.map-clouds) { opacity: 0.62; }
-.map-clouds { opacity: 0.45; }
+.map-sea:not(.map-clouds) { opacity: 0.5; }
+.map-clouds { opacity: 0.32; }
 
 /* Crosshair: a subtle tracking reticle that follows the pointer. */
 .map-crosshair {
@@ -1748,3 +1748,18 @@ dialog::backdrop {
 
 .dialog-globe { display: inline-block; font: var(--font-card-link); line-height: var(--lh-card-link); color: var(--gold); margin: 0 0 8px; }
 .dialog-globe:hover { text-decoration: underline; }
+
+/* Reduced motion, last so it outranks every animation declared above
+   (the earlier block sits before some of them in source order). */
+@media (prefers-reduced-motion: reduce) {
+  .atlas-hint,
+  .map-marker,
+  .map-marker-ring,
+  .loading-glyph { animation: none; }
+  .map-user-ring { animation: none; opacity: 0; }
+}
+
+/* In-page jumps (List them, the skip link) land below the sticky header. */
+html { scroll-padding-top: 92px; }
+@media (max-width: 640px) { html { scroll-padding-top: 140px; } }
+

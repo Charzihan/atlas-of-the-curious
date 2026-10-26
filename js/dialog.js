@@ -1185,6 +1185,8 @@ function boot(win, doc) {
   function close() {
     stopStepAnimation();
     cancelReveal();
+    // Save a note still inside its debounce while its place is known.
+    flushNote();
     currentId = null;
     if (typeof dialog.close === "function") dialog.close();
     else dialog.removeAttribute("open");

@@ -82,6 +82,22 @@ try {
     await page.waitForFunction(() => document.getElementById('place-dialog').open);
     await page.keyboard.press('Escape');
     await page.waitForFunction(() => !document.getElementById('place-dialog').open);
+    // A note typed and closed at once (inside its save debounce) is kept.
+    await page.locator('.card[data-place-id="salar-de-uyuni"] .card-more').click();
+    await page.waitForFunction(() => document.getElementById('place-dialog').open);
+    const notebook = page.locator('#place-dialog .notebook-input');
+    if (await notebook.count()) {
+      await notebook.fill('Bring sunglasses.');
+      await page.locator('#dialog-close').click();
+      await page.waitForFunction(() => !document.getElementById('place-dialog').open);
+      await page.locator('.card[data-place-id="salar-de-uyuni"] .card-more').click();
+      await page.waitForFunction(() => document.getElementById('place-dialog').open);
+      assert.equal(await notebook.inputValue(), 'Bring sunglasses.', 'a note closed inside its debounce is saved');
+      await notebook.fill('');
+      await page.waitForTimeout(400);
+      await page.keyboard.press('Escape');
+      await page.waitForFunction(() => !document.getElementById('place-dialog').open);
+    }
     // So does the same place's grid link, under the same retained hash.
     await page.locator('.card[data-place-id="salar-de-uyuni"] .card-more').click();
     await page.waitForFunction(() => document.getElementById('place-dialog').open);
