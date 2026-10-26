@@ -14,7 +14,8 @@ export class PlaceLayer {
     this.ringFont = roles['map-label'].font.replace(/[\d.]+px/, '8px');
     this.categoryLabels = new Map((globalThis.ATLAS_DATA?.categories || []).map(category => [category.id, category.label]));
     this.onCluster = onCluster;
-    this.clusterButtons = [];
+    this.clusterByKey = new Map();
+    this.onInspect = onInspect;
     this.clustered = new Set();
     this.dimmed = new Set();
     const view = stage.ownerDocument?.defaultView;
@@ -275,9 +276,21 @@ export class PlaceLayer {
   /** At planet scale, rings closer than a ring's width merge into one count
    * that zooms toward its places (`onCluster`); returns the merged ids. */
   clusterMarkers(ctx, level) {
-    const merged = new Set();
-    for (const button of this.clusterButtons) button.hidden = true;
-    if (!this.onCluster || level.index !== 0) return merged;
+    const merged = new Set(), live = new Set();
+    const retire = () => {
+      // A cluster that dissolved while focused hands focus to the globe.
+      for (const [key, button] of this.clusterByKey) {
+        if (live.has(key)) continue;
+        if (button === document.activeElement) {
+          this.restoring = true;
+          this.stage.querySelector('canvas')?.focus({ preventScroll: true });
+          this.restoring = false;
+        }
+        button.remove();
+        this.clusterByKey.delete(key);
+      }
+    };
+    if (!this.onCluster || level.index !== 0) { retire(); return merged; }
     const groups = [];
     for (const marker of this.markers) {
       if (!marker.visible || this.dimmed.has(marker.id)) continue;
@@ -288,9 +301,12 @@ export class PlaceLayer {
         near.y = near.members.reduce((sum, m) => sum + m.y, 0) / near.members.length;
       } else groups.push({ x: marker.x, y: marker.y, members: [marker] });
     }
-    let used = 0;
     for (const group of groups) {
       if (group.members.length < 2) continue;
+      // A cluster is its membership, so a focused one keeps its places while
+      // the globe turns beneath it.
+      const key = group.members.map(member => member.id).sort().join('|');
+      live.add(key);
       for (const member of group.members) merged.add(member.id);
       ctx.beginPath();
       ctx.arc(group.x, group.y, 9, 0, Math.PI * 2);
@@ -305,16 +321,18 @@ export class PlaceLayer {
       ctx.textBaseline = 'middle';
       if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
       ctx.fillText(String(group.members.length), group.x, group.y + 0.5);
-      let button = this.clusterButtons[used];
+      let button = this.clusterByKey.get(key);
       if (!button) {
         button = document.createElement('button');
         button.type = 'button';
         button.className = 'globe-marker globe-cluster';
         button.addEventListener('click', () => this.onCluster(button.places));
+        // Reaching for a cluster stops the globe, as reaching for a ring does.
+        button.addEventListener('pointerenter', () => this.onInspect());
+        button.addEventListener('focus', () => { if (!this.restoring) this.onInspect(); });
         this.layer.append(button);
-        this.clusterButtons.push(button);
+        this.clusterByKey.set(key, button);
       }
-      used++;
       button.places = group.members.map(member => this.byId.get(member.id));
       button.setAttribute('aria-label', `${group.members.length} places close together: ${button.places.map(place => place.name).join(', ')}. Zoom in to separate them.`);
       button.style.setProperty('--accent', 'var(--gold)');
@@ -322,6 +340,7 @@ export class PlaceLayer {
       button.hidden = false;
     }
     ctx.textAlign = 'left';
+    retire();
     return merged;
   }
   /** Mirror the atlas search/category filter: `ids` is the visible set, or null for all. */

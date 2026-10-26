@@ -263,7 +263,8 @@ function setupControls() {
     });
   }
   listen('zoom-slider', 'input', event => zoomTo(zoomToDistance(Number(event.target.value) / 100)));
-  for (const button of document.querySelectorAll('[data-level]')) button.addEventListener('click', () => zoomTo(LEVELS[Number(button.dataset.level)].targetDistance));
+  // Choosing a level of detail is choosing to look: rotation stops.
+  for (const button of document.querySelectorAll('[data-level]')) button.addEventListener('click', () => { setRotation(false); zoomTo(LEVELS[Number(button.dataset.level)].targetDistance); });
   bindToggle('labels-toggle', on => { state.labels = on; dirty = true; });
   bindToggle('grid-toggle', on => { state.grid = on; dirty = true; });
   bindToggle('serif-toggle', (on, toggle) => {
