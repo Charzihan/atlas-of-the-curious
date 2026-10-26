@@ -1061,10 +1061,13 @@
       window.dispatchEvent(new CustomEvent("atlas:visible", { detail: ids }));
       // What the filter is, for the readout beside the hero map (js/views.js).
       var cat = categoryById.get(state.category);
-      window.dispatchEvent(new CustomEvent("atlas:filter", { detail: {
+      // Kept as state too, so a view that starts later (js/views.js, the
+      // globe) begins from the filter restored from the URL.
+      window.ATLAS_FILTER_STATE = {
         shown: places.length, total: DATA.places.length,
         query: state.query.trim(), category: cat ? cat.label : ""
-      } }));
+      };
+      window.dispatchEvent(new CustomEvent("atlas:filter", { detail: window.ATLAS_FILTER_STATE }));
     }
   }
   // The hero map's readout clears search and category in one go.

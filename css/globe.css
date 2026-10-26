@@ -227,7 +227,14 @@
 .globe-stage a.map-card-cta:hover { text-decoration: underline; }
 
 /* ---------- Globe controls (in the shared .map-controls bar) ---------- */
-.globe-controls { align-items: center; }
+.globe-controls { align-items: center; gap: 10px; }
+/* Wider screens: a little more type and air between the control groups
+   (detail · appearance · movement · zoom). */
+@media (min-width: 641px) {
+  .globe-controls .map-btn { font-size: 0.76rem; }
+  .globe-controls .turn-pad .map-btn { padding: 4px 10px; }
+  .globe-controls .zoom-group { gap: 6px; }
+}
 .zoom-group { display: flex; gap: 6px; }
 .turn-pad { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 999px; background: rgba(9, 13, 28, 0.82); }
 .turn-pad .map-btn { border-color: transparent; background: transparent; padding: 4px 8px; }
@@ -291,7 +298,7 @@
    place on either projection hides behind it. Wide screens set it in two
    columns: the title on the left, how to read the map on the right.
    (`.atlas >` outranks css/style.css, which loads after this file.) */
-.atlas > .atlas-overlay {
+#text-atlas .atlas-overlay {
   position: relative;
   top: auto; left: auto; right: auto;
   z-index: auto;
@@ -303,40 +310,42 @@
   box-shadow: none;
   pointer-events: auto;
 }
-.atlas > .atlas-overlay .atlas-title { margin-bottom: 6px; }
-.atlas > .atlas-overlay .atlas-sub { max-width: 640px; }
-/* The map's height is set, not flexed: a reading caption appearing below it
-   must not resize it (a resize rebuilds the flat map). --intro-h is the
-   band's measured height (js/views.js). */
+#text-atlas .atlas-overlay .atlas-title { margin-bottom: 6px; }
+#text-atlas .atlas-overlay .atlas-sub { max-width: 640px; }
+/* The intro band and the map fill one frame of fixed height; the map flexes
+   into what the band leaves, in CSS from the first layout. Reading captions
+   sit below the frame, so they never resize the map (a resize rebuilds it). */
 @media (min-width: 641px) {
   #text-atlas { height: auto; min-height: 0; }
-  #text-atlas .map-viewport {
-    flex: none;
-    height: max(430px, calc(100vh - 132px - var(--intro-h, 122px)));
+  .atlas-frame {
+    display: flex;
+    flex-direction: column;
+    height: max(560px, calc(100vh - 132px));
   }
+  #text-atlas .map-viewport { flex: 1 1 auto; height: auto; min-height: 0; }
 }
 @media (min-width: 1100px) {
-  .atlas > .atlas-overlay {
+  #text-atlas .atlas-overlay {
     display: grid;
     grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
     min-height: 122px;
     column-gap: 48px;
     align-items: end;
   }
-  .atlas > .atlas-overlay .hero-kicker,
-  .atlas > .atlas-overlay .atlas-title { grid-column: 1; }
-  .atlas > .atlas-overlay .atlas-title { margin: 0; font-size: clamp(1.5rem, 2.05vw, 1.95rem); }
-  .atlas > .atlas-overlay .atlas-sub,
-  .atlas > .atlas-overlay .atlas-hint { grid-column: 2; }
-  .atlas > .atlas-overlay .atlas-sub { grid-row: 1 / span 2; align-self: end; margin: 0; max-width: none; }
-  .atlas > .atlas-overlay .atlas-hint { grid-row: 3; margin-top: 8px; }
-  .atlas > .atlas-overlay .hero-kicker { grid-row: 1; margin-bottom: 6px; }
-  .atlas > .atlas-overlay .atlas-title { grid-row: 2 / span 2; align-self: start; }
+  #text-atlas .atlas-overlay .hero-kicker,
+  #text-atlas .atlas-overlay .atlas-title { grid-column: 1; }
+  #text-atlas .atlas-overlay .atlas-title { margin: 0; font-size: clamp(1.5rem, 2.05vw, 1.95rem); }
+  #text-atlas .atlas-overlay .atlas-sub,
+  #text-atlas .atlas-overlay .atlas-hint { grid-column: 2; }
+  #text-atlas .atlas-overlay .atlas-sub { grid-row: 1 / span 2; align-self: end; margin: 0; max-width: none; }
+  #text-atlas .atlas-overlay .atlas-hint { grid-row: 3; margin-top: 8px; }
+  #text-atlas .atlas-overlay .hero-kicker { grid-row: 1; margin-bottom: 6px; }
+  #text-atlas .atlas-overlay .atlas-title { grid-row: 2 / span 2; align-self: start; }
 }
 /* Phone toolbars (js/views.js moves the floating controls into them). */
 .map-toolbar { display: none; }
 @media (max-width: 640px) {
-  .atlas > .atlas-overlay { padding: 12px 16px 11px; }
+  #text-atlas .atlas-overlay { padding: 12px 16px 11px; }
   .map-toolbar {
     display: flex;
     flex-wrap: wrap;
@@ -390,7 +399,7 @@
   .globe-controls #rotate-toggle { order: 4; }
   .globe-controls #serif-toggle { order: 5; }
   .globe-controls .long-label { display: none; }
-  .atlas > .atlas-overlay .atlas-hint { font-size: 0.75rem; letter-spacing: 0.04em; line-height: 1.45; }
+  #text-atlas .atlas-overlay .atlas-hint { font-size: 0.75rem; letter-spacing: 0.04em; line-height: 1.45; }
   .lod-switch .map-btn { padding: 5px 9px; }
 }
 .globe-stage .map-card-cat { white-space: nowrap; }

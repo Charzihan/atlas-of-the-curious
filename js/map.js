@@ -853,9 +853,9 @@ import {
        is the one case that earns it. Phases 7–8's `.map-art` canvas and
        `.map-art-inset` are in there and are both transparent, so they hide no
        glyph; if the inset ever grows a background, it belongs in this list. */
-    // The intro panel is the section's own child (it becomes a band above the
-    // map on narrow screens); on wide ones it floats over the map like these.
-    const floating = [...viewport.children, ...section.querySelectorAll(":scope > .atlas-overlay")];
+    // The intro panel is a band above the map (outside the viewport); it only
+    // masks water if a layout ever floats it over the map again.
+    const floating = [...viewport.children, ...section.querySelectorAll(".atlas-overlay")];
     for (const el of floating) {
       if (el === stage || el.hidden || typeof el.getBoundingClientRect !== "function") continue;
       const r = el.getBoundingClientRect();
@@ -3549,7 +3549,9 @@ import {
       });
     }
     clusterEls = [];
-    reclusterFlat(true);
+    // A rebuild makes fresh dots: the active search/category filter applies
+    // to them before they cluster (setMarkersVisible reclusters).
+    setMarkersVisible(visibleIds || window.ATLAS_VISIBLE || null);
     showCardRef = showCard;
     hideCardRef = hideCard;
     cardNativeLinesRef = function (x) {

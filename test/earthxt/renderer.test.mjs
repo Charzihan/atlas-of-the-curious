@@ -24,7 +24,7 @@ globalThis.OffscreenCanvas = class {
 // measure browser painting or layout. The Playwright suite covers those APIs.
 export function recorder({ nativeSpacing = false, inkHeight = 8 } = {}) {
   const marks = [];
-  const context = { setTransform() {}, clearRect() { marks.length = 0; },
+  const context = { setTransform() {}, clearRect() { marks.length = 0; }, fillRect() {},
     measureText(text) {
       measurements++;
       const spacing = parseFloat(this.letterSpacing) || 0;

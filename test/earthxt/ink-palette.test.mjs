@@ -137,7 +137,7 @@ const places = globePlaces(window.ATLAS_DATA.places);
 
 function recorder(nativeSpacing, inkHeight) {
   const marks = [];
-  const context = { setTransform() {}, clearRect() { marks.length = 0; },
+  const context = { setTransform() {}, clearRect() { marks.length = 0; }, fillRect() {},
     measureText(text) {
       measurements++;
       return { width: [...text].length * 6, actualBoundingBoxLeft: 0,
@@ -223,7 +223,7 @@ for (const nativeSpacing of [false, true]) test(`only raster glyphs change; all 
 test('coasts use the densest tone even at Planet detail; oceans including grid cells use the sparse band', async () => {
   const { cache, finish } = scheduledEngine();
   const draws = [], samples = [];
-  const context = { setTransform() {}, clearRect() { draws.length = 0; },
+  const context = { setTransform() {}, clearRect() { draws.length = 0; }, fillRect() {},
     fillText(text, x, y) { draws.push({ text, x, y }); } };
   const renderer = new TextRenderer({ getContext: () => context }, new Node(), fonts);
   renderer.palettes = cache;
@@ -259,7 +259,7 @@ test('a six-entry palette keeps oceans in the sparsest tenth, including animated
   const entry = await cache.prepare(fonts.serif, 8, 11, 1);
   assert.deepEqual(entry.ocean, [ramp[0]]);
   const draws = [];
-  const ctx = { setTransform() {}, clearRect() {}, fillText(text) { draws.push(text); } };
+  const ctx = { setTransform() {}, clearRect() {}, fillRect() {}, fillText(text) { draws.push(text); } };
   const renderer = new TextRenderer({ getContext: () => ctx }, new Node(), fonts);
   renderer.palettes = cache;
   renderer.resize(400, 400);

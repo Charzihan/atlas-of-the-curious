@@ -96,15 +96,18 @@ if (section && globeView) {
   // Search and category feedback where the map shows it, with one way out.
   const filter = document.getElementById("atlas-filter");
   const filterText = document.getElementById("atlas-filter-text");
-  window.addEventListener("atlas:filter", (event) => {
-    const { shown, total, query, category } = event.detail;
+  const showFilter = (detail) => {
+    if (!detail) return;
+    const { shown, total, query, category } = detail;
     const active = shown !== total || query || category;
     if (!filter || !filterText) return;
     filter.hidden = !active;
     if (!active) { filterText.textContent = ""; return; }
     const scope = [query && `“${query}”`, category].filter(Boolean).join(" in ");
     filterText.textContent = `${shown} of ${total} places${scope ? ` match ${scope}` : ""}`;
-  });
+  };
+  window.addEventListener("atlas:filter", (event) => showFilter(event.detail));
+  showFilter(window.ATLAS_FILTER_STATE);
   document.getElementById("atlas-filter-clear")?.addEventListener("click", () => window.ATLAS_CLEAR_FILTER?.());
 
   // On a phone the map is a short band, so its switch, filter readout and
@@ -133,14 +136,6 @@ if (section && globeView) {
   }
   phone.addEventListener("change", placeTools);
   placeTools();
-
-  // The map below takes the room the intro band leaves (css/globe.css).
-  const intro = section.querySelector(":scope > .atlas-overlay");
-  if (intro && typeof ResizeObserver === "function") {
-    new ResizeObserver(() => {
-      section.style.setProperty("--intro-h", Math.ceil(intro.getBoundingClientRect().height) + "px");
-    }).observe(intro);
-  }
 
   // Zoom takes Command on a Mac and Control elsewhere (js/gesture-hint.js).
   if (/Mac|iPhone|iPad/.test(navigator.platform || "")) {

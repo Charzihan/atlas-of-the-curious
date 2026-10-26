@@ -12,6 +12,8 @@ export const CONTINENT_GLYPHS = Object.freeze(['#', '%', '+', '8', '@', ':', 'x'
 const OCEAN = ['rgba(74, 124, 164, 0.2)', 'rgba(90, 146, 186, 0.27)', 'rgba(110, 172, 208, 0.34)', 'rgba(140, 200, 232, 0.42)'];
 const LAND_ALPHA = [0.5, 0.66, 0.82, 0.96];
 const BORDER = 'rgba(244, 232, 204, 0.82)', GRID = 'rgba(232, 180, 90, 0.42)';
+// Country names: warm ink on a bed of the stage's ground (--bg-soft).
+const LABEL_INK = '#e4e4ca', LABEL_GROUND = 'rgba(16, 23, 51, 0.86)';
 
 function rgba(hex, alpha) {
   const value = parseInt(hex.replace('#', ''), 16);
@@ -341,7 +343,7 @@ export class TextRenderer {
     ctx.font = role.font;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
-    ctx.fillStyle = '#e4e4ca';
+    ctx.fillStyle = LABEL_INK;
     if (this.nativeSpacing) ctx.letterSpacing = `${role.letterSpacing}px`;
     const safe = { x: 32, y: 60, width: width - 96, height: height - 150 };
     const labels = [...geography.labels()].sort((a, b) => a.rank - b.rank || a.id - b.id);
@@ -357,6 +359,12 @@ export class TextRenderer {
         continue;
       }
       for (const line of lines) {
+        // A ground-coloured bed under each line, padded, so the name reads
+        // over the continent's glyphs in either texture.
+        const { box } = line;
+        ctx.fillStyle = LABEL_GROUND;
+        ctx.fillRect(box.x - 3, box.y - 2, box.width + 6, box.height + 4);
+        ctx.fillStyle = LABEL_INK;
         if (this.nativeSpacing) ctx.fillText(line.text, line.x, line.y);
         else for (const glyph of line.glyphs) ctx.fillText(glyph.text, glyph.x, glyph.y);
         occupied.push(line.box);
