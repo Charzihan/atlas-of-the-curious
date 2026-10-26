@@ -107,5 +107,13 @@ if (section && globeView) {
   });
   document.getElementById("atlas-filter-clear")?.addEventListener("click", () => window.ATLAS_CLEAR_FILTER?.());
 
+  // The map below takes the room the intro band leaves (css/globe.css).
+  const intro = section.querySelector(":scope > .atlas-overlay");
+  if (intro && typeof ResizeObserver === "function") {
+    new ResizeObserver(() => {
+      section.style.setProperty("--intro-h", Math.ceil(intro.getBoundingClientRect().height) + "px");
+    }).observe(intro);
+  }
+
   if (isGlobeHash(location.hash)) setView("globe");
 }

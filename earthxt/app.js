@@ -7,6 +7,7 @@ import { globePlaces, parsePlaceHash } from './places.js';
 import { PlaceLayer } from './place-layer.js';
 import { readCategoryColors, readContinentColors } from '../js/category-colors.js';
 import { wheelZooms } from '../js/gesture-hint.js';
+import { routeToNearest } from '../js/nearest-target.js';
 
 const $ = id => document.getElementById(id);
 // The embedded atlas view carries a leaner control set than the globe page,
@@ -309,9 +310,26 @@ async function main({ embedded = false } = {}) {
       placeHref: embedded ? id => `#/place/${encodeURIComponent(id)}` : undefined
     });
   renderer.places = placeLayer;
+  routeToNearest($('globe-markers'), '.globe-marker');
   // Inside the atlas, the search box and category chips dim globe dots too.
   if (embedded) {
-    window.addEventListener('atlas:motion', event => { if (event.detail) setRotation(false); dirty = true; });
+    // The page's Pause motion is the one authority: it holds rotation (and the
+    // ocean) still, disables Auto-rotate meanwhile, and Resume restores
+    // whatever rotation intent the visitor had before pausing.
+    // A page loaded paused still means to rotate once resumed.
+    let rotateIntent = !reducedMotion.matches;
+    const holdMotion = (paused, initial = false) => {
+      const toggle = $('rotate-toggle');
+      if (paused) { if (!initial) rotateIntent = state.autoRotate; setRotation(false); }
+      else if (rotateIntent && !reducedMotion.matches) setRotation(true);
+      if (toggle) {
+        toggle.disabled = paused;
+        toggle.title = paused ? 'Motion is paused — use Resume motion' : '';
+      }
+      dirty = true;
+    };
+    window.addEventListener('atlas:motion', event => holdMotion(Boolean(event.detail)));
+    if (still() && !reducedMotion.matches) holdMotion(true, true);
     placeLayer.setFilter(window.ATLAS_VISIBLE || null);
     window.addEventListener('atlas:visible', event => { placeLayer.setFilter(event.detail); dirty = true; });
   }

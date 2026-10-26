@@ -45,6 +45,14 @@
 .motion-btn:hover, .motion-btn:focus-visible { color: var(--gold); border-color: var(--gold); outline: none; }
 .motion-btn[aria-pressed="true"] { color: var(--gold); border-color: color-mix(in srgb, var(--gold) 60%, transparent); }
 .motion-glyph { font-size: 0.7rem; letter-spacing: -0.1em; }
+/* Focus is its own ring, distinct from the gold of a selected button. */
+.atlas .view-btn:focus-visible,
+.atlas .motion-btn:focus-visible,
+.atlas .map-btn:focus-visible,
+.atlas .atlas-filter-clear:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 3px;
+}
 /* Paused motion stills the CSS loops of both projections too. */
 :root[data-motion="paused"] .map-marker,
 :root[data-motion="paused"] .map-marker-ring,
@@ -94,14 +102,6 @@
 .globe-stage {
   position: absolute;
   inset: 0;
-}
-@media (min-width: 1100px) {
-  /* Close up, the sphere outgrows the stage: its edge fades, never cuts. */
-  .globe-stage {
-    left: 430px; right: 20px;
-    -webkit-mask-image: linear-gradient(to right, transparent, #000 72px);
-    mask-image: linear-gradient(to right, transparent, #000 72px);
-  }
 }
 .globe-stage canvas {
   display: block;
@@ -277,30 +277,59 @@
 .atlas-scale #coordinates { font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 /* ---------- Small screens ---------- */
-/* ---------- Narrower screens ---------- */
-/* Below the wide layout the intro is a band above the map, never on it, so
-   neither projection is hidden behind it. (`.atlas >` outranks the phone
-   rules of css/style.css, which load after this file.) */
-@media (max-width: 1099px) {
-  .atlas > .atlas-overlay {
-    position: relative;
-    top: auto; left: auto; right: auto;
-    max-width: none;
-    margin: 0;
-    padding: 16px 24px 14px;
-    border-radius: 0;
-    border-width: 0 0 1px;
-    box-shadow: none;
-    pointer-events: auto;
+/* ---------- The intro band ---------- */
+/* The intro is a band above the map at every width, never on it, so no
+   place on either projection hides behind it. Wide screens set it in two
+   columns: the title on the left, how to read the map on the right.
+   (`.atlas >` outranks css/style.css, which loads after this file.) */
+.atlas > .atlas-overlay {
+  position: relative;
+  top: auto; left: auto; right: auto;
+  z-index: auto;
+  max-width: none;
+  margin: 0;
+  padding: 18px max(26px, calc((100% - 1180px) / 2)) 16px;
+  border-radius: 0;
+  border-width: 0 0 1px;
+  box-shadow: none;
+  pointer-events: auto;
+}
+.atlas > .atlas-overlay .atlas-title { margin-bottom: 6px; }
+.atlas > .atlas-overlay .atlas-sub { max-width: 640px; }
+/* The map's height is set, not flexed: a reading caption appearing below it
+   must not resize it (a resize rebuilds the flat map). --intro-h is the
+   band's measured height (js/views.js). */
+@media (min-width: 641px) {
+  #text-atlas { height: auto; min-height: 0; }
+  #text-atlas .map-viewport {
+    flex: none;
+    height: max(430px, calc(100vh - 132px - var(--intro-h, 122px)));
   }
-  .atlas > .atlas-overlay .atlas-title { margin-bottom: 6px; }
-  .atlas > .atlas-overlay .atlas-sub { max-width: 640px; }
+}
+@media (min-width: 1100px) {
+  .atlas > .atlas-overlay {
+    display: grid;
+    grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+    min-height: 122px;
+    column-gap: 48px;
+    align-items: end;
+  }
+  .atlas > .atlas-overlay .hero-kicker,
+  .atlas > .atlas-overlay .atlas-title { grid-column: 1; }
+  .atlas > .atlas-overlay .atlas-title { margin: 0; font-size: clamp(1.5rem, 2.05vw, 1.95rem); }
+  .atlas > .atlas-overlay .atlas-sub,
+  .atlas > .atlas-overlay .atlas-hint { grid-column: 2; }
+  .atlas > .atlas-overlay .atlas-sub { grid-row: 1 / span 2; align-self: end; margin: 0; max-width: none; }
+  .atlas > .atlas-overlay .atlas-hint { grid-row: 3; margin-top: 8px; }
+  .atlas > .atlas-overlay .hero-kicker { grid-row: 1; margin-bottom: 6px; }
+  .atlas > .atlas-overlay .atlas-title { grid-row: 2 / span 2; align-self: start; }
 }
 @media (max-width: 640px) {
   .atlas > .atlas-overlay { padding: 12px 16px 11px; }
   .view-tools { top: 10px; right: 10px; gap: 6px; }
-  .atlas-filter { left: 10px; top: 10px; bottom: auto; max-width: calc(100% - 230px); font-size: 0.7rem; padding-left: 10px; }
-  .atlas-filter-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* A row of its own under the switch: the whole message wraps, Clear stays. */
+  .atlas-filter { left: 10px; right: 10px; top: 62px; bottom: auto; max-width: none; justify-content: space-between; border-radius: 16px; font-size: 0.74rem; padding-left: 12px; }
+  .atlas-filter-text { flex: 1 1 auto; min-width: 0; }
   .view-switch { padding: 2px; }
   .motion-btn { padding: 8px 12px; }
   .motion-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

@@ -29,6 +29,7 @@ import {
 import { fitHoverTagline } from "./hover-card.js";
 import { readCategoryColors } from "./category-colors.js";
 import { wheelZooms } from "./gesture-hint.js";
+import { routeToNearest } from "./nearest-target.js";
 import { createSeaEngine, IDLE_MAX_SENTENCES } from "./sea.js";
 import { createMapArtEngine, COUNTRY_MARKER } from "./map-art.js";
 import { generateCloud, generateCloudSet } from "./clouds.js";
@@ -1901,7 +1902,7 @@ import {
   let stage, card, cardVisibleId = null, cardHideTimer = 0;
   // Escape dismisses the hover card, as it does on the globe.
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && cardVisibleId && hideCardRef) hideCardRef();
+    if (e.key === "Escape" && cardVisibleId && hideCardRef) hideCardRef(true);
   });
   // Off-screen pause: when the map scrolls out of view we stop the animation
   // loop and ambient timer (they otherwise run for the page's whole life).
@@ -1965,6 +1966,21 @@ import {
     if (tierFor(view.zoom) !== lastTier || Math.abs(view.zoom - lastPlaceZoom) > ZOOM_STEP) {
       requestPlacement();
     }
+  }
+  // Pan a zoomed map just enough that a focused element sits inside the
+  // viewport with a margin (keyboard users cannot see what they tab to).
+  function revealInView(el) {
+    if (view.zoom <= 1.001) return;
+    const r = el.getBoundingClientRect(), v = viewport.getBoundingClientRect();
+    const m = 48;
+    let dx = 0, dy = 0;
+    if (r.left < v.left + m) dx = v.left + m - r.left;
+    else if (r.right > v.right - m) dx = v.right - m - r.right;
+    if (r.top < v.top + m) dy = v.top + m - r.top;
+    else if (r.bottom > v.bottom - m) dy = v.bottom - m - r.bottom;
+    if (!dx && !dy) return;
+    panX += dx; panY += dy;
+    clampPan(); applyView();
   }
   // Zoom so that the map point under stage-local (sx,sy) stays fixed there.
   function zoomTo(newZoom, sx, sy) {
@@ -2140,7 +2156,9 @@ import {
        into the strips needs nothing new. A row is only *shown* if its whole
        line box is inside the hero, so the count rounds up: the partly-visible
        boundary row is one no label may use. */
-    cropY = Math.max(0, (mapH - vpH) / 2);
+    // A sub-pixel overhang is rounding in the cell size, not a crop.
+    const overhang = (mapH - vpH) / 2;
+    cropY = overhang > 0.5 ? overhang : 0;
     cropRows = Math.min(ROWS >> 1, Math.ceil(cropY / LINEH));
 
     /* ---- The open ocean ------------------------------------------------
@@ -2932,6 +2950,7 @@ import {
     markersEl = document.createElement("div");
     markersEl.className = "map-markers";
     zoomEl.appendChild(markersEl);
+    routeToNearest(markersEl, ".map-marker");
 
     // ---- Tap ripple rings ---------------------------------------------------
     // In addition to the glyph spring, a tap spawns a visible expanding ring so
@@ -3024,7 +3043,11 @@ import {
     card = document.createElement("div");
     card.className = "map-card";
     card.id = "atlas-place-card";
-    card.setAttribute("role", "tooltip");
+    // It holds a link, so it is a labelled region rather than a tooltip, and
+    // inert whenever it is faded out.
+    card.setAttribute("role", "region");
+    card.setAttribute("aria-label", "Place preview");
+    card.inert = true;
     const cardCat = document.createElement("span"); cardCat.className = "map-card-cat";
     const cardName = document.createElement("span"); cardName.className = "map-card-name";
     const cardNative = document.createElement("span"); cardNative.className = "map-card-native";
@@ -3040,6 +3063,9 @@ import {
     stage.appendChild(card);
     card.addEventListener("mouseenter", () => clearTimeout(cardHideTimer));
     card.addEventListener("mouseleave", () => scheduleHideCard());
+    // Tabbing from a dot into its card's link keeps the card open.
+    card.addEventListener("focusin", () => clearTimeout(cardHideTimer));
+    card.addEventListener("focusout", (e) => { if (!card.contains(e.relatedTarget)) scheduleHideCard(); });
 
     /* ---- A card that hugs its text ------------------------------------
        The card used to be a fixed 252px box in CSS while js/map.js positioned
@@ -3307,6 +3333,7 @@ import {
       cardCta.href = "#/place/" + encodeURIComponent(x.p.id);
       card.style.setProperty("--accent", `var(--category-${x.p.category}, var(--gold))`);
       positionCard(x);
+      card.inert = false;
       card.classList.add("is-visible");
     }
     // Leaving a dot gives the pointer a moment to reach its card's link.
@@ -3314,9 +3341,16 @@ import {
       clearTimeout(cardHideTimer);
       cardHideTimer = setTimeout(hideCard, 280);
     }
-    function hideCard() {
+    // A timed dismissal never yanks focus out of the card; a forced one
+    // (Escape, a filter, the globe view) hands focus back to the page first.
+    function hideCard(force) {
       clearTimeout(cardHideTimer);
+      if (card.contains(document.activeElement)) {
+        if (force !== true) return;
+        document.activeElement.blur();
+      }
       cardVisibleId = null;
+      card.inert = true;
       card.classList.remove("is-visible");
     }
     function lightCard(id, on) {
@@ -3439,6 +3473,7 @@ import {
       m.addEventListener("mouseenter", enter);
       m.addEventListener("mouseleave", leave);
       m.addEventListener("focus", enter);
+      m.addEventListener("focus", () => revealInView(m));
       m.addEventListener("blur", leave);
       // One click always opens the info card (previously the first click only
       // dismissed the hover card that mouseenter had shown, so it felt like two
@@ -3616,7 +3651,17 @@ import {
     }, { passive: false });
     // Keyboard zoom for accessibility (buttons are also on the viewport).
     stage.tabIndex = 0;
+    stage.setAttribute("aria-describedby", "flat-instructions");
+    const PAN_KEYS = { ArrowLeft: [1, 0], ArrowRight: [-1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] };
     stage.addEventListener("keydown", (e) => {
+      // Arrow keys pan a zoomed map, as dragging does.
+      const pan = PAN_KEYS[e.key];
+      if (pan && view.zoom > 1.001 && !e.altKey && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        panX += pan[0] * 90; panY += pan[1] * 70;
+        clampPan(); applyView();
+        return;
+      }
       if (e.key === "+" || e.key === "=") zoomTo(view.zoom * 1.2, vpW / 2, vpH / 2);
       else if (e.key === "-" || e.key === "_") zoomTo(view.zoom / 1.2, vpW / 2, vpH / 2);
       else if (e.key === "0") { view.zoom = 1; panX = 0; panY = 0; applyView(); }
@@ -4071,7 +4116,7 @@ import {
       else if (ref.el.tabIndex === -1) ref.el.removeAttribute("tabindex");
     }
     // A dimmed marker being hovered should release its card.
-    if (ids != null && cardVisibleId && !ids.has(cardVisibleId) && hideCardRef) hideCardRef();
+    if (ids != null && cardVisibleId && !ids.has(cardVisibleId) && hideCardRef) hideCardRef(true);
   }
   window.addEventListener("atlas:visible", (e) => setMarkersVisible(e.detail));
   // Initial state in case the app rendered before this module's first build.
@@ -4137,7 +4182,7 @@ import {
     window.addEventListener("atlas:view", (e) => {
       flatShown = e.detail !== "globe";
       if (stage) stage.inert = !flatShown;
-      if (!flatShown && hideCardRef) hideCardRef();
+      if (!flatShown && hideCardRef) hideCardRef(true);
       setLive();
     });
     // The page's "Pause motion" (js/views.js) holds the sea and clouds still.
