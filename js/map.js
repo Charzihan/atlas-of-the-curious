@@ -3711,7 +3711,9 @@ import {
       }
     });
     stage.addEventListener("wheel", (e) => {
-      if (REDUCED || !wheelZooms(e, stage)) return;
+      // Ctrl/⌘ + scroll zooms under reduced motion too: zoomTo() is a jump,
+      // never an animation, so there is nothing to reduce.
+      if (!wheelZooms(e, stage)) return;
       e.preventDefault();
       const sx = e.clientX - rect.left;
       const sy = e.clientY - rect.top;

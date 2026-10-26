@@ -362,10 +362,10 @@
   #text-atlas .atlas-overlay .hero-kicker { grid-row: 1; margin-bottom: 6px; }
   #text-atlas .atlas-overlay .atlas-title { grid-row: 2 / span 2; align-self: start; }
 }
-/* A tablet globe gets the height to be a planet, not a coin; the legend
-   can sit below the fold. */
+/* A tablet globe keeps its controls on screen and still reads as a planet:
+   the intro trims to its title and hint so the sphere gets the room. */
 @media (min-width: 641px) and (max-width: 1099px) {
-  .atlas[data-view="globe"] .atlas-frame { height: max(780px, calc(100vh - 132px)); }
+  .atlas[data-view="globe"] .atlas-overlay .atlas-sub { display: none; }
 }
 
 /* Toolbar rows (js/views.js moves the floating controls into them) below

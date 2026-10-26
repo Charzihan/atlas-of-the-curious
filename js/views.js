@@ -118,7 +118,8 @@ if (section && globeView) {
   // The matches as a list: scroll to the filtered cards and focus the first.
   document.getElementById("atlas-filter-view")?.addEventListener("click", () => {
     const status = document.getElementById("results-status");
-    status?.scrollIntoView({ behavior: "smooth", block: "start" });
+    const still = matchMedia("(prefers-reduced-motion: reduce)").matches || document.documentElement.dataset.motion === "paused";
+    status?.scrollIntoView({ behavior: still ? "instant" : "smooth", block: "start" });
     const first = document.querySelector("#grid .card:not(.is-leaving) .card-more");
     (first || status)?.focus({ preventScroll: true });
   });
