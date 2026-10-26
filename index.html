@@ -110,21 +110,21 @@
               <button class="map-btn lod-btn" type="button" data-level="1" aria-pressed="false" title="Closer coastlines and islands">Coasts</button>
               <button class="map-btn lod-btn" type="button" data-level="2" aria-pressed="false" title="Borders and country names">Countries</button>
             </div>
-            <button class="map-btn" id="serif-toggle" type="button" aria-pressed="false">Serif<span class="long-label"> globe</span></button>
-            <button class="map-btn" id="labels-toggle" type="button" aria-pressed="true" title="Place and country names at close range">Names</button>
-            <div class="turn-pad" role="group" aria-label="Turn the globe">
+          <div class="zoom-group" role="group" aria-label="Zoom">
+              <button class="map-btn" id="zoom-in" type="button" aria-label="Zoom in" title="Zoom in (+)">＋</button>
+              <button class="map-btn" id="zoom-out" type="button" aria-label="Zoom out" title="Zoom out (−)">−</button>
+              <button class="map-btn" id="reset-view" type="button" aria-label="Reset globe view" title="Reset view (0)">↺</button>
+            </div>
+          <div class="turn-pad" role="group" aria-label="Turn the globe">
               <button class="map-btn" id="turn-left" type="button" aria-label="Turn west" title="Turn west (←)">←</button>
               <button class="map-btn" id="turn-up" type="button" aria-label="Turn north" title="Turn north (↑)">↑</button>
               <button class="map-btn" id="turn-down" type="button" aria-label="Turn south" title="Turn south (↓)">↓</button>
               <button class="map-btn" id="turn-right" type="button" aria-label="Turn east" title="Turn east (→)">→</button>
             </div>
-            <button class="map-btn" id="rotate-toggle" type="button" aria-pressed="false" aria-label="Auto-rotate"><span id="rotate-icon" aria-hidden="true">▷</span> <span id="rotate-text">Auto-rotate</span></button>
-            <div class="zoom-group" role="group" aria-label="Zoom">
-              <button class="map-btn" id="zoom-in" type="button" aria-label="Zoom in" title="Zoom in (+)">＋</button>
-              <button class="map-btn" id="zoom-out" type="button" aria-label="Zoom out" title="Zoom out (−)">−</button>
-              <button class="map-btn" id="reset-view" type="button" aria-label="Reset globe view" title="Reset view (0)">↺</button>
-            </div>
-          </div>
+          <button class="map-btn" id="rotate-toggle" type="button" aria-pressed="false" aria-label="Auto-rotate"><span id="rotate-icon" aria-hidden="true">▷</span> <span id="rotate-text">Auto-rotate</span></button>
+          <button class="map-btn" id="serif-toggle" type="button" aria-pressed="false">Serif<span class="long-label"> globe</span></button>
+          <button class="map-btn" id="labels-toggle" type="button" aria-pressed="true" title="Place and country names at close range">Names</button>
+        </div>
         </div>
       </div>
       <p id="map-story-status" class="map-story-status" role="status" hidden></p>

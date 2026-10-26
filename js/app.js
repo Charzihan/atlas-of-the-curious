@@ -69,6 +69,16 @@
   }
 
   // --- Filtering / sorting ---------------------------------------------
+  // Search matches the start of a word: "ice" finds Iceland and icebergs,
+  // not slice or sacrificed. Highlighting (markRuns) uses the same rule.
+  var WORD_CHAR = /[\p{L}\p{N}]/u;
+  function wordStartIndex(hay, tok, from) {
+    for (var at = hay.indexOf(tok, from); at !== -1; at = hay.indexOf(tok, at + 1)) {
+      if (at === 0 || !WORD_CHAR.test(hay.charAt(at - 1))) return at;
+    }
+    return -1;
+  }
+
   function visiblePlaces() {
     var q = state.query.trim().toLowerCase();
     var out = DATA.places.filter(function (p) {
@@ -76,7 +86,7 @@
       if (!q) return true;
       var hay = (p.name + " " + p.country + " " + p.region + " " + p.tagline + " " +
                  p.story + " " + p.fact + " " + p.bestTime + " " + p.nearestCity).toLowerCase();
-      return q.split(/\s+/).every(function (tok) { return hay.indexOf(tok) !== -1; });
+      return q.split(/\s+/).every(function (tok) { return wordStartIndex(hay, tok, 0) !== -1; });
     });
     if (state.sort === "name") out = out.slice().sort(function (a, b) { return a.name.localeCompare(b.name); });
     if (state.sort === "country") out = out.slice().sort(function (a, b) {
@@ -461,7 +471,7 @@
       var tok = tokens[t];
       var from = 0;
       for (;;) {
-        var at = hay.indexOf(tok, from);
+        var at = wordStartIndex(hay, tok, from);
         if (at === -1) break;
         for (var i = at; i < at + tok.length; i++) hit[i] = 1;
         any = true;

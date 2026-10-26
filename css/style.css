@@ -4,6 +4,9 @@
 
 /* Atlas of the Curious — styles. No external fonts, no external assets. */
 
+/* The search box's placeholder is its only instruction: full contrast. */
+.search input::placeholder { color: var(--ink-dim); opacity: 1; }
+
 :root {
   --radius: 14px;
   --shadow: 0 12px 32px rgba(0, 0, 0, 0.35);

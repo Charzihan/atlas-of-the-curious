@@ -361,6 +361,12 @@
   #text-atlas .atlas-overlay .hero-kicker { grid-row: 1; margin-bottom: 6px; }
   #text-atlas .atlas-overlay .atlas-title { grid-row: 2 / span 2; align-self: start; }
 }
+/* A tablet globe gets the height to be a planet, not a coin; the legend
+   can sit below the fold. */
+@media (min-width: 641px) and (max-width: 1099px) {
+  .atlas[data-view="globe"] .atlas-frame { height: max(780px, calc(100vh - 132px)); }
+}
+
 /* Toolbar rows (js/views.js moves the floating controls into them) below
    the width where the globe's control bar fits over the map. */
 .map-toolbar { display: none; }
@@ -413,13 +419,10 @@
   .atlas[data-view="globe"] .map-viewport { height: min(100vw, 420px); }
   .globe-stage { top: 0; bottom: 0; }
   .globe-controls #labels-toggle { display: none; }
-  /* Two deliberate rows: what to see (detail, zoom), then how to move it. */
+  /* Two deliberate rows, in DOM (and focus) order: what to see (detail,
+     zoom), then how to move it. */
   .map-toolbar .globe-controls { justify-content: space-between; row-gap: 8px; }
-  .globe-controls .lod-switch { order: 1; }
-  .globe-controls .zoom-group { order: 2; gap: 4px; }
-  .globe-controls .turn-pad { order: 3; }
-  .globe-controls #rotate-toggle { order: 4; }
-  .globe-controls #serif-toggle { order: 5; }
+  .globe-controls .zoom-group { gap: 4px; }
   .globe-controls .long-label { display: none; }
   #text-atlas .atlas-overlay .atlas-hint { font-size: 0.75rem; letter-spacing: 0.04em; line-height: 1.45; }
   .lod-switch .map-btn { padding: 5px 9px; }
