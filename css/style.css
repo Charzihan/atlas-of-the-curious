@@ -721,8 +721,8 @@ dialog::backdrop {
 .atlas-hint {
   margin: 0;
   font-family: Verdana, Geneva, sans-serif;
-  font-size: 0.68rem;
-  letter-spacing: 0.14em;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--gold);
   opacity: 0.92;
@@ -1245,8 +1245,8 @@ dialog::backdrop {
 
 .map-card-cat {
   display: inline-block;
-  font-size: 0.62rem;
-  letter-spacing: 0.12em;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   border: 1px solid;
   border-radius: 999px;
@@ -1458,7 +1458,7 @@ dialog::backdrop {
   letter-spacing: var(--ls-notebook);
   color: var(--ink);
   background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--line);
+  border: 1px solid rgba(154, 164, 200, 0.5); /* an editable field: a real edge */
   border-radius: 10px;
   padding: 10px 12px;
   white-space: pre-wrap;
@@ -1468,6 +1468,7 @@ dialog::backdrop {
   overflow-y: hidden;    /* …and never a scrollbar, which would eat the measure */
 }
 .notebook-input:focus-visible { outline: none; border-color: var(--gold); }
+.notebook-input::placeholder { color: var(--ink-dim); opacity: 1; }
 
 .notebook-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 

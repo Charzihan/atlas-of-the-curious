@@ -80,7 +80,7 @@
             <button class="view-btn" type="button" data-view-target="globe" aria-pressed="false" title="Globe"><span class="view-glyph" aria-hidden="true">◍</span><span class="view-label">Globe</span></button>
           </div>
           </div>
-          <p class="atlas-filter" id="atlas-filter" hidden><span class="atlas-filter-text" id="atlas-filter-text" role="status"></span><button class="atlas-filter-clear" id="atlas-filter-clear" type="button">Clear</button></p>
+          <p class="atlas-filter" id="atlas-filter" hidden><span class="atlas-filter-text" id="atlas-filter-text" role="status"></span><button class="atlas-filter-clear atlas-filter-view" id="atlas-filter-view" type="button">List<span class="long-label"> them</span></button><button class="atlas-filter-clear" id="atlas-filter-clear" type="button">Clear</button></p>
           <p class="gesture-hint" id="gesture-hint" role="status" hidden></p>
           <p class="visually-hidden" id="flat-instructions">Tab to a ring to preview it and press Enter to open it. Hold <span class="mod-key-name">Control</span> and scroll, or press plus and minus, to zoom; arrow keys pan a zoomed map; 0 resets.</p>
           <!-- map stage injected here by js/map.js -->
@@ -174,7 +174,7 @@
       </label>
     </section>
 
-    <p id="results-status" class="results-status" role="status" aria-live="polite"></p>
+    <p id="results-status" class="results-status" role="status" aria-live="polite" tabindex="-1"></p>
 
     <section id="grid" class="grid" aria-label="Places"></section>
 

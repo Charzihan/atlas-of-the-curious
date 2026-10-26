@@ -103,11 +103,25 @@ if (section && globeView) {
     if (!filter || !filterText) return;
     filter.hidden = !active;
     if (!active) { filterText.textContent = ""; return; }
+    // The count always shows; the scope can give way on a narrow toolbar.
     const scope = [query && `“${query}”`, category].filter(Boolean).join(" in ");
-    filterText.textContent = `${shown} of ${total} places${scope ? ` match ${scope}` : ""}`;
+    const count = document.createElement("span");
+    count.className = "filter-count";
+    count.textContent = `${shown} of ${total}`;
+    const rest = document.createElement("span");
+    rest.className = "filter-scope";
+    rest.textContent = ` places${scope ? ` match ${scope}` : ""}`;
+    filterText.replaceChildren(count, rest);
   };
   window.addEventListener("atlas:filter", (event) => showFilter(event.detail));
   showFilter(window.ATLAS_FILTER_STATE);
+  // The matches as a list: scroll to the filtered cards and focus the first.
+  document.getElementById("atlas-filter-view")?.addEventListener("click", () => {
+    const status = document.getElementById("results-status");
+    status?.scrollIntoView({ behavior: "smooth", block: "start" });
+    const first = document.querySelector("#grid .card:not(.is-leaving) .card-more");
+    (first || status)?.focus({ preventScroll: true });
+  });
   document.getElementById("atlas-filter-clear")?.addEventListener("click", () => window.ATLAS_CLEAR_FILTER?.());
 
   // Below the wide layout (phones and tablets) the switch, filter readout

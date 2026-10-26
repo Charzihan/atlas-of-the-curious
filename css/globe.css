@@ -303,6 +303,7 @@
   padding: 4px 12px;
   cursor: pointer;
 }
+.atlas-filter-view { background: transparent; }
 .atlas-filter-clear:hover, .atlas-filter-clear:focus-visible { background: var(--gold); color: #101a28; outline: none; }
 @media (pointer: coarse) { .atlas-filter-clear { min-height: 44px; padding: 4px 16px; } }
 .legend-item.is-empty { opacity: 0.45; }
@@ -413,6 +414,7 @@
   .view-btn { padding: 6px 12px 6px 10px; font-size: 0.72rem; }
   .motion-btn { padding: 8px 12px; }
   .motion-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .map-toolbar .filter-scope, .atlas-filter .long-label { display: none; }
   .map-controls .map-btn { padding: 6px 10px; }
   #map-locate { font-size: 0; }
   #map-locate::first-letter { font-size: 0.8rem; }

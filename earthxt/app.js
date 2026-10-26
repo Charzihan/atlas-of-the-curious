@@ -184,10 +184,10 @@ function frame(time) {
   }
   frameId = requestAnimationFrame(frame);
 }
-function nearestPlace(latitude, longitude) {
+function nearestPlace(latitude, longitude, among = places) {
   const rad = Math.PI / 180;
-  let best = places[0], bestCos = -2;
-  for (const place of places) {
+  let best = among[0], bestCos = -2;
+  for (const place of among) {
     const cos = Math.sin(latitude * rad) * Math.sin(place.latitude * rad)
       + Math.cos(latitude * rad) * Math.cos(place.latitude * rad) * Math.cos((place.longitude - longitude) * rad);
     if (cos > bestCos) { bestCos = cos; best = place; }
@@ -401,7 +401,24 @@ async function main({ embedded = false } = {}) {
     window.addEventListener('atlas:motion', event => holdMotion(Boolean(event.detail)));
     if (still() && !reducedMotion.matches) holdMotion(true, true);
     placeLayer.setFilter(window.ATLAS_VISIBLE || null);
-    window.addEventListener('atlas:visible', event => { placeLayer.setFilter(event.detail); dirty = true; });
+    // A search whose matches all lie on the far side would leave the globe
+    // looking empty: turn to the match nearest the current view instead.
+    const turnToMatches = () => {
+      const ids = window.ATLAS_VISIBLE;
+      if (!active || !ids || !ids.size || ids.size === places.length || state.source !== 'earth') return;
+      if (placeLayer.markers.some(marker => marker.visible && ids.has(marker.id))) return;
+      const target = nearestPlace(state.latitude, state.longitude, places.filter(place => ids.has(place.id)));
+      setRotation(false);
+      state.latitude = target.latitude;
+      state.longitude = target.longitude;
+      setText('live-status', `Turned the globe to ${target.name}, the nearest match.`);
+      dirty = true;
+    };
+    window.addEventListener('atlas:visible', event => {
+      placeLayer.setFilter(event.detail); dirty = true;
+      requestAnimationFrame(turnToMatches);
+    });
+    window.addEventListener('atlas:view', event => { if (event.detail === 'globe') requestAnimationFrame(turnToMatches); });
   }
   setupControls();
   const resize = (width, height) => {

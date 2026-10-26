@@ -123,7 +123,7 @@ export class PlaceLayer {
       let textWidth = fit.width;
       // The category pill is tracked uppercase in a padded, bordered box.
       const pill = `${categoryGlyph(place.category)} ${this.categoryLabel(place.category)}`.toUpperCase();
-      textWidth = Math.max(textWidth, this.metrics.tightWidthOfText('hover-loc', pill, maxWidth * 2) * 1.12 + 22);
+      textWidth = Math.max(textWidth, this.metrics.tightWidthOfText('hover-loc', pill, maxWidth * 2) * 1.2 + 24);
       for (const [role, text] of [['hover-name', place.name], ['native-name', native], ['hover-loc', place.country.toUpperCase()], ['hover-cta', cta]]) {
         if (text) textWidth = Math.max(textWidth, this.metrics.tightWidthOfText(role, text, maxWidth));
       }
