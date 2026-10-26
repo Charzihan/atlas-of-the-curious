@@ -282,7 +282,7 @@ test('place adapter mirrors visibility, paints tracked names without preparation
       const adapter = new PlaceLayer(new Node('stage'), new Node('layer'), items, allRoles, new Map(items.map(place => [place.category, '#123456'])), { standalone });
       adapter.resize(viewport.width, viewport.height);
       const marks = [], dots = [];
-      const ctx = { letterSpacing: '0px', fillText(text, x, y) { marks.push({ text, x, y, font: this.font, spacing: this.letterSpacing }); }, beginPath() {}, arc(...args) { dots.push(args); }, fill() {} };
+      const ctx = { letterSpacing: '0px', fillText(text, x, y) { marks.push({ text, x, y, font: this.font, spacing: this.letterSpacing }); }, beginPath() {}, stroke() {}, arc(...args) { dots.push(args); }, fill() {} };
       const camera = { ...here, distance: 2.05 };
       const blocked = new Uint8Array(grid.cols * grid.rows);
       const prepared = measurements;
@@ -291,7 +291,7 @@ test('place adapter mirrors visibility, paints tracked names without preparation
       adapter.draw(ctx, camera, LEVELS[1], viewport, grid, blocked, true, true);
       const labelArray = adapter.labels, markerRecord = adapter.markers[0], markerCells = adapter.markerCells;
       const visible = adapter.markers.filter(marker => marker.visible);
-      assert.equal(dots.length, visible.length);
+      assert.equal(dots.length, visible.length * 2); // ring and core per marker
       for (const marker of adapter.markers) assert.equal(adapter.nodes.get(marker.id).hidden, !marker.visible);
       assert.equal(adapter.nodes.get(here.id).attributes.get('aria-label'), `${here.name}, ${here.country}`);
       assert.ok(marks.length);

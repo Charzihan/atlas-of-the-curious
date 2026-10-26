@@ -1,11 +1,12 @@
 import { createLabelEngine } from '../js/labels.js';
 import { cameraBasis, latLonToCartesian, project } from './geometry.js';
 
-export function parsePlaceHash(hash) {
-  const match = /^#\/place\/([^/]+)$/.exec(hash || '');
-  if (!match) return null;
+export function parsePlaceHash(hash, prefix = '#/place/') {
+  if (!hash || !hash.startsWith(prefix)) return null;
+  const rest = hash.slice(prefix.length);
+  if (!rest || rest.includes('/')) return null;
   try {
-    const id = decodeURIComponent(match[1]);
+    const id = decodeURIComponent(rest);
     return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id) ? id : null;
   } catch { return null; }
 }

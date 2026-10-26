@@ -1,4 +1,4 @@
-/** Real browser navigation checks against the combined source site.
+/** Real browser checks of the atlas's two views (flat map and globe) on one page.
  * Run pnpm build first, then node scripts/earthxt/smoke-nav.mjs.
  * The globe-only dist build does not include the atlas entry.
  * Browser/server unavailability is a failure, never a skipped pass.
@@ -27,50 +27,71 @@ try {
       return ['--bg', '--ink', '--gold'].map(name => style.getPropertyValue(name).trim());
     });
 
-    await page.goto(`${server.origin}/earthxt/`);
-    await globeReady();
-    assert.equal(await page.title(), 'Globe · Atlas of the Curious');
-    const globePalette = await palette();
-    const brand = page.locator('.site-header a.brand');
-    assert.ok(await brand.isVisible());
-    assert.equal(await brand.evaluate(link => link.href), `${server.origin}/`);
-    assert.equal(await page.locator('.site-header .view-label').innerText(), 'Globe');
-    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
-    // Activate the real link by keyboard so focus access is exercised too.
-    await brand.focus();
-    await Promise.all([page.waitForURL(`${server.origin}/`), page.keyboard.press('Enter')]);
+    const view = () => page.evaluate(() => document.getElementById('text-atlas').dataset.view);
+    const roomy = () => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
+
+    // One page: the atlas opens flat, and its hero switch turns the same
+    // viewport into the globe without leaving the document.
+    await page.goto(`${server.origin}/`);
     await page.waitForFunction(() => window.ATLAS_TEXT_READY === true && window.ATLAS_MAP_DEBUG && document.querySelector('.map-marker'));
     assert.equal(await page.title(), 'Atlas of the Curious — 40 extraordinary places on Earth');
-    assert.deepEqual(await palette(), globePalette);
-    const globeLink = page.locator('.site-header a.surprise-btn');
-    assert.equal(await globeLink.innerText(), '⊕ Globe');
-    assert.equal(await globeLink.evaluate(link => link.href), `${server.origin}/earthxt/`);
-    await Promise.all([page.waitForURL(`${server.origin}/earthxt/`), globeLink.click()]);
+    assert.equal(await view(), 'flat');
+    assert.ok(await page.locator('#globe-view').isHidden());
+    assert.equal(await page.locator('.site-header a[href*="earthxt"]').count(), 0);
+    const flatPalette = await palette();
+    const globeButton = page.locator('[data-view-target="globe"]');
+    await globeButton.focus();
+    await page.keyboard.press('Enter');
+    await page.waitForURL(`${server.origin}/#/globe`);
     await globeReady();
+    assert.equal(await view(), 'globe');
+    assert.equal(await globeButton.getAttribute('aria-pressed'), 'true');
+    assert.ok(await page.locator('.globe-controls').isVisible());
+    assert.ok(await page.locator('.map-controls[data-for="flat"]').isHidden());
+    assert.deepEqual(await palette(), flatPalette);
+    assert.ok(await roomy());
+    // Back returns to the flat map; the globe stops drawing while hidden.
+    await page.goBack();
+    await page.waitForFunction(() => document.getElementById('text-atlas').dataset.view === 'flat');
+    const frames = await page.evaluate(() => EARTHXT_DEBUG.snapshot().frameNumber);
+    await page.waitForTimeout(400);
+    assert.equal(await page.evaluate(() => EARTHXT_DEBUG.snapshot().frameNumber), frames, 'a hidden globe draws nothing');
+
+    // The field note's globe link turns the hero into the globe at that place.
     await page.goto(`${server.origin}/#/place/salar-de-uyuni`);
     await page.waitForFunction(() => document.getElementById('place-dialog').open && document.getElementById('dialog-globe'));
     const placeLink = page.locator('#dialog-globe');
     assert.equal(await placeLink.innerText(), 'See on the globe →');
-    await Promise.all([page.waitForURL(`${server.origin}/earthxt/#/place/salar-de-uyuni`), placeLink.click()]);
+    await Promise.all([page.waitForURL(`${server.origin}/#/globe/place/salar-de-uyuni`), placeLink.click()]);
     await globeReady();
+    await page.waitForFunction(() => EARTHXT_DEBUG.snapshot().lod === 2 && !document.getElementById('globe-place-card').hidden);
+    assert.equal(await page.evaluate(() => document.getElementById('place-dialog').open), false);
     const state = await page.evaluate(() => EARTHXT_DEBUG.snapshot());
-    assert.equal(state.lod, 2);
     assert.ok(Math.abs(state.latitude + 19.917) < 0.001 && Math.abs(state.longitude + 67.846) < 0.001);
-    assert.ok(await page.locator('#globe-place-card').isVisible());
+    // A globe marker opens the same field note, over the globe.
     const marker = page.locator('.globe-marker[data-id="salar-de-uyuni"]');
     await marker.focus();
     await Promise.all([page.waitForURL(`${server.origin}/#/place/salar-de-uyuni`), page.keyboard.press('Enter')]);
     await page.waitForFunction(() => document.getElementById('place-dialog').open);
+    assert.equal(await view(), 'globe');
+
+    // Old globe links land in the unified page with their place.
     await page.goto(`${server.origin}/earthxt/#/place/fez-medina`);
+    await page.waitForURL(`${server.origin}/#/globe/place/fez-medina`);
     await globeReady();
+    await page.waitForFunction(() => !document.getElementById('globe-place-card').hidden);
     const native = page.locator('#globe-place-card .map-card-native');
     assert.ok(await native.isVisible());
     assert.equal(await native.getAttribute('dir'), 'rtl');
     assert.equal(await native.innerText(), await page.evaluate(() => ATLAS_DATA.places.find(place => place.id === 'fez-medina').nativeName));
+    // The atlas filter dims the globe's dots too.
+    await page.fill('#search-input', 'salt');
+    await page.waitForFunction(() => document.querySelector('.globe-marker[data-id="fez-medina"]').classList.contains('is-dimmed'));
+    assert.ok(await roomy());
     await context.close();
   }
   assert.deepEqual(errors, []);
-  console.log('PASS: desktop/mobile atlas ↔ globe header navigation, keyboard brand link, shared palette, rendered views, and no console/page errors.');
+  console.log('PASS: desktop/mobile flat ↔ globe switch on one page, Back, paused hidden globe, dialog and marker links, old-URL redirect, shared filter and palette, no console/page errors.');
 } catch (error) {
   console.error(`Globe navigation smoke failed: ${error.message}`);
   process.exitCode = 1;

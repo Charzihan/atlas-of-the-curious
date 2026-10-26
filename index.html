@@ -31,6 +31,7 @@
   <script src="js/reader.js" type="module" defer></script>
   <script src="js/app.js" defer></script>
   <script src="js/map.js" type="module" defer></script>
+  <script src="js/views.js" type="module" defer></script>
 </head>
 <body>
   <header class="site-header">
@@ -39,7 +40,6 @@
         <span class="brand-glyph" aria-hidden="true">✦</span>
         <span class="brand-text">Atlas of the Curious</span>
       </a>
-      <a class="surprise-btn" href="earthxt/">⊕ Globe</a>
       <form id="search-form" class="search" role="search">
         <label for="search-input" class="visually-hidden">Search places</label>
         <input id="search-input" type="search" name="q"
@@ -50,20 +50,41 @@
   </header>
 
   <main>
-    <section class="atlas" id="text-atlas" aria-labelledby="atlas-title">
-      <div class="map-viewport" role="group" aria-label="Interactive character map of the world with 40 marked places. Move your cursor across the water to make it ripple.">
+    <section class="atlas" id="text-atlas" data-view="flat" aria-labelledby="atlas-title">
+      <div class="map-viewport" role="group" aria-label="The atlas map, shown as a flat character map or as a turning character globe, with 40 marked places.">
         <div class="atlas-overlay">
-          <p class="hero-kicker">The Text Atlas</p>
-          <h2 id="atlas-title" class="atlas-title">Every wonder, on one map of characters.</h2>
-          <p class="atlas-sub">
+          <p class="hero-kicker"><span class="for-flat">The Text Atlas · flat</span><span class="for-globe">The Text Atlas · globe</span></p>
+          <h2 id="atlas-title" class="atlas-title"><span class="for-flat">Every wonder, on one map of characters.</span><span class="for-globe">Every wonder, on one turning world.</span></h2>
+          <p class="atlas-sub for-flat">
             Real coastlines and continent-by-continent color, drawn in text. Each dot sits on
             its true coordinates. Text measured by
             <a class="atlas-cred" href="https://github.com/chenglou/pretext">@chenglou/pretext</a> — never reflowed.
           </p>
-          <p class="atlas-hint">drift across the water · tap for a splash · hover a dot · tap a dot to open it</p>
+          <p class="atlas-sub for-globe">
+            The same continents, colors and forty dots, wrapped onto a sphere of characters.
+            Descend from the planet to coastlines to named countries.
+          </p>
+          <p class="atlas-hint for-flat">drift across the water · tap for a splash · hover a dot · tap a dot to open it</p>
+          <p class="atlas-hint for-globe">drag to turn · scroll or pinch to descend · hover a dot · tap a dot to open it</p>
+        </div>
+        <div class="view-switch" role="group" aria-label="Map projection">
+          <button class="view-btn" type="button" data-view-target="flat" aria-pressed="true" title="Flat map"><span class="view-glyph" aria-hidden="true">▭</span><span class="view-label">Flat</span></button>
+          <button class="view-btn" type="button" data-view-target="globe" aria-pressed="false" title="Globe"><span class="view-glyph" aria-hidden="true">◍</span><span class="view-label">Globe</span></button>
         </div>
         <!-- map stage injected here by js/map.js -->
-        <div class="map-controls" role="group" aria-label="Map controls">
+        <!-- The globe (earthxt/app.js) is loaded by js/views.js the first time
+             this view opens; until then it is only this markup. -->
+        <div class="globe-view" id="globe-view" hidden>
+          <div class="globe-stage" id="globe-stage">
+            <canvas id="globe" tabindex="0" role="img" aria-label="Interactive globe made of text characters" aria-describedby="globe-instructions">An interactive text globe. Focus it and use the arrow keys to turn it, plus and minus to zoom.</canvas>
+            <div id="country-labels" aria-hidden="true"></div>
+            <div id="globe-markers" role="group" aria-label="Atlas places on the globe"></div>
+            <div class="loading-state" id="loading" role="status"><span class="loading-glyph" aria-hidden="true">◍</span>Wrapping the atlas onto a sphere…</div>
+          </div>
+          <p class="visually-hidden" id="globe-instructions">Drag or use the arrow keys to turn the globe, scroll, pinch or press plus and minus to zoom, 0 resets, space toggles rotation.</p>
+          <p class="globe-error" id="data-error" role="status" hidden></p>
+        </div>
+        <div class="map-controls" data-for="flat" role="group" aria-label="Map controls">
           <button class="map-btn" id="map-serif" type="button" aria-pressed="false">Serif map</button>
           <button class="map-btn" id="map-art-clear" type="button" hidden>Clear story</button>
           <button class="map-btn" id="map-locate" type="button" title="Show where I am on the map">⌖ Locate me</button>
@@ -71,14 +92,29 @@
           <button class="map-btn" id="map-zoom-out" type="button" aria-label="Zoom out" title="Zoom out (−)">−</button>
           <button class="map-btn" id="map-zoom-reset" type="button" aria-label="Reset map view" title="Reset view">⤢</button>
         </div>
+        <div class="map-controls globe-controls" data-for="globe" role="group" aria-label="Globe controls" hidden>
+          <div class="lod-switch" role="group" aria-label="Level of detail">
+            <button class="map-btn lod-btn" type="button" data-level="0" aria-pressed="true" title="The whole planet">Planet</button>
+            <button class="map-btn lod-btn" type="button" data-level="1" aria-pressed="false" title="Closer coastlines and islands">Coasts</button>
+            <button class="map-btn lod-btn" type="button" data-level="2" aria-pressed="false" title="Borders and country names">Countries</button>
+          </div>
+          <button class="map-btn" id="serif-toggle" type="button" aria-pressed="false">Serif globe</button>
+          <button class="map-btn" id="labels-toggle" type="button" aria-pressed="true" title="Place and country names at close range">Names</button>
+          <button class="map-btn" id="rotate-toggle" type="button" aria-pressed="false" aria-label="Start automatic rotation"><span id="rotate-icon" aria-hidden="true">▷</span> <span id="rotate-text">Auto-rotate</span></button>
+          <button class="map-btn" id="zoom-in" type="button" aria-label="Zoom in" title="Zoom in (+)">＋</button>
+          <button class="map-btn" id="zoom-out" type="button" aria-label="Zoom out" title="Zoom out (−)">−</button>
+          <button class="map-btn" id="reset-view" type="button" aria-label="Reset globe view" title="Reset view (0)">⤢</button>
+        </div>
       </div>
       <p id="map-story-status" class="map-story-status" role="status" hidden></p>
       <p id="map-story-copy" class="visually-hidden" hidden></p>
       <p id="map-route-note" class="map-route-note" hidden></p>
+      <p class="visually-hidden" id="live-status" role="status" aria-live="polite"></p>
       <div class="atlas-foot">
         <div class="wrap atlas-foot-inner">
           <div class="atlas-legend" id="atlas-legend"></div>
-          <span class="atlas-scale">equirectangular · hover a marker to read it</span>
+          <span class="atlas-scale for-flat">equirectangular · hover a marker to read it</span>
+          <span class="atlas-scale for-globe">perspective globe · <span id="view-level">00 — PLANET VIEW</span> · <span id="coordinates">18.00° N &nbsp; 24.00° W</span></span>
         </div>
       </div>
     </section>

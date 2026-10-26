@@ -5,3 +5,10 @@ export function readCategoryColors(doc, categories) {
   return new Map(categories.map(category => [category.id,
     css.getPropertyValue(`--category-${category.id}`).trim() || fallback]));
 }
+
+/* Continent land colours (--continent-<name>), in the order given, as hex. */
+export function readContinentColors(doc, continents) {
+  const css = doc.defaultView.getComputedStyle(doc.documentElement);
+  return continents.map(name =>
+    css.getPropertyValue(`--continent-${name.toLowerCase().replace(/\s+/g, '-')}`).trim() || '#d0a05a');
+}

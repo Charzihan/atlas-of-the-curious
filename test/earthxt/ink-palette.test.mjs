@@ -145,7 +145,7 @@ function recorder(nativeSpacing, inkHeight) {
         actualBoundingBoxAscent: inkHeight - 1, actualBoundingBoxDescent: 1 };
     },
     fillText(text, x, y) { marks.push({ text, x, y, font: this.font, color: this.fillStyle, spacing: this.letterSpacing, align: this.textAlign, baseline: this.textBaseline }); },
-    beginPath() {}, fill() {}, arc(...args) { marks.push({ dot: args, color: this.fillStyle }); }
+    beginPath() {}, fill() {}, stroke() {}, arc(...args) { marks.push({ dot: args, color: this.fillStyle }); }
   };
   if (nativeSpacing) context.letterSpacing = '0px';
   const renderer = new TextRenderer({ getContext: () => context }, new Node(), fonts);

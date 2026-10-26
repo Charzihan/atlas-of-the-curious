@@ -3,7 +3,34 @@ import { prepareFlowText, flowIntoSlots, boxesOverlap } from '../js/map-art.js';
 import { cameraBasis, latLonToCartesian, project, RAD } from './geometry.js';
 import { InkPaletteCache } from './ink-palette.js';
 
-const PALETTE = ['#213e42', '#2e5558', '#3c6969', '#598580', '#45695a', '#73977a', '#a0bea0', '#c6dfb3', '#dfd4a6', '#dcad79', '#3b5651'];
+// The atlas's continent colours (css/tokens.css --continent-*) and texture
+// glyphs (scripts/build-map.mjs), in CONTINENTS order. The app passes the
+// resolved tokens; these defaults keep node tests and old callers working.
+export const CONTINENT_COLORS = Object.freeze(['#6f9e5f', '#d0a05a', '#a88ac4', '#8fc96a', '#e07a5a', '#4fb0c9', '#ecf2f6']);
+export const CONTINENT_GLYPHS = Object.freeze(['#', '%', '+', '8', '@', ':', 'x']);
+// The atlas sea is a pale steel blue at low alpha; four lit tones of it.
+const OCEAN = ['rgba(74, 124, 164, 0.2)', 'rgba(90, 146, 186, 0.27)', 'rgba(110, 172, 208, 0.34)', 'rgba(140, 200, 232, 0.42)'];
+const LAND_ALPHA = [0.5, 0.66, 0.82, 0.96];
+const BORDER = 'rgba(244, 232, 204, 0.82)', GRID = 'rgba(232, 180, 90, 0.42)';
+
+function rgba(hex, alpha) {
+  const value = parseInt(hex.replace('#', ''), 16);
+  return `rgba(${value >> 16 & 255}, ${value >> 8 & 255}, ${value & 255}, ${alpha})`;
+}
+function lighten(hex, amount) {
+  const value = parseInt(hex.replace('#', ''), 16);
+  const mix = channel => Math.round(channel + (255 - channel) * amount);
+  return `rgb(${mix(value >> 16 & 255)}, ${mix(value >> 8 & 255)}, ${mix(value & 255)})`;
+}
+/** Fill styles indexed by cell colour: ocean light 0–3, then per continent
+ * four lit land tones and one coast tone, then border and grid. */
+export function globePalette(continents = CONTINENT_COLORS) {
+  const palette = [...OCEAN];
+  for (const color of continents) palette.push(...LAND_ALPHA.map(alpha => rgba(color, alpha)), lighten(color, 0.28));
+  palette.push(BORDER, GRID);
+  return palette;
+}
+const LAND_BASE = OCEAN.length, PER_CONTINENT = LAND_ALPHA.length + 1;
 const MAX_CELLS = 24000;
 
 /** Maximal same-country runs, inset by one cell at each end. Geometry uses
@@ -66,8 +93,11 @@ export function placeSilhouetteName(text, role, measured, slots, anchor) {
 
 /** Display adapter: geography is painted exclusively with browser text glyphs. */
 export class TextRenderer {
-  constructor(canvas, labelLayer, fonts) {
+  constructor(canvas, labelLayer, fonts, { continents = CONTINENT_COLORS } = {}) {
     this.fonts = fonts;
+    this.palette = globePalette(continents);
+    this.borderColor = this.palette.length - 2;
+    this.gridColor = this.palette.length - 1;
     this.preparedLabels = new Map();
     this.canvas = canvas;
     this.context = canvas.getContext('2d', { alpha: true });
@@ -79,6 +109,7 @@ export class TextRenderer {
     this.cells = new Uint8Array(MAX_CELLS);
     this.variants = new Uint8Array(MAX_CELLS);
     this.tones = new Uint8Array(MAX_CELLS);
+    this.continents = new Uint8Array(MAX_CELLS);
     this.palettes = new InkPaletteCache();
     this.dpr = 1;
     this.countryIds = new Uint8Array(MAX_CELLS);
@@ -189,6 +220,7 @@ export class TextRenderer {
     const { east, north, front } = cameraBasis(camera.latitude, camera.longitude);
     const distance = camera.distance, d2 = distance * distance;
     const sample = { country: 0, coast: false, border: false };
+    const continentByCountry = geography.continentByCountry || new Uint8Array(256).fill(1);
     let visible = 0;
     for (let row = 0; row < rows; row++) {
       const rayY = (height / 2 - (yOffset + row * cellHeight)) / focal;
@@ -219,11 +251,16 @@ export class TextRenderer {
         const facing = (distance * z - 1) / Math.hypot(x, y, distance - z);
         const light = Math.max(0, Math.min(3, Math.floor((facing * 0.85 - x * 0.24 + y * 0.1) * 4)));
         this.tones[index] = sample.coast ? 4 : light;
-        let color = sample.country ? 4 + (level.labels ? Math.max(1, light) : light) : light;
+        const continent = sample.country ? continentByCountry[sample.country] : 0;
+        this.continents[index] = continent;
+        // Land is the atlas's flat continent colour, shaded by the light; at
+        // name-bearing detail the darkest tone is skipped so names keep ground.
+        const landBase = LAND_BASE + continent * PER_CONTINENT;
+        let color = sample.country ? landBase + (level.labels ? Math.max(1, light) : light) : light;
         let variant = sample.country ? 1 : 0;
-        if (sample.coast && level.index > 0) { color = 8; variant = 2; }
-        if (sample.border && level.borders) { color = 9; variant = 3; }
-        if (options.grid && !sample.country && (Math.abs(latitude % 30) < 0.4 || Math.abs(longitude % 30) < 0.4)) { color = 10; variant = 4; }
+        if (sample.coast && level.index > 0) { color = landBase + LAND_ALPHA.length; variant = 2; }
+        if (sample.border && level.borders) { color = this.borderColor; variant = 3; }
+        if (options.grid && !sample.country && (Math.abs(latitude % 30) < 0.4 || Math.abs(longitude % 30) < 0.4)) { color = this.gridColor; variant = 4; }
         this.cells[index] = color + 1;
         this.variants[index] = variant;
         visible++;
@@ -237,10 +274,10 @@ export class TextRenderer {
     ctx.textBaseline = 'middle';
     if (this.nativeSpacing) ctx.letterSpacing = '0px';
     const oceanPhase = options.animateOcean ? Math.floor((options.time ?? 0) / 900) : 0;
-    const glyphs = [level.ocean, level.land, '+', '·', '+'];
+    const glyphs = [level.ocean, '', '', '·', '+'];
     // Batch by palette to avoid thousands of canvas state changes.
-    for (let color = 0; color < PALETTE.length; color++) {
-      ctx.fillStyle = PALETTE[color];
+    for (let color = 0; color < this.palette.length; color++) {
+      ctx.fillStyle = this.palette[color];
       for (let row = 0; row < rows; row++) {
         for (let col = 0; col < cols; col++) {
           const index = row * cols + col;
@@ -255,9 +292,9 @@ export class TextRenderer {
             ctx.fillText(glyph.glyph, xOffset + col * cellWidth - glyph.width / 2, yOffset + row * cellHeight);
             continue;
           }
-          let glyph = glyphs[variant];
+          // Land and coast take their continent's atlas texture glyph.
+          let glyph = variant === 1 || variant === 2 ? CONTINENT_GLYPHS[this.continents[index]] : glyphs[variant];
           if (variant === 0 && (row * 13 + col * 7 + oceanPhase) % 17 === 0) glyph = '~';
-          if (variant === 1 && level.index === 0 && (row + col) % 5 === 0) glyph = '+';
           ctx.fillText(glyph, xOffset + col * cellWidth, yOffset + row * cellHeight);
         }
       }

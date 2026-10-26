@@ -9,7 +9,7 @@ npm start
 # Open http://localhost:8000/earthxt/
 ```
 
-The atlas remains available at `/`. Its header links to **Globe**, and the globe’s **✦ Atlas of the Curious** brand link returns to the atlas. The globe shares the atlas’s CSS font registry, text metrics module, and vendored `@chenglou/pretext` measurement library. It uses no external fonts, map services, API keys, or backend. The development server is only a static file server.
+The globe is a view of the atlas page itself: the hero map's **Flat / Globe** switch (or `/#/globe`) mounts this engine into the same viewport, sharing the control bar, legend, search filter and dialog (`js/views.js`, `mountGlobe({ embedded: true })`). Land takes the atlas's per-continent colours (`--continent-*` in `css/tokens.css`, checked against `js/landmap.js` by `pnpm validate`) and texture glyphs. Visiting `/earthxt/` redirects there; `/earthxt/?bench` keeps this page as the engine's instrumented test bench, and it is still the template of the standalone edition. The globe shares the atlas’s CSS font registry, text metrics module, and vendored `@chenglou/pretext` measurement library. It uses no external fonts, map services, API keys, or backend. The development server is only a static file server.
 
 If localhost is unavailable, generate the standalone edition:
 

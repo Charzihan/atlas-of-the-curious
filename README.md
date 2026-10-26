@@ -1,4 +1,4 @@
-> **Globe:** The spherical view of Atlas of the Curious lives at [`/earthxt/`](earthxt/), sharing its text foundation and colour palette. See the [globe guide](earthxt/README.md) for architecture, controls, data, tests, and static deployment. Run `npm start`, then open `http://localhost:8000/earthxt/`.
+> **Globe:** The hero map has two views on one page: the flat character map and a turning character globe (switch top-right, or open `#/globe`; `#/globe/place/<id>` centres a place). Both share the continent colours and glyphs, the 40 ringed markers, the legend, the search filter and the field-note dialog. The globe engine lives in [`earthxt/`](earthxt/README.md) and loads the first time the globe opens; the old `/earthxt/` address redirects into the page (`/earthxt/?bench` keeps the engine's instrumented test bench).
 
 # Atlas of the Curious
 

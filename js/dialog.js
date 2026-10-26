@@ -1087,7 +1087,7 @@ function boot(win, doc) {
       globeLink.textContent = "See on the globe →";
       $("dialog-loc").after(globeLink);
     }
-    globeLink.href = "./earthxt/#/place/" + encodeURIComponent(place.id);
+    globeLink.href = "#/globe/place/" + encodeURIComponent(place.id);
     $("dialog-tagline").textContent = place.tagline;
     storyEl.textContent = place.story;   // the accessible, un-hyphenated copy
     factEl.textContent = place.fact;

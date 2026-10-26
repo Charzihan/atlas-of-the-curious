@@ -8,13 +8,16 @@
    - Navigations: network-first (fresh content wins), cache as offline fallback.
    - Everything else: cache-first, falling back to network and caching the
      result so repeated visits are instant. */
-const CACHE = "atlas-of-the-curious-v11";
+const CACHE = "atlas-of-the-curious-v12";
 const CORE = [
   "/",
   "/index.html",
   "/css/style.css",
   "/css/fonts.css",
   "/css/tokens.css",
+  "/css/globe.css",
+  "/js/views.js",
+  "/earthxt/redirect.js",
   "/earthxt/",
   "/earthxt/index.html",
   "/earthxt/styles.css",

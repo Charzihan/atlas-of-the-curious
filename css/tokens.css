@@ -16,4 +16,13 @@
   --category-sacred: #ce93d8;
   --category-urban: #ef5350;
   --line: rgba(154, 164, 200, 0.18);
+  /* Land, one flat colour per continent, in both the flat map and the globe
+     (scripts/build-map.mjs bakes the same values into js/landmap.js). */
+  --continent-africa: #6f9e5f;
+  --continent-asia: #d0a05a;
+  --continent-europe: #a88ac4;
+  --continent-north-america: #8fc96a;
+  --continent-south-america: #e07a5a;
+  --continent-oceania: #4fb0c9;
+  --continent-antarctica: #ecf2f6;
 }

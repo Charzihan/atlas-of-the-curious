@@ -4064,31 +4064,43 @@ import {
     // view, resume when it comes back. The wave clock is wall-clock based, so
     // the sea continues exactly where it left off (no jump on resume). Saves
     // CPU for the rest of the page.
+    // The globe view (js/views.js) covers the stage; it counts as off-screen.
+    let onScreen = true, flatShown = section.dataset.view !== "globe";
+    function setLive() {
+      const visible = onScreen && flatShown;
+      viewportVisible = visible;
+      if (visible) {
+        if (!frameRef) return;
+        if (REDUCED) return; // static map: nothing to restart
+        if (ambientTimer === null) {
+          ambientTimer = setInterval(() => {
+            const i = waterList[(Math.random() * waterLen) | 0];
+            disp[i] += 0.75;
+            if (Math.random() < 0.5) {
+              const j = waterList[(Math.random() * waterLen) | 0];
+              disp[j] += 0.55;
+            }
+          }, 900);
+        }
+        startLoop();
+      } else {
+        if (animId) cancelAnimationFrame(animId);
+        loopRunning = false; // so startLoop() can restart when visible again
+        if (ambientTimer) { clearInterval(ambientTimer); ambientTimer = null; }
+      }
+    }
+    window.addEventListener("atlas:view", (e) => {
+      flatShown = e.detail !== "globe";
+      if (!flatShown && hideCardRef) hideCardRef();
+      setLive();
+    });
     if (typeof IntersectionObserver === "function") {
       new IntersectionObserver((entries) => {
-        const visible = entries.some((en) => en.isIntersecting);
-        viewportVisible = visible;
-        if (visible) {
-          if (!frameRef) return;
-          if (REDUCED) return; // static map: nothing to restart
-          if (ambientTimer === null) {
-            ambientTimer = setInterval(() => {
-              const i = waterList[(Math.random() * waterLen) | 0];
-              disp[i] += 0.75;
-              if (Math.random() < 0.5) {
-                const j = waterList[(Math.random() * waterLen) | 0];
-                disp[j] += 0.55;
-              }
-            }, 900);
-          }
-          startLoop();
-        } else {
-          if (animId) cancelAnimationFrame(animId);
-          loopRunning = false; // so startLoop() can restart when visible again
-          if (ambientTimer) { clearInterval(ambientTimer); ambientTimer = null; }
-        }
+        onScreen = entries.some((en) => en.isIntersecting);
+        setLive();
       }, { threshold: 0.02 }).observe(viewport);
     }
+    if (!flatShown) setLive();
 
     // ---- Map controls: zoom in/out, reset (#16). The "Locate me" button is
     // owned by app.js (it runs geolocation); map.js only reacts to its events.

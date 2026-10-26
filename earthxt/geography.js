@@ -1,5 +1,10 @@
 import { clamp, wrapLongitude, RAD } from './geometry.js';
 
+/** The atlas's continent order (js/landmap.js `continents`); colours and
+ * texture glyphs are indexed by it in both views. */
+export const CONTINENTS = Object.freeze(['Africa', 'Asia', 'Europe', 'North America', 'South America', 'Oceania', 'Antarctica']);
+const FALLBACK_CONTINENT = CONTINENTS.indexOf('Asia');
+
 /** Local raster provider. Future providers can implement sample() and labels(). */
 export class Geography {
   constructor(metadata, buffer, metadataBytes = 0) {
@@ -9,6 +14,12 @@ export class Geography {
     this.metadata = metadata;
     this.loadedBytes = buffer.byteLength + metadataBytes;
     this.countries = metadata.countries;
+    // Country id → continent index, read once per frame cell without lookups.
+    this.continentByCountry = new Uint8Array(256).fill(FALLBACK_CONTINENT);
+    for (const country of this.countries) {
+      const index = CONTINENTS.indexOf(country.continent);
+      if (index >= 0) this.continentByCountry[country.id] = index;
+    }
     this.levels = new Map(metadata.levels.map(level => {
       if (level.bytes !== level.width * level.height || level.offset + level.bytes > buffer.byteLength) throw new Error('Invalid geography level.');
       return [level.id, { ...level, grid: new Uint8Array(buffer, level.offset, level.bytes) }];
@@ -35,6 +46,7 @@ export class Geography {
 
 export const syntheticGeography = {
   loadedBytes: 0,
+  continentByCountry: Uint8Array.from({ length: 256 }, (_, id) => id === 1 ? 3 : FALLBACK_CONTINENT),
   labels: () => [],
   sample(latitude, longitude, level, result) {
     const lat = latitude * RAD, lon = longitude * RAD;

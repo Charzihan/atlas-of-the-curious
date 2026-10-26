@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { TextRenderer, countryRunSlots, placeSilhouetteName } from '../../earthxt/renderer.js';
+import { TextRenderer, CONTINENT_GLYPHS, countryRunSlots, placeSilhouetteName } from '../../earthxt/renderer.js';
 import { prepareFlowText, flowPreparationCount, flowIntoSlots, createMapArtEngine, boxesOverlap } from '../../js/map-art.js';
 import { measureNaturalWidth } from '../../vendor/pretext/layout.js';
 import { Geography } from '../../earthxt/geography.js';
@@ -48,7 +48,7 @@ test('globe silhouette matches perspective radius; only text is drawn', () => {
   assert.equal(metrics.visibleGlyphs, marks.length);
   for (const mark of marks) {
     assert.ok(Math.hypot(mark.x - 450, mark.y - 350) <= radius + 1e-8);
-    assert.ok(['#', '+', '·', '~'].includes(mark.text));
+    assert.ok([...CONTINENT_GLYPHS, '·', '~'].includes(mark.text));
   }
   assert.ok(marks.some(mark => mark.text === '#'));
   assert.ok(marks.some(mark => mark.text === '·'));
@@ -69,8 +69,10 @@ test('finer LODs use richer glyphs, show borders, and remain under the viewport 
   for (const level of LEVELS) {
     const metrics = renderer.draw({ latitude: 25, longitude: 15, distance: level.targetDistance }, level, data);
     assert.ok(marks.length > previous); previous = marks.length;
-    assert.ok(marks.some(mark => mark.text === level.land));
-    if (level.borders) assert.ok(marks.some(mark => mark.color === '#dcad79'));
+    // Land wears the atlas's continent glyphs and colours at every level.
+    assert.ok(marks.some(mark => mark.text === '#' && mark.color.startsWith('rgba(111, 158, 95,')), 'African savanna green');
+    assert.ok(marks.filter(mark => mark.color.startsWith('rgba(111, 158, 95,')).every(mark => mark.text === '#'), 'one glyph per continent');
+    if (level.borders) assert.ok(marks.some(mark => mark.text === '·' && mark.color === 'rgba(244, 232, 204, 0.82)'));
     assert.ok(metrics.totalGlyphs <= 24000);
     assert.ok(Number.isFinite(metrics.projectionMs) && Number.isFinite(metrics.renderMs));
   }

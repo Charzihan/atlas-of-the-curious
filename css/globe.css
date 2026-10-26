@@ -1,0 +1,211 @@
+/* The globe view of the hero map (js/views.js, earthxt/app.js). It shares the
+   map viewport, intro panel, control bar and legend with the flat map, so this
+   file only adds what a sphere needs: the switch, the stage and its layers. */
+
+/* Panels below set `display`; `hidden` must still win over it. */
+.map-controls[hidden], .globe-view[hidden], .globe-view [hidden] { display: none !important; }
+
+/* Copy written for one view only. */
+.atlas[data-view="flat"] .for-globe,
+.atlas[data-view="globe"] .for-flat { display: none !important; }
+
+/* ---------- Flat / Globe switch ---------- */
+.view-switch {
+  position: absolute;
+  top: 26px;
+  right: 26px;
+  z-index: 10;
+  display: flex;
+  padding: 3px;
+  gap: 2px;
+  background: rgba(9, 13, 28, 0.86);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+.view-btn {
+  font: inherit;
+  font-family: var(--font-sans);
+  font-size: 0.76rem;
+  letter-spacing: 0.02em;
+  color: var(--ink-dim);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 7px 15px 7px 12px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+.view-btn:hover { color: var(--ink); }
+.view-btn:focus-visible { outline: none; border-color: var(--gold); color: var(--gold); }
+.view-btn[aria-pressed="true"] { background: var(--gold); color: #101a28; }
+.view-glyph { font-family: var(--font-mono); font-size: 0.95rem; line-height: 1; }
+
+/* ---------- Stage ---------- */
+.globe-view {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  background:
+    radial-gradient(640px 520px at 62% 50%, rgba(79, 195, 247, 0.07), transparent 72%),
+    radial-gradient(700px 420px at 20% 70%, rgba(96, 155, 205, 0.05), transparent 70%),
+    var(--bg-soft);
+}
+/* The globe is centred in the room the intro panel leaves free. */
+.globe-stage {
+  position: absolute;
+  inset: 0;
+}
+@media (min-width: 1100px) {
+  /* Close up, the sphere outgrows the stage: its edge fades, never cuts. */
+  .globe-stage {
+    left: 430px; right: 20px;
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 72px);
+    mask-image: linear-gradient(to right, transparent, #000 72px);
+  }
+}
+.globe-stage canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  touch-action: none;
+}
+.globe-stage canvas.dragging { cursor: grabbing; }
+.globe-stage canvas:focus-visible { outline: 2px solid var(--gold); outline-offset: -6px; border-radius: 12px; }
+
+.loading-state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 14px;
+  font: 0.72rem var(--font-mono);
+  letter-spacing: 0.08em;
+  color: var(--ink-dim);
+}
+.loading-glyph { font-size: 46px; color: var(--gold); animation: globe-breathe 1.6s ease-in-out infinite; }
+@keyframes globe-breathe { 50% { opacity: 0.35; } }
+
+.globe-error {
+  position: absolute;
+  left: 50%;
+  bottom: 64px;
+  transform: translateX(-50%);
+  margin: 0;
+  max-width: min(520px, calc(100% - 32px));
+  padding: 8px 14px;
+  font: 0.72rem var(--font-sans);
+  color: var(--ink);
+  background: rgba(9, 13, 28, 0.9);
+  border: 1px solid var(--category-urban);
+  border-radius: 10px;
+}
+
+/* Country names that do not fit their silhouette, as a pill. */
+#country-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.country-label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  white-space: nowrap;
+  color: var(--ink);
+  font: var(--font-globe-label);
+  line-height: var(--lh-globe-label);
+  letter-spacing: var(--ls-globe-label);
+  text-transform: uppercase;
+  background: rgba(9, 13, 28, 0.86);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 10px;
+  will-change: transform;
+}
+
+/* Hit targets over the canvas rings (place-layer.js paints the rings). */
+#globe-markers { position: absolute; inset: 0; pointer-events: none; }
+.globe-marker {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.globe-marker:hover, .globe-marker:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 25%, transparent), 0 0 16px 3px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.globe-marker.is-dimmed { pointer-events: none; }
+
+/* The globe's hover card is the atlas card; it is shown with `hidden`
+   rather than the flat map's fade class, and is sized by place-layer.js. */
+.globe-stage .map-card {
+  left: 0;
+  top: 0;
+  width: auto;
+  max-width: calc(100% - 16px);
+  opacity: 1;
+  pointer-events: auto;
+  transition: none;
+}
+.globe-stage a.map-card-cta { text-decoration: none; }
+.globe-stage a.map-card-cta:hover { text-decoration: underline; }
+
+/* ---------- Globe controls (in the shared .map-controls bar) ---------- */
+.globe-controls { align-items: center; }
+.lod-switch {
+  display: flex;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(9, 13, 28, 0.82);
+  backdrop-filter: blur(6px);
+  padding: 2px;
+  gap: 2px;
+}
+.lod-switch .map-btn { border-color: transparent; background: transparent; padding: 4px 10px; }
+.lod-switch .map-btn[aria-pressed="true"] { background: var(--gold); color: #101a28; border-color: var(--gold); }
+.globe-controls .map-btn:disabled { opacity: 0.4; cursor: default; }
+#serif-toggle[aria-busy="true"] { cursor: progress; opacity: 0.7; }
+
+/* The flat map's readout line in the legend row, set in the same face. */
+.atlas-scale #view-level,
+.atlas-scale #coordinates { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* ---------- Small screens ---------- */
+@media (max-width: 1099px) {
+  /* The intro panel would sit on the sphere: it shrinks to its title. */
+  .atlas[data-view="globe"] .atlas-overlay { max-width: 300px; }
+  .atlas[data-view="globe"] .atlas-overlay .atlas-sub { display: none; }
+}
+@media (max-width: 640px) {
+  /* One bottom row on a phone: the icon switch on the left, controls right. */
+  .view-switch { top: auto; bottom: 10px; right: auto; left: 10px; padding: 2px; }
+  .view-btn { padding: 6px 10px; font-size: 0.72rem; }
+  .view-btn .view-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .view-glyph { font-size: 1rem; }
+  .map-controls { gap: 5px; }
+  .map-controls .map-btn { padding: 6px 10px; }
+  .atlas[data-view="flat"] .map-controls { left: 96px; right: 10px; bottom: 10px; max-width: none; justify-content: flex-end; }
+  #map-locate { font-size: 0; }
+  #map-locate::first-letter { font-size: 0.8rem; }
+  .atlas[data-view="globe"] .map-viewport { height: min(140vw, 580px); }
+  .atlas[data-view="globe"] .atlas-overlay { max-width: none; }
+  .globe-stage { top: 92px; bottom: 92px; }
+  .globe-controls { left: 96px; right: 10px; bottom: 10px; max-width: none; justify-content: flex-end; flex-wrap: wrap-reverse; }
+  .globe-controls #labels-toggle, .globe-controls #rotate-text { display: none; }
+  .lod-switch .map-btn { padding: 5px 9px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .loading-glyph { animation: none; }
+}

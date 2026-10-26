@@ -5,7 +5,12 @@ import { measureNaturalWidth } from '../vendor/pretext/layout.js';
 import { createPlaceRouter, projectPlaces } from './places.js';
 
 export class PlaceLayer {
-  constructor(stage, layer, places, roles, colors, { standalone = false, onInspect = () => {} } = {}) {
+  constructor(stage, layer, places, roles, colors, { standalone = false, onInspect = () => {},
+    placeHref = id => `../#/place/${encodeURIComponent(id)}` } = {}) {
+    this.placeHref = placeHref;
+    this.dimmed = new Set();
+    const view = stage.ownerDocument?.defaultView;
+    this.ground = (view?.getComputedStyle ? view.getComputedStyle(stage).getPropertyValue('--bg').trim() : '') || '#0b1020';
     this.stage = stage;
     this.layer = layer;
     this.places = places;
@@ -57,7 +62,7 @@ export class PlaceLayer {
       button.addEventListener('blur', () => this.scheduleHide());
       button.addEventListener('click', () => {
         if (standalone) inspect();
-        else window.location.assign(`../#/place/${encodeURIComponent(place.id)}`);
+        else window.location.assign(placeHref(place.id));
       });
       layer.append(button);
       this.nodes.set(place.id, button);
@@ -124,7 +129,7 @@ export class PlaceLayer {
     this.parts.loc.textContent = place.country;
     this.parts.tag.textContent = fit.lines.join('\n');
     this.parts.cta.textContent = fit.cta;
-    if (!this.standalone) this.parts.cta.href = `../#/place/${encodeURIComponent(id)}`;
+    if (!this.standalone) this.parts.cta.href = this.placeHref(id);
     this.card.hidden = false;
     // One layout read on inspection/resize; moving frames only write position.
     this.cardSize = { width: this.card.offsetWidth, height: this.card.offsetHeight };
@@ -166,6 +171,7 @@ export class PlaceLayer {
     const nativeSpacing = 'letterSpacing' in ctx;
     if (nativeSpacing) ctx.letterSpacing = `${role.letterSpacing}px`;
     for (const label of this.labels) {
+      if (this.dimmed.has(label.id)) continue;
       ctx.fillStyle = this.colors.get(this.byId.get(label.id).category);
       for (const line of label.lines) {
         const x = grid.x + (label.dir > 0 ? label.col * grid.cellWidth : (label.col + 1) * grid.cellWidth - line.width);
@@ -181,16 +187,37 @@ export class PlaceLayer {
       if (!marker.visible) continue;
       visibleMarkers++;
       node.style.transform = `translate(${marker.x}px, ${marker.y}px) translate(-50%, -50%)`;
-      ctx.fillStyle = this.colors.get(this.byId.get(marker.id).category);
+      // The atlas marker: a ground-coloured disc in a category ring, with a
+      // bright core. Places outside the atlas filter fade to background.
+      const color = this.colors.get(this.byId.get(marker.id).category);
+      ctx.globalAlpha = this.dimmed.has(marker.id) ? 0.18 : 1;
       ctx.beginPath();
-      ctx.arc(marker.x, marker.y, 3, 0, Math.PI * 2);
+      ctx.arc(marker.x, marker.y, 6, 0, Math.PI * 2);
+      ctx.fillStyle = this.ground;
+      ctx.fill();
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = color;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(marker.x, marker.y, 2, 0, Math.PI * 2);
+      ctx.fillStyle = color;
       ctx.fill();
     }
+    ctx.globalAlpha = 1;
     this.positionCard();
     this.drawMetrics.visibleMarkers = visibleMarkers;
     this.drawMetrics.labelledPlaces = this.labels.length;
     this.drawMetrics.placeLabelMs = out.placeLabelMs;
     return this.drawMetrics;
+  }
+  /** Mirror the atlas search/category filter: `ids` is the visible set, or null for all. */
+  setFilter(ids) {
+    this.dimmed = new Set(ids ? this.places.filter(place => !ids.has(place.id)).map(place => place.id) : []);
+    for (const [id, node] of this.nodes) {
+      node.tabIndex = this.dimmed.has(id) ? -1 : 0;
+      node.classList.toggle('is-dimmed', this.dimmed.has(id));
+    }
+    if (this.activeId && this.dimmed.has(this.activeId)) this.hide();
   }
   snapshot() {
     return structuredClone({ placeCount: this.places.length, placeLabels: this.labels,

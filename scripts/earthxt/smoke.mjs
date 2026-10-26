@@ -174,7 +174,7 @@ try {
   const snapshot = () => page.evaluate(() => window.EARTHXT_DEBUG.snapshot());
   const settled = () => page.waitForFunction(() => Math.abs(EARTHXT_DEBUG.snapshot().distance - EARTHXT_DEBUG.snapshot().targetDistance) < 0.001);
   // Exercise the published copy under a project subpath, not just source files.
-  await page.goto(server.origin + '/dist/earthxt/');
+  await page.goto(server.origin + '/dist/earthxt/?bench');
   await page.waitForFunction(() => window.EARTHXT_DEBUG?.snapshot().visibleGlyphs > 500);
   await page.locator('#reset-view').click(); await settled();
   assert.equal((await snapshot()).countryCount, 177);
@@ -315,7 +315,7 @@ try {
   assert.equal((await snapshot()).longitude, reducedState.longitude);
   assert.equal((await snapshot()).autoRotate, false);
   // Place deep links set the camera and open a card before interaction.
-  await page.goto(server.origin + '/dist/earthxt/#/place/salar-de-uyuni');
+  await page.goto(server.origin + '/dist/earthxt/?bench#/place/salar-de-uyuni');
   await page.waitForFunction(() => window.EARTHXT_DEBUG?.snapshot().lod === 2 && !document.getElementById('globe-place-card').hidden);
   const linked = await snapshot();
   assert.equal(linked.placeCount, 40);
@@ -389,7 +389,7 @@ try {
   const mobile = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, reducedMotion: 'reduce' });
   const touchPage = await mobile.newPage();
   touchPage.on('pageerror', error => errors.push(error.message));
-  await touchPage.goto(server.origin + '/dist/earthxt/');
+  await touchPage.goto(server.origin + '/dist/earthxt/?bench');
   await touchPage.waitForFunction(() => window.EARTHXT_DEBUG?.snapshot().visibleGlyphs > 0);
   assert.ok(await touchPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   await touchPage.screenshot({ path: new URL('../../test-results/earthxt/mobile.png', import.meta.url).pathname, fullPage: true });
@@ -410,7 +410,7 @@ try {
   // Loading failure is recoverable and never strands the user on a blank globe.
   const fallback = await context.newPage();
   await fallback.route('**/data/world.bin', route => route.fulfill({ status: 503, body: '' }));
-  await fallback.goto(server.origin + '/dist/earthxt/');
+  await fallback.goto(server.origin + '/dist/earthxt/?bench');
   await fallback.waitForFunction(() => window.EARTHXT_DEBUG?.snapshot().visibleGlyphs > 0);
   assert.equal(await fallback.evaluate(() => EARTHXT_DEBUG.snapshot().source), 'synthetic');
   assert.ok(await fallback.locator('#data-error').isVisible());

@@ -1,13 +1,29 @@
 import { readFontRoles, readFontFamily, readMapStoryFamily } from '../js/text.js';
 import { HOME, EARTH_RADIUS_KM, MIN_DISTANCE, MAX_DISTANCE, clamp, wrapLongitude, distanceToZoom, zoomToDistance } from './geometry.js';
 import { LEVELS, selectLOD } from './lod.js';
-import { loadGeography, syntheticGeography } from './geography.js';
+import { loadGeography, syntheticGeography, CONTINENTS } from './geography.js';
 import { TextRenderer } from './renderer.js';
 import { globePlaces, parsePlaceHash } from './places.js';
 import { PlaceLayer } from './place-layer.js';
-import { readCategoryColors } from '../js/category-colors.js';
+import { readCategoryColors, readContinentColors } from '../js/category-colors.js';
 
 const $ = id => document.getElementById(id);
+// The embedded atlas view carries a leaner control set than the globe page,
+// so every optional control and readout is looked up through these.
+const setText = (id, text) => { const el = $(id); if (el) el.textContent = text; };
+const listen = (id, type, handler) => $(id)?.addEventListener(type, handler);
+// A setting is either a checkbox switch (globe page) or a pressed-state button
+// (atlas map controls); both report the new value to `apply`.
+function bindToggle(id, apply) {
+  const el = $(id);
+  if (!el) return;
+  if (el.type === 'checkbox') el.addEventListener('change', () => apply(el.checked, el));
+  else el.addEventListener('click', () => {
+    const next = el.getAttribute('aria-pressed') !== 'true';
+    el.setAttribute('aria-pressed', String(next));
+    apply(next, el);
+  });
+}
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 const state = { ...HOME, targetDistance: HOME.distance, autoRotate: !reducedMotion.matches, source: 'earth', labels: true, grid: false, serif: false };
 let geography = null, renderer, level = selectLOD(distanceToZoom(state.distance));
@@ -17,22 +33,23 @@ let labelSum = 0, averageLabels = 0, frameNumber = 0;
 const pointers = new Map();
 let pinchDistance = 0;
 let placeLayer;
+let active = true;
 const places = globePlaces(window.ATLAS_DATA?.places || []);
 
 function setRotation(enabled) {
   state.autoRotate = enabled;
-  $('rotate-toggle').setAttribute('aria-pressed', String(enabled));
-  $('rotate-toggle').setAttribute('aria-label', enabled ? 'Pause automatic rotation' : 'Start automatic rotation');
-  $('rotate-icon').textContent = enabled ? 'Ⅱ' : '▷';
-  $('rotate-text').textContent = enabled ? 'Pause rotation' : 'Auto-rotate';
+  $('rotate-toggle')?.setAttribute('aria-pressed', String(enabled));
+  $('rotate-toggle')?.setAttribute('aria-label', enabled ? 'Pause automatic rotation' : 'Start automatic rotation');
+  setText('rotate-icon', enabled ? 'Ⅱ' : '▷');
+  setText('rotate-text', enabled ? 'Pause rotation' : 'Auto-rotate');
   dirty = true;
 }
 function zoomTo(distance) {
   state.targetDistance = clamp(distance, MIN_DISTANCE, MAX_DISTANCE);
   if (reducedMotion.matches) state.distance = state.targetDistance;
-  $('zoom-slider').value = distanceToZoom(state.targetDistance) * 100;
-  $('zoom-in').disabled = state.targetDistance <= MIN_DISTANCE + 0.0001;
-  $('zoom-out').disabled = state.targetDistance >= MAX_DISTANCE - 0.0001;
+  if ($('zoom-slider')) $('zoom-slider').value = distanceToZoom(state.targetDistance) * 100;
+  if ($('zoom-in')) $('zoom-in').disabled = state.targetDistance <= MIN_DISTANCE + 0.0001;
+  if ($('zoom-out')) $('zoom-out').disabled = state.targetDistance >= MAX_DISTANCE - 0.0001;
   dirty = true;
 }
 function zoomBy(factor) { zoomTo(1 + (state.targetDistance - 1) * factor); }
@@ -45,22 +62,22 @@ function reset() {
 }
 function setSource(source) {
   state.source = source;
-  $('source-earth').setAttribute('aria-pressed', String(source === 'earth'));
-  $('source-synthetic').setAttribute('aria-pressed', String(source === 'synthetic'));
-  $('view-name').textContent = `${source === 'earth' ? 'EARTH' : 'SYNTHETIC'} / LIVE VIEW`;
-  $('live-status').textContent = source === 'earth' ? 'Showing Earth geography.' : 'Showing invented synthetic geography.';
+  $('source-earth')?.setAttribute('aria-pressed', String(source === 'earth'));
+  $('source-synthetic')?.setAttribute('aria-pressed', String(source === 'synthetic'));
+  setText('view-name', `${source === 'earth' ? 'EARTH' : 'SYNTHETIC'} / LIVE VIEW`);
+  setText('live-status', source === 'earth' ? 'Showing Earth geography.' : 'Showing invented synthetic geography.');
   dirty = true;
 }
 function prepareSerif() {
   if (!state.serif) return;
   const toggle = $('serif-toggle');
-  toggle.setAttribute('aria-busy', 'true');
+  toggle?.setAttribute('aria-busy', 'true');
   renderer.preparePalette(level).then(entry => {
     // A late palette can populate the cache, but cannot activate a stale
     // size/LOD or re-enable a switch the user has since turned off.
     if (!state.serif || renderer.paletteFor(level) !== entry) return;
-    toggle.setAttribute('aria-busy', 'false');
-    $('live-status').textContent = entry.status === 'ready' ? 'Measured glyphs ready.' : entry.reason;
+    toggle?.setAttribute('aria-busy', 'false');
+    setText('live-status', entry.status === 'ready' ? 'Measured glyphs ready.' : entry.reason);
     dirty = true;
   });
 }
@@ -72,28 +89,30 @@ function updateLOD(next) {
     button.classList.toggle('is-active', active);
     button.setAttribute('aria-pressed', String(active));
   }
-  $('level-number').textContent = `${String(next.index).padStart(2, '0')} / ${String(LEVELS.length - 1).padStart(2, '0')}`;
-  $('view-level').textContent = `${String(next.index).padStart(2, '0')} — ${next.name.toUpperCase()} VIEW`;
-  $('view-description').textContent = next.description;
-  $('border-legend').hidden = !next.borders;
-  $('live-status').textContent = `${next.name} detail. ${next.description}`;
+  setText('level-number', `${String(next.index).padStart(2, '0')} / ${String(LEVELS.length - 1).padStart(2, '0')}`);
+  setText('view-level', `${String(next.index).padStart(2, '0')} — ${next.name.toUpperCase()} VIEW`);
+  setText('view-description', next.description);
+  if ($('border-legend')) $('border-legend').hidden = !next.borders;
+  setText('live-status', `${next.name} detail. ${next.description}`);
 }
 function toggleDebug(force) {
+  if (!$('debug-panel')) return;
   const show = force ?? $('debug-panel').hidden;
   $('debug-panel').hidden = !show;
-  $('debug-toggle').setAttribute('aria-expanded', String(show));
+  $('debug-toggle')?.setAttribute('aria-expanded', String(show));
   if (show) updateMetrics();
 }
 const number = new Intl.NumberFormat('en', { maximumFractionDigits: 0 });
 function updateMetrics() {
   const metrics = renderer.metrics;
-  $('coordinates').textContent = `${Math.abs(state.latitude).toFixed(2)}° ${state.latitude >= 0 ? 'N' : 'S'}   ${Math.abs(state.longitude).toFixed(2)}° ${state.longitude >= 0 ? 'E' : 'W'}`;
-  $('metric-fps').textContent = fps ? String(Math.round(fps)) : '0';
-  $('metric-glyphs').textContent = number.format(metrics.visibleGlyphs);
-  $('metric-altitude').textContent = number.format((state.distance - 1) * EARTH_RADIUS_KM);
-  $('metric-data').textContent = geography ? `${(geography.loadedBytes / 1024 / 1024).toFixed(2)} MB` : 'Synthetic';
-  $('globe').setAttribute('aria-label', `Text globe, ${state.source === 'earth' ? 'Earth' : 'synthetic geography'}, ${level.name.toLowerCase()} detail, centered at ${$('coordinates').textContent}.`);
-  if (!$('debug-panel').hidden) {
+  const coordinates = `${Math.abs(state.latitude).toFixed(2)}° ${state.latitude >= 0 ? 'N' : 'S'}   ${Math.abs(state.longitude).toFixed(2)}° ${state.longitude >= 0 ? 'E' : 'W'}`;
+  setText('coordinates', coordinates);
+  setText('metric-fps', fps ? String(Math.round(fps)) : '0');
+  setText('metric-glyphs', number.format(metrics.visibleGlyphs));
+  setText('metric-altitude', number.format((state.distance - 1) * EARTH_RADIUS_KM));
+  setText('metric-data', geography ? `${(geography.loadedBytes / 1024 / 1024).toFixed(2)} MB` : 'Synthetic');
+  $('globe').setAttribute('aria-label', `Text globe, ${state.source === 'earth' ? 'Earth' : 'synthetic geography'}, ${level.name.toLowerCase()} detail, centered at ${coordinates}.`);
+  if ($('debug-panel') && !$('debug-panel').hidden) {
     const values = {
       'Rendered frames': `${Math.round(fps)} fps`,
       'Visible / screen slots': `${number.format(metrics.visibleGlyphs)} / ${number.format(metrics.totalGlyphs)}`,
@@ -118,7 +137,7 @@ function updateMetrics() {
 }
 function frame(time) {
   frameId = 0;
-  if (document.hidden) return;
+  if (document.hidden || !active) return;
   const dt = lastTime ? Math.min((time - lastTime) / 1000, 0.06) : 0;
   lastTime = time;
   if (state.autoRotate && pointers.size === 0) {
@@ -213,29 +232,30 @@ function setupControls() {
       if (event.key.toLowerCase() === 'd') toggleDebug();
     }
   });
-  $('zoom-in').addEventListener('click', () => zoomBy(0.72));
-  $('zoom-out').addEventListener('click', () => zoomBy(1 / 0.72));
-  $('reset-view').addEventListener('click', reset);
-  $('rotate-toggle').addEventListener('click', () => setRotation(!state.autoRotate));
-  $('zoom-slider').addEventListener('input', event => zoomTo(zoomToDistance(Number(event.target.value) / 100)));
+  listen('zoom-in', 'click', () => zoomBy(0.72));
+  listen('zoom-out', 'click', () => zoomBy(1 / 0.72));
+  listen('reset-view', 'click', reset);
+  listen('rotate-toggle', 'click', () => setRotation(!state.autoRotate));
+  listen('zoom-slider', 'input', event => zoomTo(zoomToDistance(Number(event.target.value) / 100)));
   for (const button of document.querySelectorAll('[data-level]')) button.addEventListener('click', () => zoomTo(LEVELS[Number(button.dataset.level)].targetDistance));
-  $('labels-toggle').addEventListener('change', event => { state.labels = event.target.checked; dirty = true; });
-  $('grid-toggle').addEventListener('change', event => { state.grid = event.target.checked; dirty = true; });
-  $('serif-toggle').addEventListener('change', event => {
-    state.serif = event.target.checked;
-    event.target.setAttribute('aria-busy', 'false');
+  bindToggle('labels-toggle', on => { state.labels = on; dirty = true; });
+  bindToggle('grid-toggle', on => { state.grid = on; dirty = true; });
+  bindToggle('serif-toggle', (on, toggle) => {
+    state.serif = on;
+    toggle.setAttribute('aria-busy', 'false');
     if (state.serif) {
-      $('live-status').textContent = 'Preparing measured glyphs…';
+      setText('live-status', 'Preparing measured glyphs…');
       prepareSerif();
     }
     dirty = true;
   });
-  $('source-earth').addEventListener('click', () => setSource('earth'));
-  $('source-synthetic').addEventListener('click', () => setSource('synthetic'));
-  $('debug-toggle').addEventListener('click', () => toggleDebug());
-  $('debug-close').addEventListener('click', () => { toggleDebug(false); $('debug-toggle').focus(); });
+  listen('source-earth', 'click', () => setSource('earth'));
+  listen('source-synthetic', 'click', () => setSource('synthetic'));
+  listen('debug-toggle', 'click', () => toggleDebug());
+  listen('debug-close', 'click', () => { toggleDebug(false); $('debug-toggle')?.focus(); });
   for (const name of ['about', 'help']) {
     const dialog = $(`${name}-dialog`);
+    if (!dialog) continue;
     $(`${name}-open`).addEventListener('click', () => dialog.showModal());
     dialog.querySelector('[data-close]').addEventListener('click', () => dialog.close());
     dialog.addEventListener('click', event => {
@@ -247,20 +267,44 @@ function setupControls() {
   reducedMotion.addEventListener('change', () => { if (reducedMotion.matches) setRotation(false); dirty = true; });
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) { cancelAnimationFrame(frameId); frameId = 0; }
-    else { lastTime = 0; metricTime = performance.now(); renderedFrames = 0; projectionSum = 0; renderSum = 0; labelSum = 0; dirty = true; if (!frameId) frameId = requestAnimationFrame(frame); }
+    else resume();
   });
 }
-async function main() {
+function resume() {
+  if (!active || !renderer) return;
+  lastTime = 0; metricTime = performance.now(); renderedFrames = 0; projectionSum = 0; renderSum = 0; labelSum = 0; dirty = true;
+  if (!frameId) frameId = requestAnimationFrame(frame);
+}
+/** Show or hide the globe without tearing it down: a hidden globe draws nothing. */
+function setActive(next) {
+  active = next;
+  if (!active) { cancelAnimationFrame(frameId); frameId = 0; placeLayer?.hide(); pointers.clear(); }
+  else resume();
+}
+/**
+ * Start the globe in the current document. The globe page calls it on load;
+ * the atlas calls it when its globe view first opens, passing `embedded`:
+ * place links then stay on the page and only `#/globe/place/<id>` steers the
+ * camera (`#/place/<id>` belongs to the atlas field-note dialog).
+ */
+async function main({ embedded = false } = {}) {
+  const hashPrefix = embedded ? '#/globe/place/' : '#/place/';
   const roles = readFontRoles(document, ['globe-label', 'map-label', 'hover-card', 'native-name', 'hover-name', 'hover-loc', 'hover-cta']);
   if (!roles['globe-label']) throw new Error('The globe-label font role is missing.');
   renderer = new TextRenderer($('globe'), $('country-labels'), {
     label: roles['globe-label'], mono: readFontFamily(document, '--font-mono'), serif: readMapStoryFamily(document)
-  });
+  }, { continents: readContinentColors(document, CONTINENTS) });
   placeLayer = new PlaceLayer($('globe-stage'), $('globe-markers'), places, roles,
     readCategoryColors(document, window.ATLAS_DATA.categories), {
-      standalone: document.documentElement.hasAttribute('data-standalone'), onInspect: () => setRotation(false)
+      standalone: document.documentElement.hasAttribute('data-standalone'), onInspect: () => setRotation(false),
+      placeHref: embedded ? id => `#/place/${encodeURIComponent(id)}` : undefined
     });
   renderer.places = placeLayer;
+  // Inside the atlas, the search box and category chips dim globe dots too.
+  if (embedded) {
+    placeLayer.setFilter(window.ATLAS_VISIBLE || null);
+    window.addEventListener('atlas:visible', event => { placeLayer.setFilter(event.detail); dirty = true; });
+  }
   setupControls();
   const resize = (width, height) => {
     if (width <= 0 || height <= 0) return;
@@ -277,7 +321,7 @@ async function main() {
   try { geography = await loadGeography(); }
   catch (error) {
     setSource('synthetic');
-    $('source-earth').disabled = true;
+    if ($('source-earth')) $('source-earth').disabled = true;
     $('data-error').textContent = `${error.message} Showing synthetic geography. Reload to retry loading Earth.`;
     $('data-error').hidden = false;
   }
@@ -297,7 +341,7 @@ async function main() {
     countryCount: geography?.countries.length ?? 0, viewport: { ...renderer.viewport },
     reducedMotion: reducedMotion.matches, activePointers: pointers.size, ready: true }) });
   const openHash = () => {
-    const id = parsePlaceHash(location.hash);
+    const id = parsePlaceHash(location.hash, hashPrefix);
     const place = places.find(item => item.id === id);
     if (!place || !geography) return;
     setRotation(false);
@@ -314,8 +358,13 @@ async function main() {
   window.addEventListener('hashchange', openHash);
   openHash();
   updateMetrics();
-  if (!frameId) frameId = requestAnimationFrame(frame);
+  if (active && !frameId) frameId = requestAnimationFrame(frame);
 }
-main().catch(error => {
-  $('loading').textContent = `Earthxt could not start: ${error.message} Please reload in a browser with Canvas 2D support.`;
-});
+export function mountGlobe(options) {
+  return main(options).then(() => ({ setActive }), error => {
+    setText('loading', `The globe could not start: ${error.message} Please reload in a browser with Canvas 2D support.`);
+    throw error;
+  });
+}
+// The globe page starts itself; the atlas mounts it on demand (js/views.js).
+if (!document.getElementById('text-atlas')) mountGlobe().catch(() => {});

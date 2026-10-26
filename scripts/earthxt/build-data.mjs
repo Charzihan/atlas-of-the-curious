@@ -19,6 +19,9 @@ const countries = geo.features.map((feature, index) => ({
   id: index + 1, code: feature.properties.ADM0_A3, name: feature.properties.NAME,
   latitude: feature.properties.LABEL_Y, longitude: feature.properties.LABEL_X,
   rank: feature.properties.LABELRANK,
+  // The atlas colours land by continent (scripts/build-map.mjs); the open-ocean
+  // archipelagos join Antarctica there, so they do here too.
+  continent: feature.properties.CONTINENT === 'Seven seas (open ocean)' ? 'Antarctica' : feature.properties.CONTINENT,
 }));
 
 const countryRings = parseCountries(geo.features);

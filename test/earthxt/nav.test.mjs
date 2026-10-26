@@ -16,6 +16,9 @@ const palette = {
   bg: '#0b1020', 'bg-soft': '#101733', panel: '#141c3a', 'panel-2': '#1a2450',
   ink: '#e8ecf8', 'ink-dim': '#9aa4c8', gold: '#e8b45a',
   'gold-soft': 'rgba(232, 180, 90, 0.16)', line: 'rgba(154, 164, 200, 0.18)',
+  'continent-africa': '#6f9e5f', 'continent-asia': '#d0a05a', 'continent-europe': '#a88ac4',
+  'continent-north-america': '#8fc96a', 'continent-south-america': '#e07a5a', 'continent-oceania': '#4fb0c9',
+  'continent-antarctica': '#ecf2f6',
 };
 const declarations = css => [...css.matchAll(/(--[\w-]+)\s*:\s*([^;}]+)/g)];
 
@@ -64,9 +67,14 @@ test('globe stylesheet derives every colour from the shared palette', () => {
 
 const header = html => html.match(/<header\b[^>]*>([\s\S]*?)<\/header>/)[1];
 const text = html => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-test('header links and document identity connect the globe to the atlas', () => {
+test('the atlas hero holds both views and the globe page hands visitors back to it', () => {
   const atlasHeader = header(atlasHTML), globeHeader = header(globeHTML);
-  assert.match(atlasHeader, /<a class="surprise-btn" href="earthxt\/">⊕ Globe<\/a>/);
+  // One page: the projection switch lives in the hero map, not in a link away.
+  assert.doesNotMatch(atlasHeader, /earthxt/);
+  assert.match(atlasHTML, /data-view-target="flat"[\s\S]*data-view-target="globe"/);
+  assert.match(atlasHTML, /<div class="globe-view" id="globe-view" hidden>/);
+  assert.match(atlasHTML, /<script src="js\/views\.js" type="module" defer><\/script>/);
+  assert.match(globeHTML, /<script src="\.\/redirect\.js"><\/script>\s*<script src="\.\.\/js\/data\.js">/);
   assert.match(atlasHeader, /<a class="brand" href="#\/">/);
   const brand = globeHeader.match(/<a class="brand" href="\.\.\/">([\s\S]*?)<\/a>/);
   assert.ok(brand);

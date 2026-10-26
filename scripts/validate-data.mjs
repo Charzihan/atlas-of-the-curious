@@ -9,6 +9,7 @@
    Exits non-zero on any error so it can gate a CI step. */
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import vm from "node:vm";
 import { fileURLToPath } from "node:url";
 // The very same helpers the browser uses (js/text.js is a module whose boot
 // half is guarded on `document`), so the script a place is counted under here
@@ -68,9 +69,27 @@ export function validateCategoryColors(categories, css) {
   return errors;
 }
 
+// The flat map bakes continent colours into js/landmap.js and the globe reads
+// them from CSS, so the two views must agree colour for colour.
+export function validateContinentColors(landmaps, css) {
+  const errors = [];
+  for (const [name, index] of Object.entries(landmaps.continents || {})) {
+    const id = name.toLowerCase().replace(/\s+/g, '-');
+    const token = new RegExp(`--continent-${id}\\s*:\\s*#([0-9a-f]{6})\\s*;`, 'i').exec(css);
+    const baked = /^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/.exec(landmaps.palette[index] || '');
+    if (!token) { errors.push(`continent ${name}: missing CSS token --continent-${id}`); continue; }
+    const hex = baked && baked.slice(1).map(n => Number(n).toString(16).padStart(2, '0')).join('');
+    if (hex !== token[1].toLowerCase()) errors.push(`continent ${name}: js/landmap.js ${landmaps.palette[index]} differs from --continent-${id} #${token[1]}`);
+  }
+  return errors;
+}
+
 function main() {
   const { categories, places } = load();
-  const errors = validateCategoryColors(categories, readFileSync(path.join(root, 'css', 'tokens.css'), 'utf8'));
+  const tokensCss = readFileSync(path.join(root, 'css', 'tokens.css'), 'utf8');
+  const landmapSandbox = { window: {} };
+  vm.runInNewContext(readFileSync(path.join(root, 'js', 'landmap.js'), 'utf8'), landmapSandbox);
+  const errors = [...validateCategoryColors(categories, tokensCss), ...validateContinentColors(landmapSandbox.window.LANDMAPS, tokensCss)];
   const warnings = [];
   const catIds = new Set(categories.map((c) => c.id));
 
