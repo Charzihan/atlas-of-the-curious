@@ -38,6 +38,7 @@ const pointers = new Map();
 let pinchDistance = 0;
 let placeLayer;
 let active = true;
+let embeddedMode = false;
 const places = globePlaces(window.ATLAS_DATA?.places || []);
 
 function setRotation(enabled) {
@@ -183,6 +184,16 @@ function frame(time) {
   }
   frameId = requestAnimationFrame(frame);
 }
+function nearestPlace(latitude, longitude) {
+  const rad = Math.PI / 180;
+  let best = places[0], bestCos = -2;
+  for (const place of places) {
+    const cos = Math.sin(latitude * rad) * Math.sin(place.latitude * rad)
+      + Math.cos(latitude * rad) * Math.cos(place.latitude * rad) * Math.cos((place.longitude - longitude) * rad);
+    if (cos > bestCos) { bestCos = cos; best = place; }
+  }
+  return best;
+}
 function gestureDistance() {
   const [a, b] = [...pointers.values()];
   return b ? Math.hypot(a.x - b.x, a.y - b.y) : 0;
@@ -264,7 +275,19 @@ function setupControls() {
   }
   listen('zoom-slider', 'input', event => zoomTo(zoomToDistance(Number(event.target.value) / 100)));
   // Choosing a level of detail is choosing to look: rotation stops.
-  for (const button of document.querySelectorAll('[data-level]')) button.addEventListener('click', () => { setRotation(false); zoomTo(LEVELS[Number(button.dataset.level)].targetDistance); });
+  for (const button of document.querySelectorAll('[data-level]')) button.addEventListener('click', () => {
+    setRotation(false);
+    const next = LEVELS[Number(button.dataset.level)];
+    // Close detail over open ocean shows nothing: frame the open card's place,
+    // or else the atlas place nearest the centre of the view.
+    if (embeddedMode && next.labels && state.source === 'earth' && places.length) {
+      const target = places.find(place => place.id === placeLayer?.activeId) || nearestPlace(state.latitude, state.longitude);
+      state.latitude = target.latitude;
+      state.longitude = target.longitude;
+      setText('live-status', `${next.name} detail around ${target.name}.`);
+    }
+    zoomTo(next.targetDistance);
+  });
   bindToggle('labels-toggle', on => { state.labels = on; dirty = true; });
   bindToggle('grid-toggle', on => { state.grid = on; dirty = true; });
   bindToggle('serif-toggle', (on, toggle) => {
@@ -316,6 +339,7 @@ function setActive(next) {
  */
 async function main({ embedded = false } = {}) {
   const hashPrefix = embedded ? '#/globe/place/' : '#/place/';
+  embeddedMode = embedded;
   const roles = readFontRoles(document, ['globe-label', 'map-label', 'hover-card', 'native-name', 'hover-name', 'hover-loc', 'hover-cta']);
   if (!roles['globe-label']) throw new Error('The globe-label font role is missing.');
   renderer = new TextRenderer($('globe'), $('country-labels'), {

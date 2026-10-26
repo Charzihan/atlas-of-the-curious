@@ -142,5 +142,11 @@ if (section && globeView) {
     }).observe(intro);
   }
 
+  // Zoom takes Command on a Mac and Control elsewhere (js/gesture-hint.js).
+  if (/Mac|iPhone|iPad/.test(navigator.platform || "")) {
+    for (const el of document.querySelectorAll(".mod-key")) el.textContent = "⌘";
+    for (const el of document.querySelectorAll(".mod-key-name")) el.textContent = "Command";
+  }
+
   if (isGlobeHash(location.hash)) setView("globe");
 }

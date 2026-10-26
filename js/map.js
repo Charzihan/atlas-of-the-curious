@@ -1968,13 +1968,15 @@ import {
       requestPlacement();
     }
   }
-  /* Phone overview: rings closer than a ring's width merge into one numbered
+  /* Overview: rings whose hit areas would overlap merge into one numbered
      ring, as on the globe, and tapping it zooms in until they separate. The
      merged dots stay in the DOM (hidden), so filtering and routing see them. */
-  const CLUSTER_PX = 21, CLUSTER_UNTIL = 2.2;
+  // Phones keep clusters to a closer zoom; a desktop splits them before the
+  // first zoom tier routes names, so a name never belongs to a hidden ring.
+  const CLUSTER_PX = isMobile ? 21 : 24, CLUSTER_UNTIL = isMobile ? 2.2 : 1.25;
   let clusterEls = [], clusterZoom = -1;
   function reclusterFlat(force) {
-    if (!isMobile || !markersEl) return;
+    if (!markersEl) return;
     const z = (view && view.zoom) || 1;
     if (!force && (z >= CLUSTER_UNTIL) === (clusterZoom >= CLUSTER_UNTIL) && Math.abs(z - clusterZoom) < 0.05) return;
     clusterZoom = z;

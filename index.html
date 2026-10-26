@@ -64,7 +64,7 @@
         </p>
         <p class="atlas-hint for-flat hint-pointer">drift over the water · click to splash · hover or click a ring</p>
         <p class="atlas-hint for-flat hint-touch">numbered rings zoom in · symbol rings open notes</p>
-        <p class="atlas-hint for-globe hint-pointer">drag to turn · ctrl + scroll to zoom · hover or click a ring</p>
+        <p class="atlas-hint for-globe hint-pointer">drag to turn · <span class="mod-key">ctrl</span> + scroll to zoom · hover or click a ring</p>
         <p class="atlas-hint for-globe hint-touch">swipe sideways to turn · numbered rings zoom in · symbol rings open notes</p>
       </div>
       <div class="map-viewport" role="group" aria-label="The atlas map, shown as a flat character map or as a turning character globe, with 40 marked places.">
@@ -77,7 +77,7 @@
         </div>
         <p class="atlas-filter" id="atlas-filter" hidden><span class="atlas-filter-text" id="atlas-filter-text" role="status"></span><button class="atlas-filter-clear" id="atlas-filter-clear" type="button">Clear</button></p>
         <p class="gesture-hint" id="gesture-hint" role="status" hidden></p>
-        <p class="visually-hidden" id="flat-instructions">Tab to a dot to preview it and press Enter to open it. Plus and minus zoom, arrow keys pan a zoomed map, 0 resets.</p>
+        <p class="visually-hidden" id="flat-instructions">Tab to a ring to preview it and press Enter to open it. Hold <span class="mod-key-name">Control</span> and scroll, or press plus and minus, to zoom; arrow keys pan a zoomed map; 0 resets.</p>
         <!-- map stage injected here by js/map.js -->
         <!-- The globe (earthxt/app.js) is loaded by js/views.js the first time
              this view opens; until then it is only this markup. -->
@@ -88,7 +88,7 @@
             <div id="globe-markers" role="group" aria-label="Atlas places on the globe"></div>
             <div class="loading-state" id="loading" role="status"><span class="loading-glyph" aria-hidden="true">◍</span>Wrapping the atlas onto a sphere…</div>
           </div>
-          <p class="visually-hidden" id="globe-instructions">Drag or use the arrow keys to turn the globe, scroll, pinch or press plus and minus to zoom, 0 resets, space toggles rotation.</p>
+          <p class="visually-hidden" id="globe-instructions">Drag, use the arrow keys or the turn buttons to turn the globe. Hold <span class="mod-key-name">Control</span> and scroll, pinch, or press plus and minus to zoom; 0 resets; space toggles rotation.</p>
           <p class="globe-error" id="data-error" role="status" hidden></p>
         </div>
         <div class="map-controls" data-for="flat" role="group" aria-label="Map controls">
@@ -97,7 +97,7 @@
           <button class="map-btn" id="map-locate" type="button" title="Show where I am on the map">⌖ Locate me</button>
           <button class="map-btn" id="map-zoom-in" type="button" aria-label="Zoom in" title="Zoom in (+)">＋</button>
           <button class="map-btn" id="map-zoom-out" type="button" aria-label="Zoom out" title="Zoom out (−)">−</button>
-          <button class="map-btn" id="map-zoom-reset" type="button" aria-label="Reset map view" title="Reset view">⤢</button>
+          <button class="map-btn" id="map-zoom-reset" type="button" aria-label="Reset map view" title="Reset view">↺</button>
         </div>
         <div class="map-controls globe-controls" data-for="globe" role="group" aria-label="Globe controls" hidden>
           <div class="lod-switch" role="group" aria-label="Level of detail">
@@ -117,7 +117,7 @@
           <div class="zoom-group" role="group" aria-label="Zoom">
             <button class="map-btn" id="zoom-in" type="button" aria-label="Zoom in" title="Zoom in (+)">＋</button>
             <button class="map-btn" id="zoom-out" type="button" aria-label="Zoom out" title="Zoom out (−)">−</button>
-            <button class="map-btn" id="reset-view" type="button" aria-label="Reset globe view" title="Reset view (0)">⤢</button>
+            <button class="map-btn" id="reset-view" type="button" aria-label="Reset globe view" title="Reset view (0)">↺</button>
           </div>
         </div>
       </div>

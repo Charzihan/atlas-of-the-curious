@@ -404,7 +404,10 @@
   color: var(--chip-accent);
 }
 
-/* The phone flat map's merged rings (js/map.js reclusterFlat). */
+/* Every flat ring answers a 25px target, wider than the 19px it draws. */
+.map-marker::after { content: ""; position: absolute; inset: -3px; border-radius: 50%; }
+
+/* The flat map's merged rings (js/map.js reclusterFlat). */
 /* A merged dot is transparent, not gone: Tab still reaches each place, and
    the focused one shows itself above its cluster. */
 .map-marker.is-clustered { opacity: 0; pointer-events: none; animation: none; }
