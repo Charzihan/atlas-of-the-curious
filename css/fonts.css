@@ -94,10 +94,10 @@
   --font-hover-name: normal 1.02rem var(--font-serif);
   --lh-hover-name: 1.55;
   --ls-hover-name: 0px;
-  --font-hover-loc: normal 0.66rem var(--font-sans);
+  --font-hover-loc: normal 0.76rem var(--font-sans);
   --lh-hover-loc: 1.55;
   --ls-hover-loc: 0.08em;
-  --font-hover-cta: normal 0.72rem var(--font-sans);
+  --font-hover-cta: normal 0.8rem var(--font-sans);
   --lh-hover-cta: 1.55;
   --ls-hover-cta: 0.04em;
 

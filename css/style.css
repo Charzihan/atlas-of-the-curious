@@ -1012,7 +1012,7 @@ dialog::backdrop {
 .map-btn {
   font: inherit;
   font-family: Verdana, Geneva, sans-serif;
-  font-size: 0.72rem;
+  font-size: 0.8rem;
   color: var(--ink);
   background: rgba(9, 13, 28, 0.82);
   border: 1px solid var(--line);

@@ -231,6 +231,8 @@
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 25%, transparent), 0 0 16px 3px color-mix(in srgb, var(--accent) 45%, transparent);
 }
 .globe-marker.is-dimmed { pointer-events: none; }
+/* Keyboard focus is a solid ring, distinct from the hover glow. */
+.globe-marker:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 
 /* The globe's hover card is the atlas card; it is shown with `hidden`
    rather than the flat map's fade class, and is sized by place-layer.js. */
@@ -420,10 +422,15 @@
   .map-controls .map-btn { padding: 6px 10px; }
   #map-locate { font-size: 0; }
   #map-locate::first-letter { font-size: 0.8rem; }
-  .atlas[data-view="globe"] .map-viewport { height: min(100vw, 420px); }
+  .atlas[data-view="globe"] .map-viewport { height: min(90vw, 360px); }
+  .map-toolbar { padding: 6px 10px; gap: 6px; }
   .globe-stage { top: 0; bottom: 0; }
   /* Three even rows: detail and zoom, movement, appearance. */
-  .globe-controls .appearance-group { flex: 1 0 100%; justify-content: flex-end; }
+  /* Two rows on a phone: detail, zoom and movement first; rotation and
+     appearance share the second, compact, so all stay near the globe. */
+  .globe-controls .appearance-group { justify-content: flex-end; }
+  .globe-controls .turn-pad .map-btn { padding: 4px 6px; }
+  .globe-controls #rotate-toggle { padding: 6px 10px; }
   /* Two deliberate rows, in DOM (and focus) order: what to see (detail,
      zoom), then how to move it. */
   .map-toolbar .globe-controls { justify-content: space-between; row-gap: 8px; }

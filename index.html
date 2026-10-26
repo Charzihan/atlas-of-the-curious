@@ -100,7 +100,13 @@
             <button class="map-btn" id="map-serif" type="button" aria-pressed="false">Serif map</button>
             <button class="map-btn" id="map-art-clear" type="button" hidden>Clear story</button>
             <button class="map-btn" id="map-locate" type="button" title="Show where I am on the map">⌖ Locate me</button>
-            <button class="map-btn" id="map-zoom-in" type="button" aria-label="Zoom in" title="Zoom in (+)">＋</button>
+            <div class="turn-pad pan-pad" role="group" aria-label="Pan the map" hidden>
+            <button class="map-btn" type="button" data-pan="left" aria-label="Pan west" title="Pan west (←)">←</button>
+            <button class="map-btn" type="button" data-pan="up" aria-label="Pan north" title="Pan north (↑)">↑</button>
+            <button class="map-btn" type="button" data-pan="down" aria-label="Pan south" title="Pan south (↓)">↓</button>
+            <button class="map-btn" type="button" data-pan="right" aria-label="Pan east" title="Pan east (→)">→</button>
+          </div>
+          <button class="map-btn" id="map-zoom-in" type="button" aria-label="Zoom in" title="Zoom in (+)">＋</button>
             <button class="map-btn" id="map-zoom-out" type="button" aria-label="Zoom out" title="Zoom out (−)">−</button>
             <button class="map-btn" id="map-zoom-reset" type="button" aria-label="Reset map view" title="Reset view">↺</button>
           </div>
