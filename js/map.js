@@ -27,7 +27,7 @@ import {
   TIER_NAME_Z, TIER_TAG_Z, TAG_MAX_LINES
 } from "./labels.js";
 import { fitHoverTagline } from "./hover-card.js";
-import { readCategoryColors } from "./category-colors.js";
+import { readCategoryColors, categoryGlyph } from "./category-colors.js";
 import { wheelZooms } from "./gesture-hint.js";
 import { routeToNearest } from "./nearest-target.js";
 import { createSeaEngine, IDLE_MAX_SENTENCES } from "./sea.js";
@@ -2009,6 +2009,11 @@ import {
         const sx = panX + mapW / 2 + (g.x - mapW / 2) * zoom;
         const sy = panY + mapH / 2 + (g.y - mapH / 2) * zoom;
         zoomTo(Math.max(CLUSTER_UNTIL + 0.1, zoom * 2.4), sx, sy);
+        // The cluster is gone now: say what it opened, and keep keyboard
+        // focus on the map at its first place.
+        const status = $("live-status");
+        if (status) status.textContent = "Zoomed in on " + names.join(", ") + ".";
+        if (e.detail === 0) g.refs[0].el.focus({ preventScroll: true });
       });
       markersEl.appendChild(b);
       clusterEls.push(b);
@@ -3480,10 +3485,12 @@ import {
       m.style.color = `var(--category-${p.category}, var(--gold))`;
       m.style.animationDelay = (Math.random() * 0.6).toFixed(2) + "s";
       m.setAttribute("data-place-id", p.id);
-      m.setAttribute("aria-label", p.name + ", " + p.country + " — open field note");
+      const catLabel = (catById.get(p.category) || { label: "" }).label;
+      m.setAttribute("aria-label", p.name + ", " + p.country + (catLabel ? " — " + catLabel : "") + " — open field note");
       m.setAttribute("aria-describedby", "atlas-place-card");
       const ring = document.createElement("span"); ring.className = "map-marker-ring";
       const g = document.createElement("span"); g.className = "map-marker-glyph";
+      g.textContent = categoryGlyph(p.category);
       m.appendChild(ring); m.appendChild(g);
       markersEl.appendChild(m);
       markerRefs.push({ id: p.id, el: m, x: x.dx, y: x.dy });
@@ -4133,7 +4140,9 @@ import {
       const el = document.createElement("span");
       el.className = "legend-item";
       el.style.setProperty("--chip-accent", `var(--category-${c.id}, var(--gold))`);
-      const dot = document.createElement("i"); dot.className = "legend-dot";
+      const dot = document.createElement("i"); dot.className = "legend-dot legend-glyph";
+      dot.setAttribute("aria-hidden", "true");
+      dot.textContent = categoryGlyph(c.id);
       const t = document.createElement("span");
       t.textContent = c.label + " " + n;
       el.appendChild(dot); el.appendChild(t);

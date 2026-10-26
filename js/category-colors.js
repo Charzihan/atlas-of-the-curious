@@ -12,3 +12,10 @@ export function readContinentColors(doc, continents) {
   return continents.map(name =>
     css.getPropertyValue(`--continent-${name.toLowerCase().replace(/\s+/g, '-')}`).trim() || '#d0a05a');
 }
+
+/* One text glyph per category, so a marker and its legend entry say the
+   category in shape as well as colour (both projections and the legend). */
+export const CATEGORY_GLYPHS = Object.freeze({
+  geology: '▲', coastal: '≈', desert: '∴', forest: '♣', glacier: '❄', sacred: '✧', urban: '■'
+});
+export const categoryGlyph = id => CATEGORY_GLYPHS[id] || '•';

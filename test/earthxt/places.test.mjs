@@ -291,11 +291,14 @@ test('place adapter mirrors visibility, paints tracked names without preparation
       adapter.draw(ctx, camera, LEVELS[1], viewport, grid, blocked, true, true);
       const labelArray = adapter.labels, markerRecord = adapter.markers[0], markerCells = adapter.markerCells;
       const visible = adapter.markers.filter(marker => marker.visible);
-      assert.equal(dots.length, visible.length * 2); // ring and core per marker
+      assert.equal(dots.length, visible.length); // one ring per marker (the glyph is text)
       for (const marker of adapter.markers) assert.equal(adapter.nodes.get(marker.id).hidden, !marker.visible);
       assert.equal(adapter.nodes.get(here.id).attributes.get('aria-label'), `${here.name}, ${here.country}`);
       assert.ok(marks.length);
-      assert.ok(marks.every(mark => mark.font === role.font && mark.spacing === `${role.letterSpacing}px` && mark.text === mark.text.toUpperCase()));
+      // Names are tracked map-label text; each ring also carries its category glyph.
+      const names = marks.filter(mark => mark.font !== adapter.ringFont);
+      assert.equal(marks.length - names.length, visible.length);
+      assert.ok(names.every(mark => mark.font === role.font && mark.spacing === `${role.letterSpacing}px` && mark.text === mark.text.toUpperCase()));
       adapter.show(here.id);
       assert.equal(adapter.parts.native.dir, 'rtl');
       assert.equal(adapter.card.hidden, false);
@@ -313,7 +316,7 @@ test('place adapter mirrors visibility, paints tracked names without preparation
       assert.equal(adapter.markers[0], markerRecord);
       assert.equal(adapter.labels, labelArray);
       assert.equal(adapter.markerCells, markerCells);
-      assert.equal(marks.map(mark => mark.text).join(''), lines.join(''), 'fallback submits cached graphemes for every routed line');
+      assert.equal(marks.filter(mark => mark.font !== adapter.ringFont).map(mark => mark.text).join(''), lines.join(''), 'fallback submits cached graphemes for every routed line');
       adapter.draw(ctx, camera, LEVELS[1], viewport, grid, blocked, true, false);
       assert.equal(adapter.card.hidden, true);
       assert.ok([...adapter.nodes.values()].every(node => node.hidden));

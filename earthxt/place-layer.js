@@ -3,6 +3,7 @@ import { fitHoverTagline } from '../js/hover-card.js';
 import { prepareFlowText } from '../js/map-art.js';
 import { measureNaturalWidth } from '../vendor/pretext/layout.js';
 import { createPlaceRouter, projectPlaces } from './places.js';
+import { categoryGlyph } from '../js/category-colors.js';
 
 const MAX_LEADER = 80;
 
@@ -10,6 +11,8 @@ export class PlaceLayer {
   constructor(stage, layer, places, roles, colors, { standalone = false, onInspect = () => {},
     placeHref = id => `../#/place/${encodeURIComponent(id)}`, onCluster = null } = {}) {
     this.placeHref = placeHref;
+    this.ringFont = roles['map-label'].font.replace(/[\d.]+px/, '8px');
+    this.categoryLabels = new Map((globalThis.ATLAS_DATA?.categories || []).map(category => [category.id, category.label]));
     this.onCluster = onCluster;
     this.clusterButtons = [];
     this.clustered = new Set();
@@ -58,7 +61,8 @@ export class PlaceLayer {
       button.type = 'button';
       button.className = 'globe-marker';
       button.dataset.id = place.id;
-      button.setAttribute('aria-label', `${place.name}, ${place.country}`);
+      const category = this.categoryLabel(place.category);
+      button.setAttribute('aria-label', `${place.name}, ${place.country}${category ? ` — ${category}` : ''}`);
       button.setAttribute('aria-describedby', 'globe-place-card');
       button.style.setProperty('--accent', `var(--category-${place.category}, var(--gold))`);
       button.hidden = true;
@@ -84,7 +88,7 @@ export class PlaceLayer {
     this.card.setAttribute('aria-label', 'Place preview');
     this.card.hidden = true;
     this.parts = {};
-    for (const [name, tag] of [['name', 'span'], ['native', 'span'], ['loc', 'span'], ['tag', 'pre'], ['cta', standalone ? 'p' : 'a']]) {
+    for (const [name, tag] of [['cat', 'span'], ['name', 'span'], ['native', 'span'], ['loc', 'span'], ['tag', 'pre'], ['cta', standalone ? 'p' : 'a']]) {
       const element = document.createElement(tag);
       element.className = `map-card-${name}`;
       this.parts[name] = element;
@@ -116,6 +120,9 @@ export class PlaceLayer {
       const cta = this.standalone ? excerpt : 'Open field note →';
       const native = place.nativeName !== place.name ? place.nativeName : '';
       let textWidth = fit.width;
+      // The category pill is tracked uppercase in a padded, bordered box.
+      const pill = `${categoryGlyph(place.category)} ${this.categoryLabel(place.category)}`.toUpperCase();
+      textWidth = Math.max(textWidth, this.metrics.tightWidthOfText('hover-loc', pill, maxWidth * 2) * 1.12 + 22);
       for (const [role, text] of [['hover-name', place.name], ['native-name', native], ['hover-loc', place.country.toUpperCase()], ['hover-cta', cta]]) {
         if (text) textWidth = Math.max(textWidth, this.metrics.tightWidthOfText(role, text, maxWidth));
       }
@@ -131,6 +138,9 @@ export class PlaceLayer {
     this.card.dataset.id = id;
     this.card.style.setProperty('--accent', `var(--category-${place.category}, var(--gold))`);
     this.card.style.width = `${fit.width}px`;
+    // Category in words and in its glyph, as on the flat map's card.
+    this.parts.cat.textContent = `${categoryGlyph(place.category)} ${this.categoryLabel(place.category)}`;
+    this.parts.cat.style.color = `var(--category-${place.category}, var(--gold))`;
     this.parts.name.textContent = place.name;
     this.parts.native.textContent = fit.native;
     this.parts.native.hidden = !fit.native;
@@ -226,6 +236,11 @@ export class PlaceLayer {
     }
     let visibleMarkers = 0;
     const clustered = this.clustered;
+    // Ring glyphs in the registry's map face, at ring size.
+    ctx.font = this.ringFont;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    if (nativeSpacing) ctx.letterSpacing = '0px';
     for (const marker of this.markers) {
       const node = this.nodes.get(marker.id);
       node.hidden = !marker.visible || clustered.has(marker.id);
@@ -238,24 +253,25 @@ export class PlaceLayer {
       const color = this.colors.get(this.byId.get(marker.id).category);
       ctx.globalAlpha = this.dimmed.has(marker.id) ? 0.18 : 1;
       ctx.beginPath();
-      ctx.arc(marker.x, marker.y, 6, 0, Math.PI * 2);
+      ctx.arc(marker.x, marker.y, 7, 0, Math.PI * 2);
       ctx.fillStyle = this.ground;
       ctx.fill();
       ctx.lineWidth = 1.5;
       ctx.strokeStyle = color;
       ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(marker.x, marker.y, 2, 0, Math.PI * 2);
+      // The category glyph in the ring, as in the flat map's markers.
       ctx.fillStyle = color;
-      ctx.fill();
+      ctx.fillText(categoryGlyph(this.byId.get(marker.id).category), marker.x, marker.y + 0.5);
     }
     ctx.globalAlpha = 1;
+    ctx.textAlign = 'left';
     this.positionCard();
     this.drawMetrics.visibleMarkers = visibleMarkers;
     this.drawMetrics.labelledPlaces = this.labels.length;
     this.drawMetrics.placeLabelMs = out.placeLabelMs;
     return this.drawMetrics;
   }
+  categoryLabel(id) { return this.categoryLabels.get(id) || ''; }
   /** At planet scale, rings closer than a ring's width merge into one count
    * that zooms toward its places (`onCluster`); returns the merged ids. */
   clusterMarkers(ctx, level) {

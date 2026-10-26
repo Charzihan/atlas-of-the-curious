@@ -328,6 +328,25 @@ async function main({ embedded = false } = {}) {
   routeToNearest($('globe-markers'), '.globe-marker');
   // Inside the atlas, the search box and category chips dim globe dots too.
   if (embedded) {
+    // The atlas floats its switch, filter readout and control bar over the
+    // stage (not on phones): names keep clear of them. Measured on resize and
+    // when they change, never in a frame.
+    const stageEl = $('globe-stage');
+    const floating = () => [...document.querySelectorAll('.globe-controls, .view-tools, #atlas-filter')];
+    const measureExclusions = () => {
+      const base = stageEl.getBoundingClientRect();
+      renderer.exclusions = floating().filter(el => !el.hidden && el.closest('.map-viewport')).map(el => el.getBoundingClientRect())
+        .filter(r => r.width && r.right > base.left && r.left < base.right && r.bottom > base.top && r.top < base.bottom)
+        .map(r => ({ x: r.left - base.left - 6, y: r.top - base.top - 6, width: r.width + 12, height: r.height + 12 }));
+      dirty = true;
+    };
+    if (typeof ResizeObserver === 'function') {
+      const watch = new ResizeObserver(() => requestAnimationFrame(measureExclusions));
+      watch.observe(stageEl);
+      for (const el of floating()) watch.observe(el);
+    }
+    window.addEventListener('atlas:filter', () => requestAnimationFrame(measureExclusions));
+    window.addEventListener('atlas:view', event => { if (event.detail === 'globe') requestAnimationFrame(measureExclusions); });
     // The page's Pause motion is the one authority: it holds rotation (and the
     // ocean) still, disables Auto-rotate meanwhile, and Resume restores
     // whatever rotation intent the visitor had before pausing.

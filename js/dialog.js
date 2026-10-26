@@ -1032,6 +1032,7 @@ function boot(win, doc) {
 
   let current = null;      // the layout currently rendered
   let currentId = null;
+  let syncRoute = null;    // the journey selector follows the open place
   let index = 0;
   let visibleProvider = () => DATA.places;
   let stepAnimation = null;
@@ -1119,6 +1120,7 @@ function boot(win, doc) {
     renderFields(layout);
     current = layout;
     currentId = layout.id;
+    if (syncRoute) syncRoute();
     playReveal(nodes);
   }
 
@@ -1275,6 +1277,13 @@ function boot(win, doc) {
   const countryButton = doc.getElementById('dialog-map-country');
   const routeButton = doc.getElementById('dialog-map-route');
   const routeSelect = doc.getElementById('dialog-route-to');
+  // A journey needs two places: no destination is chosen until the visitor
+  // picks one, and the open place is not offered as its own destination.
+  if (routeSelect) {
+    const prompt = doc.createElement('option');
+    prompt.value = ''; prompt.textContent = 'Choose a destination…';
+    routeSelect.appendChild(prompt);
+  }
   if (routeSelect) for (const p of DATA.places) {
     const option = doc.createElement('option'); option.value = p.id; option.textContent = p.name;
     routeSelect.appendChild(option);
@@ -1297,6 +1306,13 @@ function boot(win, doc) {
     routeButton.addEventListener('click', () => {
       if (currentId && routeSelect.value) revealMap('atlas:map-route', { from: currentId, to: routeSelect.value });
     });
+    syncRoute = () => {
+      for (const option of routeSelect.options) option.disabled = option.value !== '' && option.value === currentId;
+      routeSelect.value = '';
+      routeButton.disabled = true;
+    };
+    routeSelect.addEventListener('change', () => { routeButton.disabled = !routeSelect.value; });
+    if (currentId) syncRoute();
   }
 
   /* ---- The published surface --------------------------------------- */

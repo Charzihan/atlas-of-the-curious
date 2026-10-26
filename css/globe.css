@@ -381,6 +381,17 @@
   .globe-controls #labels-toggle { display: none; }
   .lod-switch .map-btn { padding: 5px 9px; }
 }
+.globe-stage .map-card-cat { white-space: nowrap; }
+
+/* Category glyphs: in each flat ring and in the legend, beside the colour. */
+.map-marker-glyph { font: 10px/1 var(--font-mono); pointer-events: none; }
+.legend-dot.legend-glyph {
+  width: auto; height: auto;
+  border-radius: 0; background: none; box-shadow: none;
+  font: normal 0.82rem/1 var(--font-mono);
+  color: var(--chip-accent);
+}
+
 /* The phone flat map's merged rings (js/map.js reclusterFlat). */
 /* A merged dot is transparent, not gone: Tab still reaches each place, and
    the focused one shows itself above its cluster. */

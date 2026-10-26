@@ -115,6 +115,7 @@ export class TextRenderer {
     this.countryIds = new Uint8Array(MAX_CELLS);
     this.blockedCells = new Uint8Array(MAX_CELLS);
     this.labelPlacements = [];
+    this.exclusions = [];
     this.nativeSpacing = 'letterSpacing' in this.context;
   }
   // Called at load/font changes, never by draw(): all names are ready before
@@ -266,6 +267,12 @@ export class TextRenderer {
         visible++;
       }
     }
+    // Floating page controls over the stage are no place for a name.
+    for (const zone of this.exclusions) {
+      const c0 = Math.max(0, Math.floor((zone.x - this.grid.x) / cellWidth)), c1 = Math.min(cols - 1, Math.floor((zone.x + zone.width - this.grid.x) / cellWidth));
+      const r0 = Math.max(0, Math.floor((zone.y - this.grid.y) / cellHeight)), r1 = Math.min(rows - 1, Math.floor((zone.y + zone.height - this.grid.y) / cellHeight));
+      for (let row = r0; row <= r1; row++) for (let col = c0; col <= c1; col++) this.blockedCells[row * cols + col] = 1;
+    }
     const projected = performance.now();
     const ctx = this.context;
     ctx.clearRect(0, 0, width, height);
@@ -325,7 +332,7 @@ export class TextRenderer {
     for (const node of this.labelNodes.values()) node.hidden = true;
     this.labelPlacements = [];
     if (!enabled || !level.labels) return 0;
-    const occupied = [], { width, height, focal } = this.viewport;
+    const occupied = [...this.exclusions], { width, height, focal } = this.viewport;
     const radiusSquared = focal * focal / (camera.distance * camera.distance - 1);
     const { cols, rows } = this.grid;
     const slots = countryRunSlots(this.countryIds, cols, rows, this.grid);
