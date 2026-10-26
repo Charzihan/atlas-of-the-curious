@@ -100,6 +100,9 @@ try {
     await page.locator('#motion-toggle').click();
     assert.equal(await page.evaluate(() => document.documentElement.dataset.motion), 'paused');
     assert.equal(await page.evaluate(() => EARTHXT_DEBUG.snapshot().autoRotate), false);
+    await page.locator('#globe').focus();
+    await page.keyboard.press(' ');
+    assert.equal(await page.evaluate(() => EARTHXT_DEBUG.snapshot().autoRotate), false, 'Space must not rotate while paused');
     await page.locator('#motion-toggle').click();
 
     // Old globe links land in the unified page with their place.

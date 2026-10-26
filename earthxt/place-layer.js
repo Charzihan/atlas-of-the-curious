@@ -4,13 +4,20 @@ import { prepareFlowText } from '../js/map-art.js';
 import { measureNaturalWidth } from '../vendor/pretext/layout.js';
 import { createPlaceRouter, projectPlaces } from './places.js';
 
+const MAX_LEADER = 80;
+
 export class PlaceLayer {
   constructor(stage, layer, places, roles, colors, { standalone = false, onInspect = () => {},
-    placeHref = id => `../#/place/${encodeURIComponent(id)}` } = {}) {
+    placeHref = id => `../#/place/${encodeURIComponent(id)}`, onCluster = null } = {}) {
     this.placeHref = placeHref;
+    this.onCluster = onCluster;
+    this.clusterButtons = [];
+    this.clustered = new Set();
     this.dimmed = new Set();
     const view = stage.ownerDocument?.defaultView;
-    this.ground = (view?.getComputedStyle ? view.getComputedStyle(stage).getPropertyValue('--bg').trim() : '') || '#0b1020';
+    const css = view?.getComputedStyle ? view.getComputedStyle(stage) : null;
+    this.ground = css?.getPropertyValue('--bg').trim() || '#0b1020';
+    this.clusterInk = css?.getPropertyValue('--gold').trim() || '#e8b45a';
     this.stage = stage;
     this.layer = layer;
     this.places = places;
@@ -167,15 +174,41 @@ export class PlaceLayer {
     const out = this.router.update(camera, level, viewport, grid, blocked, this.markers, enabled && earth);
     this.labels = out.labels;
     this.markerCells = out.markerCells;
+    this.clustered = this.clusterMarkers(ctx, level);
     const role = this.roles['map-label'];
     ctx.font = role.font;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     const nativeSpacing = 'letterSpacing' in ctx;
     if (nativeSpacing) ctx.letterSpacing = `${role.letterSpacing}px`;
+    const markerById = new Map(this.markers.map(marker => [marker.id, marker]));
     for (const label of this.labels) {
       if (this.dimmed.has(label.id)) continue;
-      ctx.fillStyle = this.colors.get(this.byId.get(label.id).category);
+      const color = this.colors.get(this.byId.get(label.id).category);
+      ctx.fillStyle = color;
+      // A name routed away from its dot gets a hairline back to the ring.
+      const marker = markerById.get(label.id), first = label.lines[0];
+      if (this.clustered.has(label.id)) continue;
+      if (marker?.visible && first) {
+        const x0 = grid.x + (label.dir > 0 ? label.col * grid.cellWidth : (label.col + 1) * grid.cellWidth - first.width);
+        const y0 = grid.y + first.row * grid.cellHeight;
+        const nx = Math.max(x0, Math.min(marker.x, x0 + first.width));
+        const ny = Math.max(y0, Math.min(marker.y, y0 + grid.cellHeight));
+        const gap = Math.hypot(nx - marker.x, ny - marker.y);
+        // A name routed this far no longer reads as its dot's; the card has it.
+        if (gap > MAX_LEADER) continue;
+        if (gap > 14) {
+          const ux = (nx - marker.x) / gap, uy = (ny - marker.y) / gap;
+          ctx.globalAlpha = 0.55;
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(marker.x + ux * 7, marker.y + uy * 7);
+          ctx.lineTo(nx - ux * 2, ny - uy * 2);
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+        }
+      }
       for (const line of label.lines) {
         const x = grid.x + (label.dir > 0 ? label.col * grid.cellWidth : (label.col + 1) * grid.cellWidth - line.width);
         const y = grid.y + line.row * grid.cellHeight;
@@ -184,10 +217,12 @@ export class PlaceLayer {
       }
     }
     let visibleMarkers = 0;
+    const clustered = this.clustered;
     for (const marker of this.markers) {
       const node = this.nodes.get(marker.id);
-      node.hidden = !marker.visible;
+      node.hidden = !marker.visible || clustered.has(marker.id);
       if (!marker.visible) continue;
+      if (clustered.has(marker.id)) { visibleMarkers++; continue; }
       visibleMarkers++;
       node.style.transform = `translate(${marker.x}px, ${marker.y}px) translate(-50%, -50%)`;
       // The atlas marker: a ground-coloured disc in a category ring, with a
@@ -212,6 +247,58 @@ export class PlaceLayer {
     this.drawMetrics.labelledPlaces = this.labels.length;
     this.drawMetrics.placeLabelMs = out.placeLabelMs;
     return this.drawMetrics;
+  }
+  /** At planet scale, rings closer than a ring's width merge into one count
+   * that zooms toward its places (`onCluster`); returns the merged ids. */
+  clusterMarkers(ctx, level) {
+    const merged = new Set();
+    for (const button of this.clusterButtons) button.hidden = true;
+    if (!this.onCluster || level.index !== 0) return merged;
+    const groups = [];
+    for (const marker of this.markers) {
+      if (!marker.visible || this.dimmed.has(marker.id)) continue;
+      const near = groups.find(group => Math.hypot(group.x - marker.x, group.y - marker.y) < 15);
+      if (near) {
+        near.members.push(marker);
+        near.x = near.members.reduce((sum, m) => sum + m.x, 0) / near.members.length;
+        near.y = near.members.reduce((sum, m) => sum + m.y, 0) / near.members.length;
+      } else groups.push({ x: marker.x, y: marker.y, members: [marker] });
+    }
+    let used = 0;
+    for (const group of groups) {
+      if (group.members.length < 2) continue;
+      for (const member of group.members) merged.add(member.id);
+      ctx.beginPath();
+      ctx.arc(group.x, group.y, 9, 0, Math.PI * 2);
+      ctx.fillStyle = this.ground;
+      ctx.fill();
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = this.clusterInk;
+      ctx.stroke();
+      ctx.fillStyle = this.clusterInk;
+      ctx.font = this.roles['hover-cta'].font; // the card's sans, from the registry
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
+      ctx.fillText(String(group.members.length), group.x, group.y + 0.5);
+      let button = this.clusterButtons[used];
+      if (!button) {
+        button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'globe-marker globe-cluster';
+        button.addEventListener('click', () => this.onCluster(button.places));
+        this.layer.append(button);
+        this.clusterButtons.push(button);
+      }
+      used++;
+      button.places = group.members.map(member => this.byId.get(member.id));
+      button.setAttribute('aria-label', `${group.members.length} places close together: ${button.places.map(place => place.name).join(', ')}. Zoom in to separate them.`);
+      button.style.setProperty('--accent', 'var(--gold)');
+      button.style.transform = `translate(${group.x}px, ${group.y}px) translate(-50%, -50%)`;
+      button.hidden = false;
+    }
+    ctx.textAlign = 'left';
+    return merged;
   }
   /** Mirror the atlas search/category filter: `ids` is the visible set, or null for all. */
   setFilter(ids) {

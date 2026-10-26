@@ -41,6 +41,11 @@ let active = true;
 const places = globePlaces(window.ATLAS_DATA?.places || []);
 
 function setRotation(enabled) {
+  // The atlas page's Pause motion outranks every way of starting rotation.
+  if (enabled && document.documentElement.dataset.motion === 'paused') {
+    setText('live-status', 'Motion is paused. Use Resume motion to rotate the globe.');
+    enabled = false;
+  }
   state.autoRotate = enabled;
   $('rotate-toggle')?.setAttribute('aria-pressed', String(enabled));
   $('rotate-toggle')?.setAttribute('aria-label', enabled ? 'Pause automatic rotation' : 'Start automatic rotation');
@@ -307,7 +312,17 @@ async function main({ embedded = false } = {}) {
   placeLayer = new PlaceLayer($('globe-stage'), $('globe-markers'), places, roles,
     readCategoryColors(document, window.ATLAS_DATA.categories), {
       standalone: document.documentElement.hasAttribute('data-standalone'), onInspect: () => setRotation(false),
-      placeHref: embedded ? id => `#/place/${encodeURIComponent(id)}` : undefined
+      placeHref: embedded ? id => `#/place/${encodeURIComponent(id)}` : undefined,
+      // Crowded rings merge at planet scale; a merged ring zooms to its places.
+      onCluster: embedded ? members => {
+        setRotation(false);
+        state.latitude = members.reduce((sum, place) => sum + place.latitude, 0) / members.length;
+        state.longitude = members.reduce((sum, place) => sum + place.longitude, 0) / members.length;
+        zoomTo(LEVELS[1].targetDistance);
+        $('globe').focus({ preventScroll: true });
+        setText('live-status', `Zoomed to ${members.map(place => place.name).join(', ')}.`);
+        dirty = true;
+      } : null
     });
   renderer.places = placeLayer;
   routeToNearest($('globe-markers'), '.globe-marker');

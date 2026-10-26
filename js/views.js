@@ -107,6 +107,33 @@ if (section && globeView) {
   });
   document.getElementById("atlas-filter-clear")?.addEventListener("click", () => window.ATLAS_CLEAR_FILTER?.());
 
+  // On a phone the map is a short band, so its switch, filter readout and
+  // control bars leave it for toolbar rows above and below rather than
+  // covering the geography; wider screens float them over the map again.
+  const viewport = section.querySelector(".map-viewport");
+  const phone = matchMedia("(max-width: 640px)");
+  const topBar = document.createElement("div");
+  topBar.className = "map-toolbar map-toolbar-top";
+  const bottomBar = document.createElement("div");
+  bottomBar.className = "map-toolbar map-toolbar-bottom";
+  viewport.before(topBar);
+  viewport.after(bottomBar);
+  const floating = {
+    top: [document.getElementById("atlas-filter"), section.querySelector(".view-tools")].filter(Boolean),
+    bottom: [...section.querySelectorAll(".map-controls")]
+  };
+  function placeTools() {
+    if (phone.matches) {
+      topBar.append(...floating.top);
+      bottomBar.append(...floating.bottom);
+    } else {
+      viewport.prepend(...floating.top);
+      viewport.append(...floating.bottom);
+    }
+  }
+  phone.addEventListener("change", placeTools);
+  placeTools();
+
   // The map below takes the room the intro band leaves (css/globe.css).
   const intro = section.querySelector(":scope > .atlas-overlay");
   if (intro && typeof ResizeObserver === "function") {

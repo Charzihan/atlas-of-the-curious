@@ -282,7 +282,7 @@ test('place adapter mirrors visibility, paints tracked names without preparation
       const adapter = new PlaceLayer(new Node('stage'), new Node('layer'), items, allRoles, new Map(items.map(place => [place.category, '#123456'])), { standalone });
       adapter.resize(viewport.width, viewport.height);
       const marks = [], dots = [];
-      const ctx = { letterSpacing: '0px', fillText(text, x, y) { marks.push({ text, x, y, font: this.font, spacing: this.letterSpacing }); }, beginPath() {}, stroke() {}, arc(...args) { dots.push(args); }, fill() {} };
+      const ctx = { letterSpacing: '0px', fillText(text, x, y) { marks.push({ text, x, y, font: this.font, spacing: this.letterSpacing }); }, beginPath() {}, stroke() {}, moveTo() {}, lineTo() {}, arc(...args) { dots.push(args); }, fill() {} };
       const camera = { ...here, distance: 2.05 };
       const blocked = new Uint8Array(grid.cols * grid.rows);
       const prepared = measurements;
