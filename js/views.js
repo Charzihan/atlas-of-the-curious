@@ -156,6 +156,31 @@ if (section && globeView) {
   phone.addEventListener("change", placeTools);
   placeTools();
 
+  // Phones: the globe's appearance settings open from an Options button.
+  const optToggle = document.getElementById("appearance-toggle");
+  const optGroup = document.getElementById("appearance-group");
+  const setOptions = (open) => {
+    optGroup?.classList.toggle("is-open", open);
+    optToggle?.setAttribute("aria-expanded", String(open));
+    if (optToggle) optToggle.textContent = open ? "Options ▴" : "Options ▾";
+  };
+  // On a phone Auto-rotate joins Serif and Names inside Options, so the
+  // globe's controls stay in two rows; wider screens keep it in the bar.
+  const rotate = document.getElementById("rotate-toggle");
+  const narrow = matchMedia("(max-width: 640px)");
+  const placeRotate = () => {
+    if (!rotate || !optGroup || !optToggle) return;
+    if (narrow.matches) optGroup.prepend(rotate);
+    else optToggle.before(rotate);
+  };
+  narrow.addEventListener("change", placeRotate);
+  placeRotate();
+  optToggle?.addEventListener("click", () => setOptions(!optGroup.classList.contains("is-open")));
+  optGroup?.addEventListener("keydown", (e) => { if (e.key === "Escape") { setOptions(false); optToggle.focus(); } });
+  document.addEventListener("click", (e) => {
+    if (optGroup?.classList.contains("is-open") && !e.target.closest("#appearance-group, #appearance-toggle")) setOptions(false);
+  });
+
   // Zoom takes Command on a Mac and Control elsewhere (js/gesture-hint.js).
   if (/Mac|iPhone|iPad/.test(navigator.platform || "")) {
     for (const el of document.querySelectorAll(".mod-key")) el.textContent = "⌘";

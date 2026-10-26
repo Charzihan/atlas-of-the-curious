@@ -258,6 +258,7 @@
   .globe-controls .zoom-group { gap: 6px; }
 }
 .zoom-group, .appearance-group { display: flex; gap: 6px; }
+.pan-pad[hidden], .appearance-toggle { display: none; }
 .turn-pad { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 999px; background: rgba(9, 13, 28, 0.82); }
 .turn-pad .map-btn { border-color: transparent; background: transparent; padding: 4px 8px; }
 .lod-switch {
@@ -278,8 +279,10 @@
    a search never reflows the page beneath the grid's scroll anchor. */
 .atlas-filter {
   position: absolute;
+  /* Top left, across from the switch: the bottom edge belongs to the
+     control bars, which can be as wide as the map. */
   left: 26px;
-  bottom: 14px;
+  top: 26px;
   z-index: 10;
   display: flex;
   align-items: center;
@@ -295,6 +298,11 @@
   backdrop-filter: blur(6px);
 }
 .atlas-filter[hidden] { display: none; }
+@media (min-width: 1100px) {
+  .atlas-filter { max-width: calc(100% - 52px - 340px); }
+  .atlas-filter-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .atlas-filter-clear { flex: none; }
+}
 /* Count first, so a clipped line still says how many places match. */
 .atlas-filter-clear {
   font: inherit;
@@ -428,7 +436,15 @@
   /* Three even rows: detail and zoom, movement, appearance. */
   /* Two rows on a phone: detail, zoom and movement first; rotation and
      appearance share the second, compact, so all stay near the globe. */
-  .globe-controls .appearance-group { justify-content: flex-end; }
+  /* Appearance settings live behind an Options disclosure on phones. */
+  .globe-controls .appearance-toggle { display: inline-flex; margin-left: auto; }
+  .globe-controls .appearance-group {
+    position: absolute; right: 10px; bottom: calc(100% + 8px);
+    padding: 6px; border: 1px solid var(--line); border-radius: 999px;
+    background: rgba(9, 13, 28, 0.95); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  }
+  .globe-controls .appearance-group:not(.is-open) { display: none; }
+  .map-toolbar-bottom { position: relative; }
   .globe-controls .turn-pad .map-btn { padding: 4px 6px; }
   .globe-controls #rotate-toggle { padding: 6px 10px; }
   /* Two deliberate rows, in DOM (and focus) order: what to see (detail,
