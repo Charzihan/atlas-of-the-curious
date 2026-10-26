@@ -83,6 +83,8 @@ if (section && globeView) {
     motion?.setAttribute("aria-pressed", String(paused));
     const label = motion?.querySelector(".motion-label");
     if (label) label.textContent = paused ? "Resume all motion" : "Pause all motion";
+    const short = motion?.querySelector(".motion-short");
+    if (short) short.textContent = paused ? "Resume" : "Pause";
     const glyph = motion?.querySelector(".motion-glyph");
     if (glyph) glyph.textContent = paused ? "▷" : "❚❚";
     try { localStorage.setItem("atlas-motion", paused ? "paused" : "running"); } catch (error) { /* private mode */ }
@@ -102,7 +104,9 @@ if (section && globeView) {
     const active = shown !== total || query || category;
     if (!filter || !filterText) return;
     filter.hidden = !active;
-    if (!active) { filterText.textContent = ""; return; }
+    // Phones keep this row on screen either way (css/globe.css), so an
+    // unfiltered map still says what it shows.
+    if (!active) { filterText.textContent = `All ${total} places`; return; }
     // The count always shows; the scope can give way on a narrow toolbar.
     const scope = [query && `“${query}”`, category].filter(Boolean).join(" in ");
     const count = document.createElement("span");
@@ -137,7 +141,7 @@ if (section && globeView) {
   viewport.before(topBar);
   viewport.after(bottomBar);
   const floating = {
-    top: [document.getElementById("atlas-filter"), section.querySelector(".view-tools")].filter(Boolean),
+    top: [section.querySelector(".view-tools"), document.getElementById("atlas-filter")].filter(Boolean),
     bottom: [...section.querySelectorAll(".map-controls")]
   };
   function placeTools() {

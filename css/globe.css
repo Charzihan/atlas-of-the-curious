@@ -393,20 +393,19 @@
   }
   .map-toolbar .view-tools { gap: 6px; }
   .map-toolbar .view-switch { padding: 2px; }
-  /* One row: the filter readout holds its place (hidden, not removed) left of
-     the switch, so a search never changes the page's height. */
-  .map-toolbar-top { flex-wrap: nowrap; justify-content: space-between; }
+  /* The filter readout is a full-width row of its own, always present (an
+     unfiltered map reads "All 40 places"), so a search never changes the
+     page's height under the grid's scroll anchor. */
+  .map-toolbar-top { justify-content: flex-end; }
   .map-toolbar .view-tools { flex: none; }
   .map-toolbar .atlas-filter {
-    flex: 1 1 auto; min-width: 0; min-height: 44px;
-    justify-content: space-between; gap: 6px;
-    border-radius: 16px; font-size: 0.72rem; line-height: 1.25; padding: 3px 3px 3px 10px;
+    flex: 1 0 100%; min-height: 44px;
+    justify-content: space-between; gap: 8px;
+    border-radius: 16px; font-size: 0.78rem; line-height: 1.25; padding: 3px 3px 3px 12px;
   }
-  .map-toolbar .atlas-filter[hidden] { display: flex !important; visibility: hidden; }
-  .map-toolbar .atlas-filter-text {
-    flex: 1 1 auto; min-width: 0;
-    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
-  }
+  .map-toolbar .atlas-filter[hidden] { display: flex !important; border-color: var(--line); }
+  .map-toolbar .atlas-filter[hidden] .atlas-filter-clear { visibility: hidden; }
+  .map-toolbar .atlas-filter-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .map-toolbar .atlas-filter-clear { flex: none; padding: 4px 10px; }
   .map-toolbar .map-controls { flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 }
@@ -417,7 +416,7 @@
   .motion-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   /* A phone keeps a short visible word; the full name stays for readers. */
   .motion-short { display: inline; }
-  .map-toolbar .filter-scope, .atlas-filter .long-label { display: none; }
+  .atlas-filter .long-label { display: none; }
   .map-controls .map-btn { padding: 6px 10px; }
   #map-locate { font-size: 0; }
   #map-locate::first-letter { font-size: 0.8rem; }

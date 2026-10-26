@@ -782,7 +782,7 @@ dialog::backdrop {
 }
 /* The sea and clouds sit a step behind the land and the dots, so the flat
    map has the same quiet ground as the globe beside it. */
-.map-sea:not(.map-clouds) { opacity: 0.42; }
+.map-sea:not(.map-clouds) { opacity: 0.34; }
 .map-clouds { opacity: 0.26; }
 
 /* Crosshair: a subtle tracking reticle that follows the pointer. */
@@ -1775,5 +1775,5 @@ html { scroll-padding-top: 92px; }
 :root[data-motion="paused"] .card { transition: none; }
 
 /* Phones: the flat sea steps further back on a small, dense map. */
-@media (max-width: 640px) { .map-sea:not(.map-clouds) { opacity: 0.38; } }
+@media (max-width: 640px) { .map-sea:not(.map-clouds) { opacity: 0.3; } }
 
