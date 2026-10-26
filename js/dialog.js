@@ -250,7 +250,8 @@ function boot(win, doc) {
   if (!T || !flag("editorial")) return;
 
   const motionQ = win.matchMedia ? win.matchMedia("(prefers-reduced-motion: reduce)") : null;
-  const reduced = () => !!(motionQ && motionQ.matches);
+  // The OS preference, or the atlas page's "Pause all motion" (js/views.js).
+  const reduced = () => !!(motionQ && motionQ.matches) || doc.documentElement.dataset.motion === "paused";
 
   const body = dialog.querySelector(".dialog-body");
   const head = $("dialog-head");
@@ -1181,6 +1182,9 @@ function boot(win, doc) {
       win.dispatchEvent(new win.CustomEvent("atlas:highlight", { detail: id }));
     }
   }
+
+  // Pausing all motion also stops a reveal or step already under way.
+  win.addEventListener("atlas:motion", (e) => { if (e.detail) { stopStepAnimation(); cancelReveal(); } });
 
   function close() {
     stopStepAnimation();

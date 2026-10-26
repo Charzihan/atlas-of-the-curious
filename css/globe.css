@@ -68,6 +68,7 @@
 .motion-btn:hover, .motion-btn:focus-visible { color: var(--gold); border-color: var(--gold); outline: none; }
 .motion-btn[aria-pressed="true"] { color: var(--gold); border-color: color-mix(in srgb, var(--gold) 60%, transparent); }
 .motion-glyph { font-size: 0.7rem; letter-spacing: -0.1em; }
+.motion-short { display: none; }
 /* Focus is its own ring, distinct from the gold of a selected button. */
 .atlas .view-btn:focus-visible,
 .atlas .motion-btn:focus-visible,
@@ -414,6 +415,8 @@
   .view-btn { padding: 6px 12px 6px 10px; font-size: 0.72rem; }
   .motion-btn { padding: 8px 12px; }
   .motion-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  /* A phone keeps a short visible word; the full name stays for readers. */
+  .motion-short { display: inline; }
   .map-toolbar .filter-scope, .atlas-filter .long-label { display: none; }
   .map-controls .map-btn { padding: 6px 10px; }
   #map-locate { font-size: 0; }

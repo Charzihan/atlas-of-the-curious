@@ -133,7 +133,9 @@
 
   var motionQ = window.matchMedia
     ? window.matchMedia("(prefers-reduced-motion: reduce)") : null;
-  function reducedMotion() { return !!(motionQ && motionQ.matches); }
+  function reducedMotion() {
+    return !!(motionQ && motionQ.matches) || document.documentElement.dataset.motion === "paused";
+  }
 
   // The predicted-vs-rendered agreement check is development-only.
   var DEBUG_METRICS = (function () {

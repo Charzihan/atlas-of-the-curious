@@ -1763,3 +1763,17 @@ dialog::backdrop {
 html { scroll-padding-top: 92px; }
 @media (max-width: 640px) { html { scroll-padding-top: 140px; } }
 
+/* "Pause all motion" (js/views.js), last so it outranks every animation
+   above, the pulses and the located-you ring included. */
+:root[data-motion="paused"] .atlas-hint,
+:root[data-motion="paused"] .loading-glyph,
+:root[data-motion="paused"] .map-marker,
+:root[data-motion="paused"] .map-marker-ring,
+:root[data-motion="paused"] .map-marker.is-pulsing,
+:root[data-motion="paused"] .map-marker.is-pulsing .map-marker-ring,
+:root[data-motion="paused"] .map-user-ring { animation: none; }
+:root[data-motion="paused"] .card { transition: none; }
+
+/* Phones: the flat sea steps further back on a small, dense map. */
+@media (max-width: 640px) { .map-sea:not(.map-clouds) { opacity: 0.38; } }
+
