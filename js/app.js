@@ -1050,8 +1050,20 @@
     window.ATLAS_VISIBLE = ids; // readable by the map even if it builds late
     if (typeof window.CustomEvent === "function") {
       window.dispatchEvent(new CustomEvent("atlas:visible", { detail: ids }));
+      // What the filter is, for the readout beside the hero map (js/views.js).
+      var cat = categoryById.get(state.category);
+      window.dispatchEvent(new CustomEvent("atlas:filter", { detail: {
+        shown: places.length, total: DATA.places.length,
+        query: state.query.trim(), category: cat ? cat.label : ""
+      } }));
     }
   }
+  // The hero map's readout clears search and category in one go.
+  window.ATLAS_CLEAR_FILTER = function () {
+    searchInput.value = "";
+    state.query = "";
+    setCategory("all");
+  };
 
   // --- Rendering ---------------------------------------------------------
   var firstLayout = true;
@@ -1391,8 +1403,11 @@
   });
 
   document.addEventListener("keydown", function (e) {
-    if (!dialog.open) return;
+    if (!dialog.open || e.defaultPrevented) return;
     if (e.key === "Escape") closeDialog();
+    // Arrow keys move the caret in the notes box and the journey selector.
+    var t = e.target;
+    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
     if (e.key === "ArrowLeft") stepDialog(-1);
     if (e.key === "ArrowRight") stepDialog(1);
   });

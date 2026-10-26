@@ -28,6 +28,7 @@ import {
 } from "./labels.js";
 import { fitHoverTagline } from "./hover-card.js";
 import { readCategoryColors } from "./category-colors.js";
+import { wheelZooms } from "./gesture-hint.js";
 import { createSeaEngine, IDLE_MAX_SENTENCES } from "./sea.js";
 import { createMapArtEngine, COUNTRY_MARKER } from "./map-art.js";
 import { generateCloud, generateCloudSet } from "./clouds.js";
@@ -851,7 +852,10 @@ import {
        is the one case that earns it. Phases 7–8's `.map-art` canvas and
        `.map-art-inset` are in there and are both transparent, so they hide no
        glyph; if the inset ever grows a background, it belongs in this list. */
-    for (const el of viewport.children) {
+    // The intro panel is the section's own child (it becomes a band above the
+    // map on narrow screens); on wide ones it floats over the map like these.
+    const floating = [...viewport.children, ...section.querySelectorAll(":scope > .atlas-overlay")];
+    for (const el of floating) {
       if (el === stage || el.hidden || typeof el.getBoundingClientRect !== "function") continue;
       const r = el.getBoundingClientRect();
       if (r.width > 0 && r.height > 0) out.push(r);
@@ -1874,7 +1878,14 @@ import {
       geometry: artGeometry(), countries: MAP.countries, panels: artPanels()
     })
   };
-  window.addEventListener('atlas:highlight', e => showCountry(e.detail, false));
+  // Map readings are drawn on the flat map: the globe view (js/views.js)
+  // neither shows nor keeps one, and its dialog highlights stay off the map.
+  let globeShown = section.dataset.view === 'globe';
+  window.addEventListener('atlas:view', e => {
+    globeShown = e.detail === 'globe';
+    if (globeShown) { artPinned = false; clearArt(); }
+  });
+  window.addEventListener('atlas:highlight', e => { if (!globeShown) showCountry(e.detail, false); });
   window.addEventListener('hashchange', () => { if (!artPinned && !location.hash.startsWith('#/place/')) clearArt(); });
   window.addEventListener('atlas:map-country', e => showCountry(e.detail));
   window.addEventListener('atlas:map-route', e => {
@@ -1887,7 +1898,11 @@ import {
   let PX, LINEH, CHARW, mapW, mapH;
   let disp, vel, animId = 0, ambientTimer = null, hoverTimer = null, hoveredX = null;
   let buildListeners = null;
-  let stage, card, cardVisibleId = null;
+  let stage, card, cardVisibleId = null, cardHideTimer = 0;
+  // Escape dismisses the hover card, as it does on the globe.
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && cardVisibleId && hideCardRef) hideCardRef();
+  });
   // Off-screen pause: when the map scrolls out of view we stop the animation
   // loop and ambient timer (they otherwise run for the page's whole life).
   let viewportVisible = true, waveT0 = 0, frameRef = null, loopRunning = false;
@@ -2253,6 +2268,8 @@ import {
     // ---- Stage ----------------------------------------------------------
     stage = document.createElement("div");
     stage.className = "map-stage";
+    // Under the globe view the flat stage is out of the tab order and tree.
+    stage.inert = section.dataset.view === "globe";
     stage.style.width = mapW + "px";
     stage.style.height = mapH + "px";
     stage.style.fontFamily = MONO;
@@ -2533,7 +2550,7 @@ import {
     const cloudDPR = ASCII_CLOUDS ? DPR : 1;
     cloudsEl.width = Math.round(mapW * cloudDPR);
     cloudsEl.height = Math.round(mapH * cloudDPR);
-    cloudsEl.className = "map-sea";      // reuse the absolute-position style
+    cloudsEl.className = "map-sea map-clouds"; // reuse the absolute-position style
     cloudsEl.style.width = mapW + "px";
     cloudsEl.style.height = mapH + "px";
     zoomEl.appendChild(cloudsEl);
@@ -3006,6 +3023,7 @@ import {
 
     card = document.createElement("div");
     card.className = "map-card";
+    card.id = "atlas-place-card";
     card.setAttribute("role", "tooltip");
     const cardCat = document.createElement("span"); cardCat.className = "map-card-cat";
     const cardName = document.createElement("span"); cardName.className = "map-card-name";
@@ -3013,12 +3031,15 @@ import {
     const cardLoc = document.createElement("span"); cardLoc.className = "map-card-loc";
     const cardTag = document.createElement("pre"); cardTag.className = "map-card-tag";
     const cardCoords = document.createElement("span"); cardCoords.className = "map-card-coords";
-    const cardCta = document.createElement("span"); cardCta.className = "map-card-cta";
+    // A real link, as on the globe's card: the card stays open while hovered.
+    const cardCta = document.createElement("a"); cardCta.className = "map-card-cta";
     cardCta.textContent = "Open field note →";
     card.appendChild(cardCat); card.appendChild(cardName); card.appendChild(cardNative);
     card.appendChild(cardLoc);
     card.appendChild(cardTag); card.appendChild(cardCoords); card.appendChild(cardCta);
     stage.appendChild(card);
+    card.addEventListener("mouseenter", () => clearTimeout(cardHideTimer));
+    card.addEventListener("mouseleave", () => scheduleHideCard());
 
     /* ---- A card that hugs its text ------------------------------------
        The card used to be a fixed 252px box in CSS while js/map.js positioned
@@ -3255,6 +3276,7 @@ import {
       card.dataset.side = flip ? "left" : "right";
     }
     function showCard(x) {
+      clearTimeout(cardHideTimer);
       if (cardVisibleId === x.p.id) { positionCard(x); return; }
       cardVisibleId = x.p.id;
       const cat = catById.get(x.p.category);
@@ -3282,11 +3304,18 @@ import {
       cardLoc.textContent = x.p.country + " — " + x.p.region;
       cardTag.textContent = fit.lines.join("\n");
       cardCoords.textContent = "≈ " + x.p.coordinates;
+      cardCta.href = "#/place/" + encodeURIComponent(x.p.id);
       card.style.setProperty("--accent", `var(--category-${x.p.category}, var(--gold))`);
       positionCard(x);
       card.classList.add("is-visible");
     }
+    // Leaving a dot gives the pointer a moment to reach its card's link.
+    function scheduleHideCard() {
+      clearTimeout(cardHideTimer);
+      cardHideTimer = setTimeout(hideCard, 280);
+    }
     function hideCard() {
+      clearTimeout(cardHideTimer);
       cardVisibleId = null;
       card.classList.remove("is-visible");
     }
@@ -3366,6 +3395,7 @@ import {
       m.style.animationDelay = (Math.random() * 0.6).toFixed(2) + "s";
       m.setAttribute("data-place-id", p.id);
       m.setAttribute("aria-label", p.name + ", " + p.country + " — open field note");
+      m.setAttribute("aria-describedby", "atlas-place-card");
       const ring = document.createElement("span"); ring.className = "map-marker-ring";
       const g = document.createElement("span"); g.className = "map-marker-glyph";
       m.appendChild(ring); m.appendChild(g);
@@ -3393,7 +3423,7 @@ import {
       const leave = () => {
         if (hoveredX === x) hoveredX = null;
         if (hoverTimer) { clearInterval(hoverTimer); hoverTimer = null; }
-        hideCard();
+        scheduleHideCard();
         lightCard(p.id, false);
         m.classList.remove("is-hot");
         const le = labelEl();
@@ -3416,9 +3446,10 @@ import {
       m.addEventListener("click", (e) => {
         e.stopPropagation();
         hideCard();
-        if (location.hash !== "#/place/" + encodeURIComponent(p.id)) {
-          location.hash = "#/place/" + encodeURIComponent(p.id);
-        }
+        const target = "#/place/" + encodeURIComponent(p.id);
+        // A closed note keeps its hash, so reopening it re-runs the route.
+        if (location.hash !== target) location.hash = target;
+        else window.dispatchEvent(new HashChangeEvent("hashchange"));
       });
     }
     showCardRef = showCard;
@@ -3577,7 +3608,7 @@ import {
       }
     });
     stage.addEventListener("wheel", (e) => {
-      if (REDUCED) return;
+      if (REDUCED || !wheelZooms(e, stage)) return;
       e.preventDefault();
       const sx = e.clientX - rect.left;
       const sy = e.clientY - rect.top;
@@ -3996,6 +4027,7 @@ import {
 
   // ---- Legend (persistent) ----------------------------------------------------
   const legend = $("atlas-legend");
+  const legendCounts = [];
   if (legend) {
     for (const c of DATA.categories) {
       const n = DATA.places.filter((p) => p.category === c.id).length;
@@ -4007,7 +4039,19 @@ import {
       t.textContent = c.label + " " + n;
       el.appendChild(dot); el.appendChild(t);
       legend.appendChild(el);
+      el.title = n + " places in total";
+      legendCounts.push({ c, el });
     }
+    // The counts stay totals (changing them would reflow the page under the
+    // grid's scroll anchor); a category with no match under the filter fades.
+    window.addEventListener("atlas:visible", (e) => {
+      const ids = e.detail;
+      const filtered = ids && ids.size !== DATA.places.length;
+      for (const { c, el } of legendCounts) {
+        const none = filtered && !DATA.places.some((p) => p.category === c.id && ids.has(p.id));
+        el.classList.toggle("is-empty", none);
+      }
+    });
   }
 
   // ---- Search / filter sync -------------------------------------------------
@@ -4027,7 +4071,7 @@ import {
       else if (ref.el.tabIndex === -1) ref.el.removeAttribute("tabindex");
     }
     // A dimmed marker being hovered should release its card.
-    if (ids != null && cardVisibleId && !ids.has(cardVisibleId)) hideCard();
+    if (ids != null && cardVisibleId && !ids.has(cardVisibleId) && hideCardRef) hideCardRef();
   }
   window.addEventListener("atlas:visible", (e) => setMarkersVisible(e.detail));
   // Initial state in case the app rendered before this module's first build.
@@ -4066,8 +4110,9 @@ import {
     // CPU for the rest of the page.
     // The globe view (js/views.js) covers the stage; it counts as off-screen.
     let onScreen = true, flatShown = section.dataset.view !== "globe";
+    let motionPaused = document.documentElement.dataset.motion === "paused";
     function setLive() {
-      const visible = onScreen && flatShown;
+      const visible = onScreen && flatShown && !motionPaused;
       viewportVisible = visible;
       if (visible) {
         if (!frameRef) return;
@@ -4091,16 +4136,19 @@ import {
     }
     window.addEventListener("atlas:view", (e) => {
       flatShown = e.detail !== "globe";
+      if (stage) stage.inert = !flatShown;
       if (!flatShown && hideCardRef) hideCardRef();
       setLive();
     });
+    // The page's "Pause motion" (js/views.js) holds the sea and clouds still.
+    window.addEventListener("atlas:motion", (e) => { motionPaused = !!e.detail; setLive(); });
     if (typeof IntersectionObserver === "function") {
       new IntersectionObserver((entries) => {
         onScreen = entries.some((en) => en.isIntersecting);
         setLive();
       }, { threshold: 0.02 }).observe(viewport);
     }
-    if (!flatShown) setLive();
+    if (!flatShown || motionPaused) setLive();
 
     // ---- Map controls: zoom in/out, reset (#16). The "Locate me" button is
     // owned by app.js (it runs geolocation); map.js only reacts to its events.

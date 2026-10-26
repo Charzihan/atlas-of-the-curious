@@ -6,6 +6,7 @@ import { TextRenderer } from './renderer.js';
 import { globePlaces, parsePlaceHash } from './places.js';
 import { PlaceLayer } from './place-layer.js';
 import { readCategoryColors, readContinentColors } from '../js/category-colors.js';
+import { wheelZooms } from '../js/gesture-hint.js';
 
 const $ = id => document.getElementById(id);
 // The embedded atlas view carries a leaner control set than the globe page,
@@ -25,7 +26,9 @@ function bindToggle(id, apply) {
   });
 }
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
-const state = { ...HOME, targetDistance: HOME.distance, autoRotate: !reducedMotion.matches, source: 'earth', labels: true, grid: false, serif: false };
+// Reduced motion, or the atlas page's "Pause motion" (js/views.js).
+const still = () => reducedMotion.matches || document.documentElement.dataset.motion === 'paused';
+const state = { ...HOME, targetDistance: HOME.distance, autoRotate: !still(), source: 'earth', labels: true, grid: false, serif: false };
 let geography = null, renderer, level = selectLOD(distanceToZoom(state.distance));
 let dirty = true, lastTime = 0, lastOceanPhase = -1, frameId = 0, metricTime = 0, renderedFrames = 0;
 let fps = 0, projectionSum = 0, renderSum = 0, averageProjection = 0, averageRender = 0;
@@ -151,11 +154,11 @@ function frame(time) {
   }
   const nextLevel = selectLOD(distanceToZoom(state.distance), level);
   if (nextLevel !== level) { updateLOD(nextLevel); dirty = true; }
-  const oceanPhase = reducedMotion.matches ? 0 : Math.floor(time / 900);
+  const oceanPhase = still() ? 0 : Math.floor(time / 900);
   if (oceanPhase !== lastOceanPhase) { dirty = true; lastOceanPhase = oceanPhase; }
   if (dirty) {
     const metrics = renderer.draw(state, level, state.source === 'earth' && geography ? geography : syntheticGeography,
-      { labels: state.labels, places: state.source === 'earth', grid: state.grid, serif: state.serif, animateOcean: !reducedMotion.matches, time });
+      { labels: state.labels, places: state.source === 'earth', grid: state.grid, serif: state.serif, animateOcean: !still(), time });
     renderedFrames++;
     frameNumber++;
     projectionSum += metrics.projectionMs;
@@ -200,6 +203,11 @@ function setupControls() {
       const nextDistance = gestureDistance();
       if (pinchDistance > 0 && nextDistance > 0) zoomBy(pinchDistance / nextDistance);
       pinchDistance = nextDistance;
+      // Two fingers also turn the globe by their shared movement (half each),
+      // since one finger may be scrolling the page in the atlas.
+      const sensitivity = 165 * (state.distance - 1) / 2.2 / Math.min(renderer.viewport.width, renderer.viewport.height) / pointers.size;
+      state.longitude = wrapLongitude(state.longitude - (event.clientX - previous.x) * sensitivity);
+      state.latitude = clamp(state.latitude + (event.clientY - previous.y) * sensitivity, -89, 89);
     }
     dirty = true;
   });
@@ -210,6 +218,7 @@ function setupControls() {
   };
   for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) canvas.addEventListener(name, endPointer);
   canvas.addEventListener('wheel', event => {
+    if (!wheelZooms(event, canvas)) return;
     event.preventDefault();
     const pixels = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? renderer.viewport.height : 1);
     zoomBy(Math.exp(clamp(pixels * 0.0015, -0.5, 0.5)));
@@ -302,6 +311,7 @@ async function main({ embedded = false } = {}) {
   renderer.places = placeLayer;
   // Inside the atlas, the search box and category chips dim globe dots too.
   if (embedded) {
+    window.addEventListener('atlas:motion', event => { if (event.detail) setRotation(false); dirty = true; });
     placeLayer.setFilter(window.ATLAS_VISIBLE || null);
     window.addEventListener('atlas:visible', event => { placeLayer.setFilter(event.detail); dirty = true; });
   }

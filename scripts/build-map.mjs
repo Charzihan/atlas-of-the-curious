@@ -6,7 +6,7 @@
    Output: js/landmap.js → window.LANDMAPS = { palette, continents, desktop: {...}, mobile: {...} }
    Each grid cell encodes a texture glyph (glyphs row) and a palette index
    (colors row; " " = water). Land is colored uniformly per continent (the
-   geojson's CONTINENT property; Antarctica is white), so every country in a
+   geojson's CONTINENT property; Antarctica is pale ice), so every country in a
    continent shares one flat color and one texture glyph.
    Run: pnpm build-map   (or: node scripts/build-map.mjs) */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -34,7 +34,7 @@ const SAMPLE = 4;      // SAMPLE x SAMPLE sub-points per cell → tight coastlin
 const THRESH = 6;      // land if ≥ THRESH of SAMPLE*SAMPLE samples hit a country
 
 // One flat color per continent — every country in a continent shares one
-// color. Antarctica is deliberately a white ice sheet. Colors chosen to stay
+// color. Antarctica is a pale ice sheet, quieter than the inhabited land. Colors chosen to stay
 // legible on the dark sea.
 const CONTINENT_COLORS = {
   "Africa": [0x6f, 0x9e, 0x5f],         // savanna green
@@ -43,7 +43,7 @@ const CONTINENT_COLORS = {
   "North America": [0x8f, 0xc9, 0x6a],  // prairie green
   "South America": [0xe0, 0x7a, 0x5a],  // terracotta
   "Oceania": [0x4f, 0xb0, 0xc9],        // lagoon teal
-  "Antarctica": [0xec, 0xf2, 0xf6],     // ice white
+  "Antarctica": [0xc6, 0xd5, 0xe2],     // pale ice, below the other continents
 };
 const PALETTE = [];
 const continentIdx = new Map();

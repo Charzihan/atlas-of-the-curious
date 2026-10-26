@@ -75,5 +75,37 @@ if (section && globeView) {
     window.addEventListener(name, () => setView("flat"));
   }
 
+  // One "Pause motion" for both projections: map.js stops its sea and
+  // clouds, the globe its rotation and ocean shimmer. Remembered per visitor.
+  const motion = document.getElementById("motion-toggle");
+  function setMotion(paused) {
+    document.documentElement.dataset.motion = paused ? "paused" : "running";
+    motion?.setAttribute("aria-pressed", String(paused));
+    const label = motion?.querySelector(".motion-label");
+    if (label) label.textContent = paused ? "Resume motion" : "Pause motion";
+    const glyph = motion?.querySelector(".motion-glyph");
+    if (glyph) glyph.textContent = paused ? "▷" : "❚❚";
+    try { localStorage.setItem("atlas-motion", paused ? "paused" : "running"); } catch (error) { /* private mode */ }
+    window.dispatchEvent(new CustomEvent("atlas:motion", { detail: paused }));
+  }
+  motion?.addEventListener("click", () => setMotion(motion.getAttribute("aria-pressed") !== "true"));
+  let savedMotion = null;
+  try { savedMotion = localStorage.getItem("atlas-motion"); } catch (error) { /* private mode */ }
+  if (savedMotion === "paused") setMotion(true);
+
+  // Search and category feedback where the map shows it, with one way out.
+  const filter = document.getElementById("atlas-filter");
+  const filterText = document.getElementById("atlas-filter-text");
+  window.addEventListener("atlas:filter", (event) => {
+    const { shown, total, query, category } = event.detail;
+    const active = shown !== total || query || category;
+    if (!filter || !filterText) return;
+    filter.hidden = !active;
+    if (!active) { filterText.textContent = ""; return; }
+    const scope = [query && `“${query}”`, category].filter(Boolean).join(" in ");
+    filterText.textContent = `${shown} of ${total} places${scope ? ` match ${scope}` : ""}`;
+  });
+  document.getElementById("atlas-filter-clear")?.addEventListener("click", () => window.ATLAS_CLEAR_FILTER?.());
+
   if (isGlobeHash(location.hash)) setView("globe");
 }

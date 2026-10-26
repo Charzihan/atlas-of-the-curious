@@ -757,6 +757,10 @@ dialog::backdrop {
   inset: 0;
   display: block;
 }
+/* The sea and clouds sit a step behind the land and the dots, so the flat
+   map has the same quiet ground as the globe beside it. */
+.map-sea:not(.map-clouds) { opacity: 0.78; }
+.map-clouds { opacity: 0.62; }
 
 /* Crosshair: a subtle tracking reticle that follows the pointer. */
 .map-crosshair {
@@ -1326,9 +1330,8 @@ dialog::backdrop {
 
 .atlas-scale {
   font-family: Verdana, Geneva, sans-serif;
-  font-size: 0.66rem;
+  font-size: 0.75rem;
   color: var(--ink-dim);
-  opacity: 0.7;
 }
 
 /* ---------- Small screens ---------- */

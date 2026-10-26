@@ -74,6 +74,33 @@ try {
     await Promise.all([page.waitForURL(`${server.origin}/#/place/salar-de-uyuni`), page.keyboard.press('Enter')]);
     await page.waitForFunction(() => document.getElementById('place-dialog').open);
     assert.equal(await view(), 'globe');
+    // A closed note keeps its hash; the same marker opens it again.
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => !document.getElementById('place-dialog').open);
+    await marker.focus();
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() => document.getElementById('place-dialog').open);
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => !document.getElementById('place-dialog').open);
+    // A plain wheel turn over an unfocused globe scrolls the page and hints.
+    if (viewport.width > 640) {
+      await page.locator('#search-input').focus();
+      const before = await page.evaluate(() => EARTHXT_DEBUG.snapshot().targetDistance);
+      const box = await page.locator('#globe').boundingBox();
+      await page.mouse.move(box.x + box.width * 0.15, box.y + box.height * 0.5);
+      await page.mouse.wheel(0, -200);
+      await page.waitForFunction(() => !document.getElementById('gesture-hint').hidden);
+      assert.equal(await page.evaluate(() => EARTHXT_DEBUG.snapshot().targetDistance), before, 'unfocused wheel must not zoom');
+      await page.keyboard.down('Control');
+      await page.mouse.wheel(0, -200);
+      await page.keyboard.up('Control');
+      assert.ok(await page.evaluate(() => EARTHXT_DEBUG.snapshot().targetDistance) < before, 'Ctrl + wheel zooms');
+    }
+    // Pause motion stops the globe and is remembered.
+    await page.locator('#motion-toggle').click();
+    assert.equal(await page.evaluate(() => document.documentElement.dataset.motion), 'paused');
+    assert.equal(await page.evaluate(() => EARTHXT_DEBUG.snapshot().autoRotate), false);
+    await page.locator('#motion-toggle').click();
 
     // Old globe links land in the unified page with their place.
     await page.goto(`${server.origin}/earthxt/#/place/fez-medina`);
@@ -91,7 +118,7 @@ try {
     await context.close();
   }
   assert.deepEqual(errors, []);
-  console.log('PASS: desktop/mobile flat ↔ globe switch on one page, Back, paused hidden globe, dialog and marker links, old-URL redirect, shared filter and palette, no console/page errors.');
+  console.log('PASS: desktop/mobile flat ↔ globe switch on one page, Back, paused hidden globe, dialog and marker links, old-URL redirect, shared filter and palette, reopen, cooperative wheel, pause motion, no console/page errors.');
 } catch (error) {
   console.error(`Globe navigation smoke failed: ${error.message}`);
   process.exitCode = 1;

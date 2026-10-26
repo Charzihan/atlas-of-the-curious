@@ -693,7 +693,7 @@ function boot(win, doc) {
     const first = buildCandidateOnce(res, colWidth, cols, innerWidth, justify, false);
     if (first.plan.quoteWidth >= colWidth) return first;
     const beside = first.lines.some(
-      (l) => l.col === 0 && l.row >= first.quoteRow &&
+      (l) => l.col === first.quoteCol && l.row >= first.quoteRow &&
              l.row < first.quoteRow + first.plan.quoteRows
     );
     if (beside) return first;
@@ -722,9 +722,11 @@ function boot(win, doc) {
     let quoteRow = quoteRowFor(plan, rowsPerCol);
     let flow = null;
     let best = null;
-    const seen = new Set();
+    let quoteCol = 0;
 
-    const attempt = (rows) => {
+    // The pull quote normally sits in the first column under the drop cap. A
+    // story too short to balance that column may set it atop the last one.
+    const attempt = (rows, qCol = 0) => {
       const obstacles = [];
       if (plan.capLines) {
         obstacles.push({
@@ -732,15 +734,23 @@ function boot(win, doc) {
           x: columns[0].x, w: plan.capWidth + CAP_GAP
         });
       }
-      const qRow = quoteRowFor(plan, rows);
+      const qRow = qCol ? 0 : quoteRowFor(plan, rows);
       obstacles.push({
-        col: 0, row0: qRow, rows: plan.quoteRows,
-        x: columns[0].x,
+        col: qCol, row0: qRow, rows: plan.quoteRows,
+        x: columns[qCol].x,
         w: plan.quoteWidth >= colWidth ? colWidth : plan.quoteWidth + PQ_GAP
       });
       const f = flowSpread(res, plan, columns, obstacles, rows, justify);
       const taken = (res.para.candidates[f.colCursor[0]] || {}).wordWidthBefore || 0;
-      return { flow: f, quoteRow: qRow, rows: rows, score: Math.abs(taken / totalWordWidth - share) };
+      // Balance what the eye sees: painted column heights, where the first
+      // column also carries the pull quote. A text share alone left a short
+      // story's second column a two-line stub beside a tall first one.
+      const quoteEnd = qRow * plan.lh + plan.quoteHeight;
+      const h0 = Math.max((f.colRows[0] || 0) * plan.lh, qCol === 0 ? quoteEnd : 0);
+      const h1 = Math.max((f.colRows[cols - 1] || 0) * plan.lh, qCol === cols - 1 ? quoteEnd : 0);
+      const tall = Math.max(h0, h1, 1);
+      return { flow: f, quoteRow: qRow, quoteCol: qCol, rows: rows, h0: h0, h1: h1,
+               score: Math.abs(h0 - h1) / tall + 0.25 * Math.abs(taken / totalWordWidth - share) };
     };
 
     if (cols === 1) {
@@ -748,21 +758,27 @@ function boot(win, doc) {
       flow = only.flow;
       quoteRow = only.quoteRow;
     } else {
-      // At most five probes, walking one row at a time towards the split that
-      // gives the first column its fair share of the paragraph.
-      for (let pass = 0; pass < 5; pass++) {
-        if (seen.has(rowsPerCol)) break;
-        seen.add(rowsPerCol);
-        const tried = attempt(rowsPerCol);
-        if (!best || tried.score < best.score) best = tried;
-        const taken =
-          (res.para.candidates[tried.flow.colCursor[0]] || {}).wordWidthBefore || 0;
-        const next = taken / totalWordWidth > share ? rowsPerCol - 1 : rowsPerCol + 1;
-        if (next < minRows) break;
-        rowsPerCol = next;
-      }
+      // At most eight probes, walking one row at a time towards the split
+      // whose two columns end nearest the same depth.
+      const start = rowsPerCol;
+      const probe = (qCol) => {
+        const seen = new Set();
+        let rows = start;
+        for (let pass = 0; pass < 8; pass++) {
+          if (seen.has(rows)) break;
+          seen.add(rows);
+          const tried = attempt(rows, qCol);
+          if (!best || tried.score < best.score) best = tried;
+          const next = tried.h0 > tried.h1 ? rows - 1 : rows + 1;
+          if (next < minRows) break;
+          rows = next;
+        }
+      };
+      probe(0);
+      if (best.h1 < 0.6 * best.h0) probe(cols - 1);
       flow = best.flow;
       quoteRow = best.quoteRow;
+      quoteCol = best.quoteCol;
       rowsPerCol = best.rows;
     }
 
@@ -772,7 +788,7 @@ function boot(win, doc) {
     let height = 0;
     for (let c = 0; c < columns.length; c++) {
       let h = (flow.colRows[c] || 0) * plan.lh;
-      if (c === 0) h = Math.max(h, quoteTop + plan.quoteHeight);
+      if (c === quoteCol) h = Math.max(h, quoteTop + plan.quoteHeight);
       columns[c].height = h;
       columns[c].rows = flow.colRows[c] || 0;
       if (h > height) height = h;
@@ -796,7 +812,7 @@ function boot(win, doc) {
 
     return {
       plan: plan, columns: columns, lines: flow.lines, height: Math.ceil(height),
-      quoteRow: quoteRow, quoteTop: quoteTop, originX: originX,
+      quoteRow: quoteRow, quoteCol: quoteCol, quoteTop: quoteTop, originX: originX,
       colWidth: colWidth, cols: cols, justified: justify, done: flow.done,
       rivers: { maxRun: maxRun, riverCount: riverCount, worst: worst, byColumn: perColumn },
       overflow: flow.lines.some((l) => l.overflow)
@@ -939,7 +955,7 @@ function boot(win, doc) {
     // Pull quote.
     clear(quoteEl);
     quoteEl.appendChild(quoteLabel);
-    quoteEl.style.setProperty("left", px(s.columns[0].x));
+    quoteEl.style.setProperty("left", px(s.columns[s.quoteCol || 0].x));
     quoteEl.style.setProperty("top", px(s.quoteTop));
     quoteEl.style.setProperty("width", px(plan.quoteWidth));
     quoteEl.style.setProperty("height", px(plan.quoteHeight));
@@ -1328,7 +1344,7 @@ function boot(win, doc) {
           lines: s.plan.capLines, width: s.plan.capWidth, fontPx: s.plan.capPx
         },
         pullQuote: {
-          x: s.columns[0].x, top: s.quoteTop, width: s.plan.quoteWidth,
+          x: s.columns[s.quoteCol || 0].x, top: s.quoteTop, width: s.plan.quoteWidth,
           height: s.plan.quoteHeight, rows: s.plan.quoteRows,
           lines: s.plan.quoteLines.length, fullBleed: s.plan.quoteWidth >= s.colWidth
         },

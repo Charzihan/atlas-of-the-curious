@@ -9,12 +9,47 @@
 .atlas[data-view="flat"] .for-globe,
 .atlas[data-view="globe"] .for-flat { display: none !important; }
 
+/* The globe's how-to line, for a mouse or for a finger. */
+.hint-touch { display: none; }
+@media (hover: none) and (pointer: coarse) {
+  .atlas .hint-pointer { display: none; }
+  .atlas .hint-touch { display: block; }
+}
+
 /* ---------- Flat / Globe switch ---------- */
-.view-switch {
+.view-tools {
   position: absolute;
   top: 26px;
   right: 26px;
   z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.motion-btn {
+  font: inherit;
+  font-family: var(--font-sans);
+  font-size: 0.72rem;
+  color: var(--ink-dim);
+  background: rgba(9, 13, 28, 0.86);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 9px 14px 9px 12px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  backdrop-filter: blur(6px);
+  transition: color 0.15s, border-color 0.15s;
+}
+.motion-btn:hover, .motion-btn:focus-visible { color: var(--gold); border-color: var(--gold); outline: none; }
+.motion-btn[aria-pressed="true"] { color: var(--gold); border-color: color-mix(in srgb, var(--gold) 60%, transparent); }
+.motion-glyph { font-size: 0.7rem; letter-spacing: -0.1em; }
+/* Paused motion stills the CSS loops of both projections too. */
+:root[data-motion="paused"] .map-marker,
+:root[data-motion="paused"] .map-marker-ring,
+:root[data-motion="paused"] .loading-glyph { animation: none; }
+.view-switch {
   display: flex;
   padding: 3px;
   gap: 2px;
@@ -76,6 +111,30 @@
   touch-action: none;
 }
 .globe-stage canvas.dragging { cursor: grabbing; }
+/* A vertical swipe scrolls the page; sideways and two-finger gestures turn
+   and zoom the globe (earthxt/app.js). */
+.globe-view .globe-stage canvas { touch-action: pan-y; }
+
+/* "Hold Ctrl to zoom" and friends (js/gesture-hint.js). */
+.gesture-hint {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 11;
+  transform: translate(-50%, -50%);
+  margin: 0;
+  padding: 10px 16px;
+  max-width: calc(100% - 32px);
+  font: 0.8rem var(--font-sans);
+  color: var(--ink);
+  text-align: center;
+  background: rgba(9, 13, 28, 0.9);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  pointer-events: none;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+.gesture-hint[hidden] { display: none; }
 .globe-stage canvas:focus-visible { outline: 2px solid var(--gold); outline-offset: -6px; border-radius: 12px; }
 
 .loading-state {
@@ -178,33 +237,92 @@
 .globe-controls .map-btn:disabled { opacity: 0.4; cursor: default; }
 #serif-toggle[aria-busy="true"] { cursor: progress; opacity: 0.7; }
 
+/* The filter readout, over the map's lower left (js/views.js). It floats so
+   a search never reflows the page beneath the grid's scroll anchor. */
+.atlas-filter {
+  position: absolute;
+  left: 26px;
+  bottom: 14px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  max-width: calc(100% - 52px);
+  padding: 4px 4px 4px 14px;
+  font: 0.78rem var(--font-sans);
+  color: var(--ink);
+  background: rgba(9, 13, 28, 0.9);
+  border: 1px solid color-mix(in srgb, var(--gold) 45%, transparent);
+  border-radius: 999px;
+  backdrop-filter: blur(6px);
+}
+.atlas-filter[hidden] { display: none; }
+.atlas-filter-clear {
+  font: inherit;
+  font-size: 0.75rem;
+  color: var(--gold);
+  background: var(--gold-soft);
+  border: 1px solid color-mix(in srgb, var(--gold) 55%, transparent);
+  border-radius: 999px;
+  padding: 4px 12px;
+  cursor: pointer;
+}
+.atlas-filter-clear:hover, .atlas-filter-clear:focus-visible { background: var(--gold); color: #101a28; outline: none; }
+@media (pointer: coarse) { .atlas-filter-clear { min-height: 44px; padding: 4px 16px; } }
+.legend-item.is-empty { opacity: 0.45; }
+
 /* The flat map's readout line in the legend row, set in the same face. */
 .atlas-scale #view-level,
 .atlas-scale #coordinates { font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 /* ---------- Small screens ---------- */
+/* ---------- Narrower screens ---------- */
+/* Below the wide layout the intro is a band above the map, never on it, so
+   neither projection is hidden behind it. (`.atlas >` outranks the phone
+   rules of css/style.css, which load after this file.) */
 @media (max-width: 1099px) {
-  /* The intro panel would sit on the sphere: it shrinks to its title. */
-  .atlas[data-view="globe"] .atlas-overlay { max-width: 300px; }
-  .atlas[data-view="globe"] .atlas-overlay .atlas-sub { display: none; }
+  .atlas > .atlas-overlay {
+    position: relative;
+    top: auto; left: auto; right: auto;
+    max-width: none;
+    margin: 0;
+    padding: 16px 24px 14px;
+    border-radius: 0;
+    border-width: 0 0 1px;
+    box-shadow: none;
+    pointer-events: auto;
+  }
+  .atlas > .atlas-overlay .atlas-title { margin-bottom: 6px; }
+  .atlas > .atlas-overlay .atlas-sub { max-width: 640px; }
 }
 @media (max-width: 640px) {
-  /* One bottom row on a phone: the icon switch on the left, controls right. */
-  .view-switch { top: auto; bottom: 10px; right: auto; left: 10px; padding: 2px; }
-  .view-btn { padding: 6px 10px; font-size: 0.72rem; }
-  .view-btn .view-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-  .view-glyph { font-size: 1rem; }
+  .atlas > .atlas-overlay { padding: 12px 16px 11px; }
+  .view-tools { top: 10px; right: 10px; gap: 6px; }
+  .atlas-filter { left: 10px; top: 10px; bottom: auto; max-width: calc(100% - 230px); font-size: 0.7rem; padding-left: 10px; }
+  .atlas-filter-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .view-switch { padding: 2px; }
+  .motion-btn { padding: 8px 12px; }
+  .motion-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .view-btn { padding: 6px 12px 6px 10px; font-size: 0.72rem; }
   .map-controls { gap: 5px; }
   .map-controls .map-btn { padding: 6px 10px; }
-  .atlas[data-view="flat"] .map-controls { left: 96px; right: 10px; bottom: 10px; max-width: none; justify-content: flex-end; }
+  .atlas[data-view="flat"] .map-controls { left: 10px; right: 10px; bottom: 10px; max-width: none; justify-content: flex-end; }
   #map-locate { font-size: 0; }
   #map-locate::first-letter { font-size: 0.8rem; }
-  .atlas[data-view="globe"] .map-viewport { height: min(140vw, 580px); }
-  .atlas[data-view="globe"] .atlas-overlay { max-width: none; }
-  .globe-stage { top: 92px; bottom: 92px; }
-  .globe-controls { left: 96px; right: 10px; bottom: 10px; max-width: none; justify-content: flex-end; flex-wrap: wrap-reverse; }
+  .atlas[data-view="globe"] .map-viewport { height: min(124vw, 500px); }
+  .globe-stage { top: 58px; bottom: 112px; }
+  .globe-controls { left: 10px; right: 10px; bottom: 10px; max-width: none; justify-content: flex-end; flex-wrap: wrap-reverse; }
   .globe-controls #labels-toggle, .globe-controls #rotate-text { display: none; }
   .lod-switch .map-btn { padding: 5px 9px; }
+}
+/* Fingers need bigger targets than cursors: 44px controls, and markers whose
+   hit area reaches past the drawn ring. */
+@media (pointer: coarse) {
+  .map-btn, .view-btn, .motion-btn { min-height: 44px; min-width: 44px; justify-content: center; }
+  .lod-switch .map-btn { min-height: 40px; }
+  .map-marker::after { content: ""; position: absolute; inset: -9px; border-radius: 50%; }
+  .globe-marker { width: 38px; height: 38px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .loading-glyph { animation: none; }

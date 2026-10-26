@@ -6,7 +6,7 @@ import { InkPaletteCache } from './ink-palette.js';
 // The atlas's continent colours (css/tokens.css --continent-*) and texture
 // glyphs (scripts/build-map.mjs), in CONTINENTS order. The app passes the
 // resolved tokens; these defaults keep node tests and old callers working.
-export const CONTINENT_COLORS = Object.freeze(['#6f9e5f', '#d0a05a', '#a88ac4', '#8fc96a', '#e07a5a', '#4fb0c9', '#ecf2f6']);
+export const CONTINENT_COLORS = Object.freeze(['#6f9e5f', '#d0a05a', '#a88ac4', '#8fc96a', '#e07a5a', '#4fb0c9', '#c6d5e2']);
 export const CONTINENT_GLYPHS = Object.freeze(['#', '%', '+', '8', '@', ':', 'x']);
 // The atlas sea is a pale steel blue at low alpha; four lit tones of it.
 const OCEAN = ['rgba(74, 124, 164, 0.2)', 'rgba(90, 146, 186, 0.27)', 'rgba(110, 172, 208, 0.34)', 'rgba(140, 200, 232, 0.42)'];

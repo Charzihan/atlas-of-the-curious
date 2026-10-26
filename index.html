@@ -51,26 +51,33 @@
 
   <main>
     <section class="atlas" id="text-atlas" data-view="flat" aria-labelledby="atlas-title">
+      <div class="atlas-overlay">
+        <p class="hero-kicker"><span class="for-flat">The Text Atlas · flat</span><span class="for-globe">The Text Atlas · globe</span></p>
+        <h2 id="atlas-title" class="atlas-title"><span class="for-flat">Every wonder, on one map of characters.</span><span class="for-globe">Every wonder, on one turning world.</span></h2>
+        <p class="atlas-sub for-flat">
+          Real coastlines and continent-by-continent color, drawn in text. Each dot sits on
+          its true coordinates. Text measured by
+          <a class="atlas-cred" href="https://github.com/chenglou/pretext">@chenglou/pretext</a> — never reflowed.
+        </p>
+        <p class="atlas-sub for-globe">
+          The same continents, colors and forty dots, wrapped onto a sphere of characters.
+          Descend from the planet to coastlines to named countries.
+        </p>
+        <p class="atlas-hint for-flat hint-pointer">drift across the water · click for a splash · hover a dot · click it to open</p>
+        <p class="atlas-hint for-flat hint-touch">tap the water for a splash · tap a dot to open it</p>
+        <p class="atlas-hint for-globe hint-pointer">drag to turn · ctrl + scroll to descend · hover a dot · click it to open</p>
+        <p class="atlas-hint for-globe hint-touch">swipe sideways to turn · pinch to descend · tap a dot to open it</p>
+      </div>
       <div class="map-viewport" role="group" aria-label="The atlas map, shown as a flat character map or as a turning character globe, with 40 marked places.">
-        <div class="atlas-overlay">
-          <p class="hero-kicker"><span class="for-flat">The Text Atlas · flat</span><span class="for-globe">The Text Atlas · globe</span></p>
-          <h2 id="atlas-title" class="atlas-title"><span class="for-flat">Every wonder, on one map of characters.</span><span class="for-globe">Every wonder, on one turning world.</span></h2>
-          <p class="atlas-sub for-flat">
-            Real coastlines and continent-by-continent color, drawn in text. Each dot sits on
-            its true coordinates. Text measured by
-            <a class="atlas-cred" href="https://github.com/chenglou/pretext">@chenglou/pretext</a> — never reflowed.
-          </p>
-          <p class="atlas-sub for-globe">
-            The same continents, colors and forty dots, wrapped onto a sphere of characters.
-            Descend from the planet to coastlines to named countries.
-          </p>
-          <p class="atlas-hint for-flat">drift across the water · tap for a splash · hover a dot · tap a dot to open it</p>
-          <p class="atlas-hint for-globe">drag to turn · scroll or pinch to descend · hover a dot · tap a dot to open it</p>
-        </div>
+        <div class="view-tools">
+        <button class="motion-btn" id="motion-toggle" type="button" aria-pressed="false" title="Pause the moving sea, clouds and rotation"><span class="motion-glyph" aria-hidden="true">❚❚</span><span class="motion-label">Pause motion</span></button>
         <div class="view-switch" role="group" aria-label="Map projection">
           <button class="view-btn" type="button" data-view-target="flat" aria-pressed="true" title="Flat map"><span class="view-glyph" aria-hidden="true">▭</span><span class="view-label">Flat</span></button>
           <button class="view-btn" type="button" data-view-target="globe" aria-pressed="false" title="Globe"><span class="view-glyph" aria-hidden="true">◍</span><span class="view-label">Globe</span></button>
         </div>
+        </div>
+        <p class="atlas-filter" id="atlas-filter" hidden><span class="atlas-filter-text" id="atlas-filter-text" role="status"></span><button class="atlas-filter-clear" id="atlas-filter-clear" type="button">Clear</button></p>
+        <p class="gesture-hint" id="gesture-hint" role="status" hidden></p>
         <!-- map stage injected here by js/map.js -->
         <!-- The globe (earthxt/app.js) is loaded by js/views.js the first time
              this view opens; until then it is only this markup. -->
@@ -112,8 +119,8 @@
       <p class="visually-hidden" id="live-status" role="status" aria-live="polite"></p>
       <div class="atlas-foot">
         <div class="wrap atlas-foot-inner">
-          <div class="atlas-legend" id="atlas-legend"></div>
-          <span class="atlas-scale for-flat">equirectangular · hover a marker to read it</span>
+          <div class="atlas-legend" id="atlas-legend" aria-label="Categories, with how many places each holds"></div>
+          <span class="atlas-scale for-flat">equirectangular · every dot on its true coordinates</span>
           <span class="atlas-scale for-globe">perspective globe · <span id="view-level">00 — PLANET VIEW</span> · <span id="coordinates">18.00° N &nbsp; 24.00° W</span></span>
         </div>
       </div>
@@ -129,7 +136,7 @@
         </p>
 
         <div class="daily" id="daily-pick" tabindex="-1">
-          <span class="daily-label">Today’s discovery</span>
+          <span class="daily-label">Today’s discovery · from all 40</span>
           <button class="daily-card" id="daily-card" type="button"></button>
           <div class="daily-actions">
             <button class="surprise-btn" id="surprise-btn" type="button" title="Open a random place from the current filter">✦ Surprise me</button>

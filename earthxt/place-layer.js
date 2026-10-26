@@ -62,7 +62,10 @@ export class PlaceLayer {
       button.addEventListener('blur', () => this.scheduleHide());
       button.addEventListener('click', () => {
         if (standalone) inspect();
-        else window.location.assign(placeHref(place.id));
+        else if (placeHref(place.id) === window.location.hash) {
+          // The atlas keeps a closed note's hash; re-run its route to reopen.
+          window.dispatchEvent(new HashChangeEvent('hashchange'));
+        } else window.location.assign(placeHref(place.id));
       });
       layer.append(button);
       this.nodes.set(place.id, button);

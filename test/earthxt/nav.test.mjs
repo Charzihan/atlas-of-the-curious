@@ -18,7 +18,7 @@ const palette = {
   'gold-soft': 'rgba(232, 180, 90, 0.16)', line: 'rgba(154, 164, 200, 0.18)',
   'continent-africa': '#6f9e5f', 'continent-asia': '#d0a05a', 'continent-europe': '#a88ac4',
   'continent-north-america': '#8fc96a', 'continent-south-america': '#e07a5a', 'continent-oceania': '#4fb0c9',
-  'continent-antarctica': '#ecf2f6',
+  'continent-antarctica': '#c6d5e2',
 };
 const declarations = css => [...css.matchAll(/(--[\w-]+)\s*:\s*([^;}]+)/g)];
 
