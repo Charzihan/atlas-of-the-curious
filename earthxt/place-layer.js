@@ -273,8 +273,8 @@ export class PlaceLayer {
     return this.drawMetrics;
   }
   categoryLabel(id) { return this.categoryLabels.get(id) || ''; }
-  /** At planet scale, rings closer than a ring's width merge into one count
-   * that zooms toward its places (`onCluster`); returns the merged ids. */
+  /** Rings that would overlap merge into one count that zooms toward its
+   * places (`onCluster`); returns the merged ids. */
   clusterMarkers(ctx, level) {
     const merged = new Set(), live = new Set();
     const retire = () => {
@@ -290,11 +290,14 @@ export class PlaceLayer {
         this.clusterByKey.delete(key);
       }
     };
-    if (!this.onCluster || level.index !== 0) { retire(); return merged; }
+    // Merge wherever rings would overlap: wide apart at planet scale, ring
+    // against ring closer in; the closest detail is where they separate.
+    const reach = level.index === 0 ? 15 : level.labels ? 0 : 14;
+    if (!this.onCluster || !reach) { retire(); return merged; }
     const groups = [];
     for (const marker of this.markers) {
       if (!marker.visible || this.dimmed.has(marker.id)) continue;
-      const near = groups.find(group => Math.hypot(group.x - marker.x, group.y - marker.y) < 15);
+      const near = groups.find(group => Math.hypot(group.x - marker.x, group.y - marker.y) < reach);
       if (near) {
         near.members.push(marker);
         near.x = near.members.reduce((sum, m) => sum + m.x, 0) / near.members.length;

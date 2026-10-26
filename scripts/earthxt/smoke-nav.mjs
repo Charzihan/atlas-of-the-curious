@@ -82,6 +82,12 @@ try {
     await page.waitForFunction(() => document.getElementById('place-dialog').open);
     await page.keyboard.press('Escape');
     await page.waitForFunction(() => !document.getElementById('place-dialog').open);
+    // So does the same place's grid link, under the same retained hash.
+    await page.locator('.card[data-place-id="salar-de-uyuni"] .card-more').click();
+    await page.waitForFunction(() => document.getElementById('place-dialog').open);
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => !document.getElementById('place-dialog').open);
+    await page.locator('#text-atlas').scrollIntoViewIfNeeded();
     // A plain wheel turn over an unfocused globe scrolls the page and hints.
     if (viewport.width > 640) {
       await page.locator('#search-input').focus();

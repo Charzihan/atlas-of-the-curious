@@ -354,7 +354,7 @@ async function main({ embedded = false } = {}) {
         setRotation(false);
         state.latitude = members.reduce((sum, place) => sum + place.latitude, 0) / members.length;
         state.longitude = members.reduce((sum, place) => sum + place.longitude, 0) / members.length;
-        zoomTo(LEVELS[1].targetDistance);
+        zoomTo(LEVELS[Math.min(level.index + 1, LEVELS.length - 1)].targetDistance);
         $('globe').focus({ preventScroll: true });
         setText('live-status', `Zoomed to ${members.map(place => place.name).join(', ')}.`);
         dirty = true;

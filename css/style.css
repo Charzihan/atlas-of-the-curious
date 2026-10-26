@@ -639,6 +639,9 @@ dialog::backdrop {
 }
 
 .ghost-btn:hover, .ghost-btn:focus-visible { border-color: var(--gold); color: var(--gold); outline: none; }
+/* Unavailable until it can act (e.g. "Show route" before a destination). */
+.ghost-btn:disabled,
+.ghost-btn:disabled:hover { opacity: 0.45; cursor: default; border-color: var(--line); color: var(--ink-dim); }
 
 /* ---------- Footer ---------- */
 .site-footer {
@@ -1334,7 +1337,7 @@ dialog::backdrop {
   align-items: center;
   gap: 6px;
   font-family: Verdana, Geneva, sans-serif;
-  font-size: 0.68rem;
+  font-size: 0.8rem;
   color: var(--ink-dim);
 }
 
@@ -1347,7 +1350,7 @@ dialog::backdrop {
 
 .atlas-scale {
   font-family: Verdana, Geneva, sans-serif;
-  font-size: 0.75rem;
+  font-size: 0.8rem;
   color: var(--ink-dim);
 }
 

@@ -1168,7 +1168,7 @@
     var list = visiblePlaces();
     if (!list.length) return;
     var p = list[(Math.random() * list.length) | 0];
-    location.hash = hashForPlace(p.id);
+    openPlace(p.id);
   }
 
   // --- Daily pick --------------------------------------------------------
@@ -1197,7 +1197,7 @@
     card.appendChild(name);
     card.appendChild(tag);
     card.appendChild(go);
-    card.addEventListener("click", function () { location.hash = hashForPlace(p.id); });
+    card.addEventListener("click", function () { openPlace(p.id); });
   }
 
   // --- Dialog -------------------------------------------------------------
@@ -1280,6 +1280,22 @@
       dialog.setAttribute("open", ""); // very old browser fallback
     }
   }
+
+  // One way to open a field note. A closed note keeps its hash, so asking for
+  // the same place again would change nothing: route it directly instead.
+  function openPlace(id) {
+    var target = hashForPlace(id);
+    if (location.hash === target) route();
+    else location.hash = target;
+  }
+  // The same for every plain link to a place (grid cards, both previews).
+  document.addEventListener("click", function (e) {
+    var a = e.target && e.target.closest && e.target.closest('a[href^="#/place/"]');
+    if (!a || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    if (a.getAttribute("href") !== location.hash) return;
+    e.preventDefault();
+    route();
+  });
 
   // --- Hash routing: #/place/<id> and #/read/<id> -------------------------
   // The two are exclusive: opening the field guide closes the dialog, and

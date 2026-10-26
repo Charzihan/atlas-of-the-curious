@@ -250,7 +250,7 @@
 /* Wider screens: a little more type and air between the control groups
    (detail · appearance · movement · zoom). */
 @media (min-width: 641px) {
-  .globe-controls .map-btn { font-size: 0.76rem; }
+  .map-controls .map-btn, .view-btn, .motion-btn { font-size: 0.82rem; }
   .globe-controls .turn-pad .map-btn { padding: 4px 10px; }
   .globe-controls .zoom-group { gap: 6px; }
 }
