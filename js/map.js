@@ -855,7 +855,10 @@ import {
        glyph; if the inset ever grows a background, it belongs in this list. */
     // The intro panel is a band above the map (outside the viewport); it only
     // masks water if a layout ever floats it over the map again.
-    const floating = [...viewport.children, ...section.querySelectorAll(".atlas-overlay")];
+    // On the full-screen atlas the header's brand and search and the corner
+    // legend float over the map too (css/globe.css, body.atlas-full).
+    const floating = [...viewport.children, ...section.querySelectorAll(".atlas-overlay, .atlas-foot"),
+      ...document.querySelectorAll(".site-header .brand, .site-header .search")];
     for (const el of floating) {
       if (el === stage || el.hidden || typeof el.getBoundingClientRect !== "function") continue;
       const r = el.getBoundingClientRect();
@@ -1635,7 +1638,7 @@ import {
     if (!zoomEl) return boxes;
     const origin = zoomEl.getBoundingClientRect();
     const zoom = (view && view.zoom) || 1;
-    for (const el of document.querySelectorAll('.atlas-overlay, .map-controls')) {
+    for (const el of document.querySelectorAll('.atlas-overlay, .map-controls, .atlas-foot, .site-header .brand, .site-header .search')) {
       const rect = el.getBoundingClientRect();
       if (!rect.width || !rect.height) continue;
       boxes.push({
@@ -1654,7 +1657,14 @@ import {
       for (let r = x.grow - ring; r <= x.grow + ring && index < 0; r++) {
         for (let c = x.gcol - ring; c <= x.gcol + ring; c++) {
           const code = (MAP.colors[r] || '').charCodeAt(c);
-          if (code >= 65) { index = code - 65; glyph = MAP.glyphs[r][c]; break; }
+          // Relief tints and rivers share their continent's ink here: the
+          // silhouette is the country, not its mountains.
+          const base = code >= 65 && MAPS.baseColor ? MAPS.baseColor[code - 65] : code - 65;
+          if (code >= 65 && base >= 0) {
+            index = base;
+            glyph = MAPS.continentGlyphs ? MAPS.continentGlyphs[base] : MAP.glyphs[r][c];
+            break;
+          }
         }
       }
     }
@@ -2693,13 +2703,15 @@ import {
     // Which grid rows are that ice: the rows where the land is drawn in the
     // palest palette entry. Read off the same per-cell colour the base canvas
     // paints, so it follows the map rather than a hard-coded latitude.
-    const PALE_COLOR = PALETTE ? PALETTE.length - 1 : 6;
+    // Ice at any height: relief tints keep their continent in MAPS.baseColor.
+    const PALE_COLOR = MAPS && MAPS.continents && MAPS.continents.Antarctica !== undefined ? MAPS.continents.Antarctica : 6;
+    const continentOf = (index) => (MAPS && MAPS.baseColor ? MAPS.baseColor[index] : index);
     const paleRow = new Uint8Array(ROWS);
     for (let r = 0; r < ROWS; r++) {
       let pale = 0;
       for (let c = 0; c < COLS; c++) {
         const i = r * COLS + c;
-        if (kind[i] && cellColor[i] === PALE_COLOR) pale++;
+        if (kind[i] && continentOf(cellColor[i]) === PALE_COLOR) pale++;
       }
       paleRow[r] = pale > COLS * 0.2 ? 1 : 0;
     }

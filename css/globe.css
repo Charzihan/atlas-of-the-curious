@@ -505,35 +505,35 @@
   .loading-glyph { animation: none; }
 }
 
-/* ---------- Full-screen globe (wide screens) ---------- */
-/* On wide screens the globe fills the window: the site header floats over
-   it (brand top left, search top right), the intro band steps aside, and the
-   legend and readout sit in the globe's lower-left corner instead of a bar
-   below it. js/views.js sets body.globe-full while the globe view is up, and
+/* ---------- Full-screen atlas (wide screens) ---------- */
+/* On wide screens either view, flat map or globe, fills the window: the site
+   header floats over it (brand top left, search top right), the intro band
+   steps aside, and the legend and readout sit in the lower-left corner
+   instead of a bar below the map. js/views.js sets body.atlas-full, and
    body.header-over-atlas while the header floats over the atlas, so the
    header keeps its solid ground over the rest of the page. Phones and tablets
    keep the stacked layout, where page scrolling needs the room. */
 @media (min-width: 1100px) {
-  body.globe-full .site-header {
+  body.atlas-full .site-header {
     position: fixed; left: 0; right: 0; top: 0;
     transition: background-color 0.2s, border-color 0.2s;
   }
-  body.globe-full.header-over-atlas .site-header {
+  body.atlas-full.header-over-atlas .site-header {
     background: transparent;
     border-bottom-color: transparent;
     backdrop-filter: none;
   }
-  body.globe-full.header-over-atlas .site-header .brand { text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8); }
-  body.globe-full.header-over-atlas .search input { background: rgba(9, 13, 28, 0.86); }
-  body.globe-full .header-inner { max-width: none; padding-left: 26px; padding-right: 26px; }
-  body.globe-full #text-atlas .atlas-overlay { display: none; }
-  body.globe-full .atlas-frame { height: max(560px, 100vh); height: max(560px, 100dvh); }
+  body.atlas-full.header-over-atlas .site-header .brand { text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8); }
+  body.atlas-full.header-over-atlas .search input { background: rgba(9, 13, 28, 0.86); }
+  body.atlas-full .header-inner { max-width: none; padding-left: 26px; padding-right: 26px; }
+  body.atlas-full #text-atlas .atlas-overlay { display: none; }
+  body.atlas-full .atlas-frame { height: max(560px, 100vh); height: max(560px, 100dvh); }
   /* Below the floating header, so the switch and the filter never meet it. */
-  body.globe-full .view-tools { top: 84px; }
-  body.globe-full .atlas-filter { top: 84px; }
+  body.atlas-full .view-tools { top: 84px; }
+  body.atlas-full .atlas-filter { top: 84px; }
   /* The legend and readout, as a key in the lower-left corner. */
-  body.globe-full #text-atlas { position: relative; }
-  body.globe-full .atlas-foot {
+  body.atlas-full #text-atlas { position: relative; }
+  body.atlas-full .atlas-foot {
     position: absolute; left: 26px; bottom: 14px; z-index: 9;
     padding: 12px 16px;
     max-width: 280px;
@@ -542,7 +542,7 @@
     border-radius: 14px;
     backdrop-filter: blur(6px);
   }
-  body.globe-full .atlas-foot-inner { max-width: none; padding: 0; flex-direction: column; align-items: flex-start; gap: 10px; }
-  body.globe-full .atlas-legend { flex-direction: column; gap: 6px; }
-  body.globe-full .atlas-scale { font-size: 0.72rem; line-height: 1.5; }
+  body.atlas-full .atlas-foot-inner { max-width: none; padding: 0; flex-direction: column; align-items: flex-start; gap: 10px; }
+  body.atlas-full .atlas-legend { flex-direction: column; gap: 6px; }
+  body.atlas-full .atlas-scale { font-size: 0.72rem; line-height: 1.5; }
 }

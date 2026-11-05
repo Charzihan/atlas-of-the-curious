@@ -35,8 +35,6 @@ if (section && globeView) {
     if (next === view) return;
     view = next;
     section.dataset.view = next;
-    // Wide screens give the globe the whole window (css/globe.css).
-    document.body.classList.toggle("globe-full", next === "globe");
     globeView.hidden = next !== "globe";
     for (const panel of panels) panel.hidden = panel.dataset.for !== next;
     for (const button of buttons) {
@@ -48,7 +46,9 @@ if (section && globeView) {
     else globe?.then((controller) => controller?.setActive(false));
   }
 
-  // While the atlas lies under the header, the full-screen globe's header
+  // Wide screens give either view the whole window (css/globe.css).
+  document.body.classList.add("atlas-full");
+  // While the atlas lies under the header, the full-screen atlas's header
   // floats clear over it; further down the page it keeps its solid ground.
   if (typeof IntersectionObserver === "function") {
     new IntersectionObserver(([entry]) => {
