@@ -13,7 +13,7 @@
      after a deploy cannot pin the previous release's files in the new cache.
    - CORE paths are relative to the worker's scope, so the site works from a
      subpath such as https://<user>.github.io/atlas-of-the-curious/. */
-const CACHE = "atlas-of-the-curious-v17";
+const CACHE = "atlas-of-the-curious-v18";
 const CORE = [
   "/",
   "/index.html",
