@@ -18,7 +18,11 @@ const LAND_ALPHA = [0.5, 0.66, 0.82, 0.96];
 const UPLAND = 800, HIGHLAND = 2000, MOUNTAIN = 1000, SHELF_DEPTH = 200;
 const BAND_LIGHTEN = [0, 0.22, 0.45];
 export const MOUNTAIN_GLYPH = '^';
-const BORDER = 'rgba(244, 232, 204, 0.82)', GRID = 'rgba(232, 180, 90, 0.42)';
+// Rivers: a line glyph per cell, following the river's direction there.
+export const RIVER_GLYPHS = Object.freeze(['-', '|', '/', '\\']);
+const RIVER = 'rgba(126, 200, 240, 0.85)';
+// Borders are one cell wide and quieter than the land they divide.
+const BORDER = 'rgba(244, 232, 204, 0.62)', GRID = 'rgba(232, 180, 90, 0.42)';
 // Country names: warm ink on a bed of the stage's ground (--bg-soft).
 const LABEL_INK = '#e4e4ca', LABEL_GROUND = 'rgba(16, 23, 51, 0.86)';
 
@@ -46,7 +50,7 @@ export function globePalette(continents = CONTINENT_COLORS) {
     for (const amount of BAND_LIGHTEN) palette.push(...LAND_ALPHA.map(alpha => tint(color, amount, alpha)));
     palette.push(lighten(color, 0.28));
   }
-  palette.push(BORDER, GRID);
+  palette.push(RIVER, BORDER, GRID);
   return palette;
 }
 const LAND_BASE = OCEAN.length + SHELF.length, PER_CONTINENT = LAND_ALPHA.length * BAND_LIGHTEN.length + 1;
@@ -118,6 +122,7 @@ export class TextRenderer {
   constructor(canvas, labelLayer, fonts, { continents = CONTINENT_COLORS } = {}) {
     this.fonts = fonts;
     this.palette = globePalette(continents);
+    this.riverColor = this.palette.length - 3;
     this.borderColor = this.palette.length - 2;
     this.gridColor = this.palette.length - 1;
     this.preparedLabels = new Map();
@@ -243,7 +248,7 @@ export class TextRenderer {
     this.grid = { cols, rows, cellWidth, cellHeight, x: xOffset - cellWidth / 2, y: yOffset - cellHeight / 2 };
     const { east, north, front } = cameraBasis(camera.latitude, camera.longitude);
     const distance = camera.distance, d2 = distance * distance;
-    const sample = { country: 0, coast: false, border: false, height: 0, depth: 0, rugged: false };
+    const sample = { country: 0, coast: false, border: false, height: 0, depth: 0, rugged: false, river: 0, riverDirection: 0 };
     const continentByCountry = geography.continentByCountry || new Uint8Array(256).fill(1);
     let visible = 0;
     for (let row = 0; row < rows; row++) {
@@ -289,6 +294,12 @@ export class TextRenderer {
         let variant = sample.country ? (mountain ? 5 : 1) : 0;
         if (sample.coast && level.index > 0) { color = landBase + COAST_TONE; variant = 2; }
         if (sample.border && level.borders) { color = this.borderColor; variant = 3; }
+        // A river runs over land, coast and border alike: many borders are rivers.
+        if (sample.country && sample.river && sample.river <= level.riverRank) {
+          color = this.riverColor; variant = 6;
+          // River cells carry their direction where land cells carry ink tone.
+          this.tones[index] = sample.riverDirection;
+        }
         if (options.grid && !sample.country && (Math.abs(latitude % 30) < 0.4 || Math.abs(longitude % 30) < 0.4)) { color = this.gridColor; variant = 4; }
         this.cells[index] = color + 1;
         this.variants[index] = variant;
@@ -323,9 +334,15 @@ export class TextRenderer {
         {
           const index = this.order[at], row = Math.floor(index / cols), col = index - row * cols;
           const variant = this.variants[index];
+          // Mono rivers are line glyphs along their course; Serif rivers keep
+          // to the measured palette, in its densest ink, in river blue.
+          if (variant === 6 && !ink) {
+            ctx.fillText(RIVER_GLYPHS[this.tones[index]], xOffset + col * cellWidth, yOffset + row * cellHeight);
+            continue;
+          }
           if (ink) {
             const ripple = (row * 13 + col * 7 + oceanPhase) % 17 === 0;
-            const glyph = this.countryIds[index] ? ink.land[this.tones[index]]
+            const glyph = this.countryIds[index] ? ink.land[variant === 6 ? 4 : this.tones[index]]
               : ink.ocean[ripple && ink.ocean.length > 1 ? 1 + oceanPhase % (ink.ocean.length - 1) : 0];
             // Match the palette probe: middle baseline, centred by measured
             // advance. Cell geometry and every overlay remain unchanged.

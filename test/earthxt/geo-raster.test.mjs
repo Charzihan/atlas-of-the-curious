@@ -98,7 +98,7 @@ test('overlapping polygons retain per-country point parity and per-polygon scanl
 // assets"); a builder whose sources are absent is skipped, not failed.
 const BUILDERS = [
   { script: 'scripts/build-map.mjs', sources: ['data/world-110m-countries.geojson'], outputs: ['js/landmap.js'] },
-  { script: 'scripts/earthxt/build-data.mjs', sources: ['data/ne_50m_admin_0_countries.geojson', 'data/terrarium/5-31-31.png', 'data/ice-surface.bin'],
+  { script: 'scripts/earthxt/build-data.mjs', sources: ['data/ne_50m_admin_0_countries.geojson', 'data/ne_50m_rivers_lake_centerlines.geojson', 'data/terrarium/5-31-31.png', 'data/ice-surface.bin'],
     outputs: ['earthxt/data/world.bin', 'earthxt/data/world.json'] },
 ];
 for (const builder of BUILDERS) {

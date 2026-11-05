@@ -1,12 +1,13 @@
-/** Build the globe's local geography: country ownership and relief rasters.
+/** Build the globe's local geography: country ownership, relief and river rasters.
  * Countries: public-domain Natural Earth 1:50m polygons through ../geo-raster.mjs.
+ * Rivers: Natural Earth 1:50m river and lake centrelines (see ./rivers.mjs).
  * Row-centre scanline ownership retains feature-order IDs and polygon holes.
  * Relief: Terrain Tiles (land heights, sea depths) with Copernicus GLO-90 for
  * the Greenland and Antarctic ice surface (see ./terrain.mjs, ./fetch-sources.mjs).
  * Fetch the sources first with `pnpm fetch:earthxt-sources`.
  * Set GEO_RASTER_OUTPUT_DIR to write earthxt/data/ beneath another root.
  * Only run when regenerating geography; the generated files are checked in.
- * Usage: node scripts/earthxt/build-data.mjs [countries.geojson] [terrain-dir] [ice-surface.bin]
+ * Usage: node scripts/earthxt/build-data.mjs [countries.geojson] [terrain-dir] [ice-surface.bin] [rivers.geojson]
  */
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { gzipSync } from 'node:zlib';
@@ -15,6 +16,7 @@ import { join } from 'node:path';
 import { parseCountries, scanlineOwnership } from '../geo-raster.mjs';
 import { LEVELS } from '../../earthxt/lod.js';
 import { RELIEF } from '../../earthxt/geography.js';
+import { rasterizeRivers } from './rivers.mjs';
 import { decodePNG, TerrainGrid, decodeIceGrid, ICE_GRID, TERRAIN_ZOOM } from './terrain.mjs';
 
 const root = new URL('../../', import.meta.url);
@@ -22,6 +24,8 @@ const data = name => fileURLToPath(new URL(`data/${name}`, root));
 const source = process.argv[2] ?? data('ne_50m_admin_0_countries.geojson');
 const terrainDir = process.argv[3] ?? data('terrarium');
 const iceSource = process.argv[4] ?? data('ice-surface.bin');
+const riverSource = process.argv[5] ?? data('ne_50m_rivers_lake_centerlines.geojson');
+const riverFeatures = JSON.parse(await readFile(riverSource, 'utf8')).features;
 
 const geo = JSON.parse(await readFile(source, 'utf8'));
 if (geo.features.length > 255) throw new Error('Ownership encoding supports at most 255 countries.');
@@ -89,16 +93,22 @@ let offset = 0;
 for (const entry of ownership) {
   const { level, width, height: rows, raster } = entry;
   const relief = reliefRaster(entry);
-  chunks.push(raster, relief);
-  levels.push({ id: level.id, width, height: rows, offset, bytes: raster.byteLength, reliefOffset: offset + raster.byteLength });
-  offset += raster.byteLength + relief.byteLength;
+  // Rivers are drawn on land only; at sea the coast already shows the water.
+  const rivers = rasterizeRivers(riverFeatures, width, rows);
+  for (let cell = 0; cell < rivers.length; cell++) if (!raster[cell]) rivers[cell] = 0;
+  chunks.push(raster, relief, rivers);
+  levels.push({ id: level.id, width, height: rows, offset, bytes: raster.byteLength,
+    reliefOffset: offset + raster.byteLength, riverOffset: offset + 2 * raster.byteLength });
+  offset += raster.byteLength + relief.byteLength + rivers.byteLength;
 }
 const binary = Buffer.concat(chunks);
-const metadata = JSON.stringify({ version: 2, source: 'Natural Earth 1:50m Admin 0 countries', license: 'Public domain',
+const metadata = JSON.stringify({ version: 3, source: 'Natural Earth 1:50m Admin 0 countries', license: 'Public domain',
   sourceURL: 'https://www.naturalearthdata.com/downloads/50m-cultural-vectors/50m-admin-0-countries/',
   relief: { landStep: RELIEF.landStep, seaStep: RELIEF.seaStep, ruggedSpread: RELIEF.ruggedSpread,
     source: `Terrain Tiles (zoom ${TERRAIN_ZOOM}); Copernicus GLO-90 DEM over the Greenland and Antarctic ice sheets`,
     sourceURL: 'https://registry.opendata.aws/terrain-tiles/' },
+  rivers: { source: 'Natural Earth 1:50m rivers and lake centerlines', license: 'Public domain',
+    sourceURL: 'https://www.naturalearthdata.com/downloads/50m-physical-vectors/50m-rivers-lake-centerlines/' },
   bytes: binary.byteLength, levels, countries });
 if (gzipSync(binary).byteLength + gzipSync(metadata).byteLength > 10 * 1024 * 1024) throw new Error('Geographic payload exceeds the 10 MB compressed budget.');
 const outputRoot = process.env.GEO_RASTER_OUTPUT_DIR ?? fileURLToPath(root);

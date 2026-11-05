@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { TextRenderer, CONTINENT_GLYPHS, MOUNTAIN_GLYPH, countryRunSlots, placeSilhouetteName, heightBand } from '../../earthxt/renderer.js';
+import { TextRenderer, CONTINENT_GLYPHS, MOUNTAIN_GLYPH, RIVER_GLYPHS, countryRunSlots, placeSilhouetteName, heightBand } from '../../earthxt/renderer.js';
 import { prepareFlowText, flowPreparationCount, flowIntoSlots, createMapArtEngine, boxesOverlap } from '../../js/map-art.js';
 import { measureNaturalWidth } from '../../vendor/pretext/layout.js';
 import { Geography } from '../../earthxt/geography.js';
@@ -48,7 +48,7 @@ test('globe silhouette matches perspective radius; only text is drawn', () => {
   assert.equal(metrics.visibleGlyphs, marks.length);
   for (const mark of marks) {
     assert.ok(Math.hypot(mark.x - 450, mark.y - 350) <= radius + 1e-8);
-    assert.ok([...CONTINENT_GLYPHS, MOUNTAIN_GLYPH, '·', '~'].includes(mark.text));
+    assert.ok([...CONTINENT_GLYPHS, MOUNTAIN_GLYPH, ...RIVER_GLYPHS, '·', '~'].includes(mark.text));
   }
   assert.ok(marks.some(mark => mark.text === '#'));
   assert.ok(marks.some(mark => mark.text === '·'));
@@ -70,6 +70,18 @@ test('relief: mountains, height tints and shelf seas', () => {
   assert.ok(marks.some(mark => shelf.has(mark.color)), 'shelf sea');
   assert.ok(marks.some(mark => mark.color.startsWith('rgba(74, 124, 164,') || mark.color.startsWith('rgba(90, 146, 186,') || mark.color.startsWith('rgba(110, 172, 208,') || mark.color.startsWith('rgba(140, 200, 232,')), 'deep sea');
 });
+test('rivers draw as line glyphs in river blue, more of them as detail rises', () => {
+  const { renderer, marks } = recorder();
+  renderer.resize(900, 700);
+  const counts = LEVELS.map(level => {
+    renderer.draw({ latitude: 31, longitude: 112, distance: level.targetDistance }, level, data);
+    const rivers = marks.filter(mark => mark.color === 'rgba(126, 200, 240, 0.85)');
+    for (const mark of rivers) assert.ok(RIVER_GLYPHS.includes(mark.text));
+    return rivers.length;
+  });
+  assert.ok(counts[0] > 0, 'the Yangtze at planet scale');
+  assert.ok(counts[2] > counts[0]);
+});
 test('rotation changes geography while keeping the spherical silhouette stable', () => {
   const { renderer, marks } = recorder();
   renderer.resize(900, 700);
@@ -89,7 +101,7 @@ test('finer LODs use richer glyphs, show borders, and remain under the viewport 
     // Land wears the atlas's continent glyphs and colours at every level.
     assert.ok(marks.some(mark => mark.text === '#' && mark.color.startsWith('rgba(111, 158, 95,')), 'African savanna green');
     assert.ok(marks.filter(mark => mark.color.startsWith('rgba(111, 158, 95,')).every(mark => mark.text === '#'), 'one glyph per continent');
-    if (level.borders) assert.ok(marks.some(mark => mark.text === '·' && mark.color === 'rgba(244, 232, 204, 0.82)'));
+    if (level.borders) assert.ok(marks.some(mark => mark.text === '·' && mark.color === 'rgba(244, 232, 204, 0.62)'));
     assert.ok(metrics.totalGlyphs <= 24000);
     assert.ok(Number.isFinite(metrics.projectionMs) && Number.isFinite(metrics.renderMs));
   }
