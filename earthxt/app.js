@@ -452,12 +452,6 @@ async function main({ embedded = false } = {}) {
     $('data-error').hidden = false;
   }
   renderer.prepareLabels(geography ? geography.labels() : syntheticGeography.labels());
-  // Each country's literature (earthxt/data/literature.json); optional.
-  if (geography) {
-    fetch(new URL('./data/literature.json', import.meta.url)).then(response => response.ok ? response.json() : null)
-      .then(literature => { renderer.setLiterature(literature, geography.countries); dirty = true; })
-      .catch(() => {});
-  }
   const stageSize = $('globe-stage').getBoundingClientRect();
   resize(stageSize.width, stageSize.height);
   $('loading').hidden = true;

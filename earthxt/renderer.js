@@ -135,11 +135,6 @@ export class TextRenderer {
     this.metrics = { visibleGlyphs: 0, totalGlyphs: 0, projectionMs: 0, renderMs: 0, labelMs: 0, placeLabelMs: 0, placeRenderMs: 0, visibleMarkers: 0, labelledPlaces: 0, visibleLabels: 0, silhouetteLabels: 0, fallbackLabels: 0 };
     this.cells = new Uint8Array(MAX_CELLS);
     this.order = new Uint16Array(MAX_CELLS);
-    // Literature fill: per cell, the character it carries (null for none,
-    // '' for the second half of a wide character) and whether it is wide.
-    this.letters = new Array(MAX_CELLS).fill(null);
-    this.wideLetters = new Uint8Array(MAX_CELLS);
-    this.literature = new Map();
     this.variants = new Uint8Array(MAX_CELLS);
     this.tones = new Uint8Array(MAX_CELLS);
     this.continents = new Uint8Array(MAX_CELLS);
@@ -150,23 +145,6 @@ export class TextRenderer {
     this.labelPlacements = [];
     this.exclusions = [];
     this.nativeSpacing = 'letterSpacing' in this.context;
-  }
-  /** Each country's text: its language's passages stitched into one stream of
-   * graphemes, each flagged wide (two cells) for CJK and fullwidth forms. */
-  setLiterature(literature, countries) {
-    this.literature = new Map();
-    if (!literature) return;
-    const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
-    const wide = /[\u1100-\u115F\u2E80-\u303E\u3041-\u33FF\u3400-\u4DBF\u4E00-\u9FFF\uA960-\uA97F\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6]/;
-    const streams = new Map();
-    for (const [code, language] of Object.entries(literature.languages)) {
-      const text = language.passages.map(passage => passage.text).join(language.separator) + language.separator;
-      streams.set(code, [...segmenter.segment(text)].map(({ segment }) => ({ text: segment, wide: wide.test(segment) })));
-    }
-    for (const country of countries) {
-      const stream = streams.get(literature.countries[country.code]);
-      if (stream) this.literature.set(country.id, stream);
-    }
   }
   // Called at load/font changes, never by draw(): all names are ready before
   // they reach the frame loop. Keep handles by font, spacing, and uppercase text.
@@ -328,40 +306,6 @@ export class TextRenderer {
         visible++;
       }
     }
-    // Coastlines and Countries detail write each country in its literature:
-    // its language's passages flow row by row through its plain land cells,
-    // like a paragraph poured into the country's shape. Mountains, rivers and
-    // borders keep their own marks; Serif keeps its ink.
-    const total = rows * cols;
-    this.letters.fill(null, 0, total);
-    if (!ink && level.index > 0 && options.literature !== false && this.literature.size) {
-      const cursors = new Map();
-      const plain = index => (this.variants[index] === 1 || this.variants[index] === 2) && this.literature.has(this.countryIds[index]);
-      for (let row = 0; row < rows; row++) {
-        for (let col = 0; col < cols;) {
-          const index = row * cols + col;
-          if (!plain(index)) { col++; continue; }
-          const id = this.countryIds[index], stream = this.literature.get(id);
-          let end = col;
-          while (end < cols && plain(row * cols + end) && this.countryIds[row * cols + end] === id) end++;
-          let cursor = cursors.get(id) || 0;
-          for (let at = col; at < end;) {
-            const letter = stream[cursor % stream.length], cell = row * cols + at;
-            if (letter.wide) {
-              // A wide character needs two cells; at a run's end it waits for the next row.
-              if (at + 1 >= end) break;
-              this.letters[cell] = letter.text; this.wideLetters[cell] = 1;
-              this.letters[cell + 1] = ''; at += 2;
-            } else {
-              this.letters[cell] = letter.text; this.wideLetters[cell] = 0; at++;
-            }
-            cursor++;
-          }
-          cursors.set(id, cursor);
-          col = end;
-        }
-      }
-    }
     // Floating page controls over the stage are no place for a name.
     for (const zone of this.exclusions) {
       const c0 = Math.max(0, Math.floor((zone.x - this.grid.x) / cellWidth)), c1 = Math.min(cols - 1, Math.floor((zone.x + zone.width - this.grid.x) / cellWidth));
@@ -379,7 +323,7 @@ export class TextRenderer {
     const glyphs = [level.ocean, '', '', '·', '+', MOUNTAIN_GLYPH];
     // Batch by palette to avoid thousands of canvas state changes: a counting
     // sort groups the cells by colour in two passes, keeping row-major order.
-    const starts = new Uint32Array(this.palette.length + 2);
+    const total = rows * cols, starts = new Uint32Array(this.palette.length + 2);
     for (let index = 0; index < total; index++) starts[this.cells[index] + 1]++;
     for (let color = 1; color < starts.length; color++) starts[color] += starts[color - 1];
     const fill = starts.slice();
@@ -403,11 +347,6 @@ export class TextRenderer {
             // Match the palette probe: middle baseline, centred by measured
             // advance. Cell geometry and every overlay remain unchanged.
             ctx.fillText(glyph.glyph, xOffset + col * cellWidth - glyph.width / 2, yOffset + row * cellHeight);
-            continue;
-          }
-          const letter = this.letters[index];
-          if (letter !== null) {
-            if (letter) ctx.fillText(letter, xOffset + col * cellWidth + (this.wideLetters[index] ? cellWidth / 2 : 0), yOffset + row * cellHeight);
             continue;
           }
           // Land and coast take their continent's atlas texture glyph.
