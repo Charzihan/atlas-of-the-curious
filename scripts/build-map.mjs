@@ -2,6 +2,10 @@
    Sources (Natural Earth, public domain):
      - data/world-110m-countries.geojson  (country polygons + CONTINENT field)
    Shared geography: geo-raster.mjs (even-odd, thresholded last-hit sampling).
+   Relief and rivers come from the globe's own rasters (earthxt/data/world.bin,
+   built by scripts/earthxt/build-data.mjs), so both views draw the same Earth:
+   high ground is tinted paler, rugged high ground takes "^", and the largest
+   rivers run as "-" "|" "/" "\" in river blue.
    Set GEO_RASTER_OUTPUT_DIR to write beneath another root directory.
    Output: js/landmap.js → window.LANDMAPS = { palette, continents, desktop: {...}, mobile: {...} }
    Each grid cell encodes a texture glyph (glyphs row) and a palette index
@@ -14,6 +18,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseCountries, classifyCell } from "./geo-raster.mjs";
 import { ringBox, clusterPolygons, encodePolygons } from "./map-outline-geometry.mjs";
+import { Geography } from "../earthxt/geography.js";
+import { LEVELS } from "../earthxt/lod.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const geo = JSON.parse(readFileSync(join(root, "data", "world-110m-countries.geojson"), "utf8"));
@@ -54,6 +60,46 @@ for (const [name, rgb] of Object.entries(CONTINENT_COLORS)) {
 const FALLBACK_IDX = continentIdx.get("Asia"); // unclassified land → largest continent
 const PALETTE_STEPS = 1; // uniform color per continent: 1 palette entry each
 
+// Relief, as on the globe (earthxt/renderer.js): above UPLAND and HIGHLAND
+// metres a continent's colour is lightened a further step. These entries
+// follow the seven continent colours, two per continent, then river blue.
+const UPLAND = 800, HIGHLAND = 2000, MOUNTAIN = 1000, RIVER_RANK = 1;
+const BAND_LIGHTEN = [0.22, 0.45];
+const CONTINENT_COUNT = PALETTE.length;
+const baseColor = PALETTE.map((_, i) => i);
+for (const [name, rgb] of Object.entries(CONTINENT_COLORS)) {
+  for (const amount of BAND_LIGHTEN) {
+    PALETTE.push("rgb(" + rgb.map(v => Math.round(v + (255 - v) * amount)).join(",") + ")");
+    baseColor.push(continentIdx.get(name));
+  }
+}
+const RIVER_IDX = PALETTE.length;
+PALETTE.push("rgb(126,200,240)");
+baseColor.push(-1);
+const RIVER_GLYPHS = ["-", "|", "/", "\\"];
+
+const worldMeta = JSON.parse(readFileSync(join(root, "earthxt", "data", "world.json"), "utf8"));
+const worldBin = readFileSync(join(root, "earthxt", "data", "world.bin"));
+const world = new Geography(worldMeta, worldBin.buffer.slice(worldBin.byteOffset, worldBin.byteOffset + worldBin.byteLength));
+const FINE = LEVELS[LEVELS.length - 1];
+// Relief of one flat cell, from 8 x 8 samples of the globe's finest rasters.
+function reliefOf(col, row, cols, rows) {
+  const n = 8, sample = {}, directions = [0, 0, 0, 0];
+  let heights = 0, land = 0, rugged = 0, river = 0;
+  for (let sy = 0; sy < n; sy++) for (let sx = 0; sx < n; sx++) {
+    const lon = -180 + ((col + (sx + 0.5) / n) / cols) * 360;
+    const lat = 90 - ((row + (sy + 0.5) / n) / rows) * 180;
+    world.sample(lat, lon, FINE, sample);
+    if (!sample.country) continue;
+    land++; heights += sample.height;
+    if (sample.rugged) rugged++;
+    if (sample.river && sample.river <= RIVER_RANK) { river++; directions[sample.riverDirection]++; }
+  }
+  const height = land ? heights / land : 0;
+  return { height, mountain: land > 0 && rugged / land >= 0.5 && height >= MOUNTAIN,
+    river: river > 0 ? directions.indexOf(Math.max(...directions)) : -1 };
+}
+
 // Texture glyph per continent, so a continent reads as one flat, uniform region.
 const GLYPHS = ["#", "%", "+", "8", "@", ":", "x", "x"];
 
@@ -91,8 +137,13 @@ function buildGrid(cols, rows) {
         // every country in the continent shares one color + one glyph.
         const cont = countryContinent.get(code) || "Asia";
         const idx = continentIdx.has(cont) ? continentIdx.get(cont) : FALLBACK_IDX;
-        cRow += String.fromCharCode(65 + idx);
-        gRow += GLYPHS[idx % GLYPHS.length];
+        const relief = reliefOf(c, r, cols, rows);
+        const band = relief.height >= HIGHLAND ? 2 : relief.height >= UPLAND ? 1 : 0;
+        let color = band ? CONTINENT_COUNT + idx * 2 + band - 1 : idx;
+        let glyph = relief.mountain ? "^" : GLYPHS[idx % GLYPHS.length];
+        if (relief.river >= 0) { color = RIVER_IDX; glyph = RIVER_GLYPHS[relief.river]; }
+        cRow += String.fromCharCode(65 + color);
+        gRow += glyph;
       } else {
         cRow += " ";
         gRow += " ";
@@ -173,6 +224,9 @@ const out = {
   countryCodes, countryNames, countryAliases: OUTLINE_ALIASES,
   palette: PALETTE,
   paletteSteps: PALETTE_STEPS,
+  // Each palette entry's continent (-1: river), and each continent's glyph.
+  baseColor,
+  continentGlyphs: GLYPHS.slice(0, CONTINENT_COUNT),
   continents: Object.fromEntries(continentIdx),
   desktop: buildGrid(GRIDS.desktop.cols, GRIDS.desktop.rows),
   mobile: buildGrid(GRIDS.mobile.cols, GRIDS.mobile.rows),
@@ -180,7 +234,7 @@ const out = {
   outlines: buildOutlines(),
 };
 
-const banner = "/* Generated by scripts/build-map.mjs from Natural Earth 110m countries. Do not edit by hand. */";
+const banner = "/* Generated by scripts/build-map.mjs from Natural Earth 110m countries and the globe's relief (earthxt/data). Do not edit by hand. */";
 const outputRoot = process.env.GEO_RASTER_OUTPUT_DIR ?? root;
 mkdirSync(join(outputRoot, "js"), { recursive: true });
 writeFileSync(join(outputRoot, "js", "landmap.js"), banner + "\nwindow.LANDMAPS = " + JSON.stringify(out) + ";\n");
