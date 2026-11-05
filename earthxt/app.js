@@ -138,7 +138,7 @@ function updateMetrics() {
       'Silhouette / pill names': `${metrics.silhouetteLabels} / ${metrics.fallbackLabels}`,
       'Resident geography': geography ? `${(geography.loadedBytes / 1024).toFixed(1)} KiB` : 'None',
       'JS heap': performance.memory ? `${(performance.memory.usedJSHeapSize / 1024 / 1024).toFixed(1)} MiB` : 'Unavailable',
-      'Source': state.source === 'earth' ? 'Natural Earth 50m + relief' : 'Synthetic field',
+      'Source': state.source === 'earth' ? 'Natural Earth 50m + relief + rivers' : 'Synthetic field',
     };
     $('debug-values').replaceChildren(...Object.entries(values).map(([key, value]) => {
       const row = document.createElement('div'), dt = document.createElement('dt'), dd = document.createElement('dd');
@@ -372,10 +372,12 @@ async function main({ embedded = false } = {}) {
     // stage (not on phones): names keep clear of them. Measured on resize and
     // when they change, never in a frame.
     const stageEl = $('globe-stage');
-    const floating = () => [...document.querySelectorAll('.globe-controls, .view-tools, #atlas-filter')];
+    // Everything that floats over the stage: the control bars, and on the
+    // full-screen globe the header's brand and search and the corner legend.
+    const floating = () => [...document.querySelectorAll('.globe-controls, .view-tools, #atlas-filter, .site-header .brand, .site-header .search, .atlas-foot')];
     const measureExclusions = () => {
       const base = stageEl.getBoundingClientRect();
-      renderer.exclusions = floating().filter(el => !el.hidden && el.closest('.map-viewport')).map(el => el.getBoundingClientRect())
+      renderer.exclusions = floating().filter(el => !el.hidden && el.getClientRects().length).map(el => el.getBoundingClientRect())
         .filter(r => r.width && r.right > base.left && r.left < base.right && r.bottom > base.top && r.top < base.bottom)
         .map(r => ({ x: r.left - base.left - 6, y: r.top - base.top - 6, width: r.width + 12, height: r.height + 12 }));
       dirty = true;
@@ -387,6 +389,11 @@ async function main({ embedded = false } = {}) {
     }
     window.addEventListener('atlas:filter', () => requestAnimationFrame(measureExclusions));
     window.addEventListener('atlas:view', event => { if (event.detail === 'globe') requestAnimationFrame(measureExclusions); });
+    // The floating header stays put while the page scrolls under it.
+    let exclusionFrame = 0;
+    window.addEventListener('scroll', () => {
+      if (!exclusionFrame) exclusionFrame = requestAnimationFrame(() => { exclusionFrame = 0; measureExclusions(); });
+    }, { passive: true });
     // The page's Pause motion is the one authority: it holds rotation (and the
     // ocean) still, disables Auto-rotate meanwhile, and Resume restores
     // whatever rotation intent the visitor had before pausing.

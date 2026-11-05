@@ -1,6 +1,7 @@
 /** Download the globe's build-time sources into data/ (git-ignored).
  * Only `pnpm build:earthxt-data` reads them; the globe itself never fetches.
  *   data/ne_50m_admin_0_countries.geojson  Natural Earth 1:50m countries (public domain)
+ *   data/ne_50m_rivers_lake_centerlines.geojson  Natural Earth 1:50m rivers (public domain)
  *   data/terrarium/5-<x>-<y>.png           Terrain Tiles, zoom 5 (land + sea floor)
  *   data/ice-surface.bin                   Copernicus GLO-90 surface heights over the
  *                                          Greenland and Antarctic ice sheets
@@ -16,7 +17,7 @@ import { join } from 'node:path';
 import { ICE_GRID, encodeIceGrid, TERRAIN_ZOOM } from './terrain.mjs';
 
 const dataDir = fileURLToPath(new URL('../../data/', import.meta.url));
-const COUNTRIES_URL = 'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_50m_admin_0_countries.geojson';
+const NATURAL_EARTH = name => `https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/${name}`;
 const TERRARIUM = (z, x, y) => `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${x}/${y}.png`;
 const COPERNICUS = 'https://copernicus-dem-90m.s3.amazonaws.com';
 
@@ -45,10 +46,11 @@ async function pool(items, limit, work) {
 
 await mkdir(join(dataDir, 'terrarium'), { recursive: true });
 
-const countries = join(dataDir, 'ne_50m_admin_0_countries.geojson');
-if (!await exists(countries)) {
-  console.log('Natural Earth 1:50m countries…');
-  await writeFile(countries, await download(COUNTRIES_URL));
+for (const name of ['ne_50m_admin_0_countries.geojson', 'ne_50m_rivers_lake_centerlines.geojson']) {
+  const file = join(dataDir, name);
+  if (await exists(file)) continue;
+  console.log(`Natural Earth ${name}…`);
+  await writeFile(file, await download(NATURAL_EARTH(name)));
 }
 
 const tiles = [];
