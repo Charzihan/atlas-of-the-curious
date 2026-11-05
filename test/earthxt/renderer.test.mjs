@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { TextRenderer, CONTINENT_GLYPHS, countryRunSlots, placeSilhouetteName } from '../../earthxt/renderer.js';
+import { TextRenderer, CONTINENT_GLYPHS, MOUNTAIN_GLYPH, countryRunSlots, placeSilhouetteName, heightBand } from '../../earthxt/renderer.js';
 import { prepareFlowText, flowPreparationCount, flowIntoSlots, createMapArtEngine, boxesOverlap } from '../../js/map-art.js';
 import { measureNaturalWidth } from '../../vendor/pretext/layout.js';
 import { Geography } from '../../earthxt/geography.js';
@@ -48,10 +48,27 @@ test('globe silhouette matches perspective radius; only text is drawn', () => {
   assert.equal(metrics.visibleGlyphs, marks.length);
   for (const mark of marks) {
     assert.ok(Math.hypot(mark.x - 450, mark.y - 350) <= radius + 1e-8);
-    assert.ok([...CONTINENT_GLYPHS, '·', '~'].includes(mark.text));
+    assert.ok([...CONTINENT_GLYPHS, MOUNTAIN_GLYPH, '·', '~'].includes(mark.text));
   }
   assert.ok(marks.some(mark => mark.text === '#'));
   assert.ok(marks.some(mark => mark.text === '·'));
+});
+test('relief: mountains, height tints and shelf seas', () => {
+  const { renderer, marks } = recorder();
+  renderer.resize(900, 700);
+  // Over the Himalaya at Coastlines detail.
+  renderer.draw({ latitude: 30, longitude: 85, distance: LEVELS[1].targetDistance }, LEVELS[1], data);
+  assert.ok(marks.filter(mark => mark.text === MOUNTAIN_GLYPH).length > 20, 'Himalayan mountains');
+  // Mountains wear their continent's tinted colour, never the lowland tone.
+  const lowAsia = 'rgba(208, 160, 90,';
+  assert.ok(marks.some(mark => mark.text === '%' && mark.color.startsWith(lowAsia)), 'Asian lowland');
+  assert.ok(marks.filter(mark => mark.text === MOUNTAIN_GLYPH).every(mark => !mark.color.startsWith(lowAsia)));
+  assert.deepEqual([heightBand(0), heightBand(799), heightBand(800), heightBand(2000)], [0, 0, 1, 2]);
+  // Over the North Sea and its shelf: shelf tones appear beside the deep-sea tones.
+  renderer.draw({ latitude: 56, longitude: 0, distance: LEVELS[1].targetDistance }, LEVELS[1], data);
+  const shelf = new Set(['rgba(120, 178, 210, 0.3)', 'rgba(140, 196, 224, 0.38)', 'rgba(162, 214, 238, 0.47)', 'rgba(186, 230, 248, 0.56)']);
+  assert.ok(marks.some(mark => shelf.has(mark.color)), 'shelf sea');
+  assert.ok(marks.some(mark => mark.color.startsWith('rgba(74, 124, 164,') || mark.color.startsWith('rgba(90, 146, 186,') || mark.color.startsWith('rgba(110, 172, 208,') || mark.color.startsWith('rgba(140, 200, 232,')), 'deep sea');
 });
 test('rotation changes geography while keeping the spherical silhouette stable', () => {
   const { renderer, marks } = recorder();

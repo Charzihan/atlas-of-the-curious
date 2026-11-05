@@ -10,7 +10,14 @@ export const CONTINENT_COLORS = Object.freeze(['#6f9e5f', '#d0a05a', '#a88ac4', 
 export const CONTINENT_GLYPHS = Object.freeze(['#', '%', '+', '8', '@', ':', 'x']);
 // The atlas sea is a pale steel blue at low alpha; four lit tones of it.
 const OCEAN = ['rgba(74, 124, 164, 0.2)', 'rgba(90, 146, 186, 0.27)', 'rgba(110, 172, 208, 0.34)', 'rgba(140, 200, 232, 0.42)'];
+// Continental shelves (shallower than SHELF_DEPTH) glow a step paler.
+const SHELF = ['rgba(120, 178, 210, 0.3)', 'rgba(140, 196, 224, 0.38)', 'rgba(162, 214, 238, 0.47)', 'rgba(186, 230, 248, 0.56)'];
 const LAND_ALPHA = [0.5, 0.66, 0.82, 0.96];
+// Height bands (metres): lowland, upland, high ground; each band is the
+// continent colour lightened a further step, like a relief map's tints.
+const UPLAND = 800, HIGHLAND = 2000, MOUNTAIN = 1000, SHELF_DEPTH = 200;
+const BAND_LIGHTEN = [0, 0.22, 0.45];
+export const MOUNTAIN_GLYPH = '^';
 const BORDER = 'rgba(244, 232, 204, 0.82)', GRID = 'rgba(232, 180, 90, 0.42)';
 // Country names: warm ink on a bed of the stage's ground (--bg-soft).
 const LABEL_INK = '#e4e4ca', LABEL_GROUND = 'rgba(16, 23, 51, 0.86)';
@@ -24,15 +31,28 @@ function lighten(hex, amount) {
   const mix = channel => Math.round(channel + (255 - channel) * amount);
   return `rgb(${mix(value >> 16 & 255)}, ${mix(value >> 8 & 255)}, ${mix(value & 255)})`;
 }
-/** Fill styles indexed by cell colour: ocean light 0–3, then per continent
- * four lit land tones and one coast tone, then border and grid. */
+function tint(hex, amount, alpha) {
+  if (!amount) return rgba(hex, alpha);
+  const value = parseInt(hex.replace('#', ''), 16);
+  const mix = channel => Math.round(channel + (255 - channel) * amount);
+  return `rgba(${mix(value >> 16 & 255)}, ${mix(value >> 8 & 255)}, ${mix(value & 255)}, ${alpha})`;
+}
+/** Fill styles indexed by cell colour: ocean light 0–3, shelf light 0–3, then
+ * per continent four lit tones for each height band and one coast tone, then
+ * border and grid. */
 export function globePalette(continents = CONTINENT_COLORS) {
-  const palette = [...OCEAN];
-  for (const color of continents) palette.push(...LAND_ALPHA.map(alpha => rgba(color, alpha)), lighten(color, 0.28));
+  const palette = [...OCEAN, ...SHELF];
+  for (const color of continents) {
+    for (const amount of BAND_LIGHTEN) palette.push(...LAND_ALPHA.map(alpha => tint(color, amount, alpha)));
+    palette.push(lighten(color, 0.28));
+  }
   palette.push(BORDER, GRID);
   return palette;
 }
-const LAND_BASE = OCEAN.length, PER_CONTINENT = LAND_ALPHA.length + 1;
+const LAND_BASE = OCEAN.length + SHELF.length, PER_CONTINENT = LAND_ALPHA.length * BAND_LIGHTEN.length + 1;
+const COAST_TONE = PER_CONTINENT - 1;
+/** Height band 0–2 for metres above sea level. */
+export function heightBand(metres) { return metres >= HIGHLAND ? 2 : metres >= UPLAND ? 1 : 0; }
 const MAX_CELLS = 24000;
 
 /** Maximal same-country runs, inset by one cell at each end. Geometry uses
@@ -109,6 +129,7 @@ export class TextRenderer {
     this.viewport = { width: 1, height: 1, focal: 1 };
     this.metrics = { visibleGlyphs: 0, totalGlyphs: 0, projectionMs: 0, renderMs: 0, labelMs: 0, placeLabelMs: 0, placeRenderMs: 0, visibleMarkers: 0, labelledPlaces: 0, visibleLabels: 0, silhouetteLabels: 0, fallbackLabels: 0 };
     this.cells = new Uint8Array(MAX_CELLS);
+    this.order = new Uint16Array(MAX_CELLS);
     this.variants = new Uint8Array(MAX_CELLS);
     this.tones = new Uint8Array(MAX_CELLS);
     this.continents = new Uint8Array(MAX_CELLS);
@@ -222,7 +243,7 @@ export class TextRenderer {
     this.grid = { cols, rows, cellWidth, cellHeight, x: xOffset - cellWidth / 2, y: yOffset - cellHeight / 2 };
     const { east, north, front } = cameraBasis(camera.latitude, camera.longitude);
     const distance = camera.distance, d2 = distance * distance;
-    const sample = { country: 0, coast: false, border: false };
+    const sample = { country: 0, coast: false, border: false, height: 0, depth: 0, rugged: false };
     const continentByCountry = geography.continentByCountry || new Uint8Array(256).fill(1);
     let visible = 0;
     for (let row = 0; row < rows; row++) {
@@ -253,15 +274,20 @@ export class TextRenderer {
         this.blockedCells[index] = sample.country || farX * farX + farY * farY >= focal * focal / (d2 - 1) ? 1 : 0;
         const facing = (distance * z - 1) / Math.hypot(x, y, distance - z);
         const light = Math.max(0, Math.min(3, Math.floor((facing * 0.85 - x * 0.24 + y * 0.1) * 4)));
-        this.tones[index] = sample.coast ? 4 : light;
+        const band = sample.country ? heightBand(sample.height) : 0;
+        const mountain = sample.rugged && sample.height >= MOUNTAIN;
+        // Serif ink: higher ground takes denser ink, mountains and coasts the densest.
+        this.tones[index] = sample.coast || mountain ? 4 : Math.min(3, light + band);
         const continent = sample.country ? continentByCountry[sample.country] : 0;
         this.continents[index] = continent;
-        // Land is the atlas's flat continent colour, shaded by the light; at
-        // name-bearing detail the darkest tone is skipped so names keep ground.
+        // Land is the atlas's continent colour, tinted paler with height and
+        // shaded by the light; at name-bearing detail the darkest tone is
+        // skipped so names keep ground. Shelf seas take the paler water.
         const landBase = LAND_BASE + continent * PER_CONTINENT;
-        let color = sample.country ? landBase + (level.labels ? Math.max(1, light) : light) : light;
-        let variant = sample.country ? 1 : 0;
-        if (sample.coast && level.index > 0) { color = landBase + LAND_ALPHA.length; variant = 2; }
+        let color = sample.country ? landBase + band * LAND_ALPHA.length + (level.labels ? Math.max(1, light) : light)
+          : (sample.depth < SHELF_DEPTH ? OCEAN.length : 0) + light;
+        let variant = sample.country ? (mountain ? 5 : 1) : 0;
+        if (sample.coast && level.index > 0) { color = landBase + COAST_TONE; variant = 2; }
         if (sample.border && level.borders) { color = this.borderColor; variant = 3; }
         if (options.grid && !sample.country && (Math.abs(latitude % 30) < 0.4 || Math.abs(longitude % 30) < 0.4)) { color = this.gridColor; variant = 4; }
         this.cells[index] = color + 1;
@@ -283,14 +309,19 @@ export class TextRenderer {
     ctx.textBaseline = 'middle';
     if (this.nativeSpacing) ctx.letterSpacing = '0px';
     const oceanPhase = options.animateOcean ? Math.floor((options.time ?? 0) / 900) : 0;
-    const glyphs = [level.ocean, '', '', '·', '+'];
-    // Batch by palette to avoid thousands of canvas state changes.
+    const glyphs = [level.ocean, '', '', '·', '+', MOUNTAIN_GLYPH];
+    // Batch by palette to avoid thousands of canvas state changes: a counting
+    // sort groups the cells by colour in two passes, keeping row-major order.
+    const total = rows * cols, starts = new Uint32Array(this.palette.length + 2);
+    for (let index = 0; index < total; index++) starts[this.cells[index] + 1]++;
+    for (let color = 1; color < starts.length; color++) starts[color] += starts[color - 1];
+    const fill = starts.slice();
+    for (let index = 0; index < total; index++) this.order[fill[this.cells[index]]++] = index;
     for (let color = 0; color < this.palette.length; color++) {
       ctx.fillStyle = this.palette[color];
-      for (let row = 0; row < rows; row++) {
-        for (let col = 0; col < cols; col++) {
-          const index = row * cols + col;
-          if (this.cells[index] !== color + 1) continue;
+      for (let at = starts[color + 1]; at < starts[color + 2]; at++) {
+        {
+          const index = this.order[at], row = Math.floor(index / cols), col = index - row * cols;
           const variant = this.variants[index];
           if (ink) {
             const ripple = (row * 13 + col * 7 + oceanPhase) % 17 === 0;

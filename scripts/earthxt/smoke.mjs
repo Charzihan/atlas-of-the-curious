@@ -177,7 +177,7 @@ try {
   await page.goto(server.origin + '/dist/earthxt/?bench');
   await page.waitForFunction(() => window.EARTHXT_DEBUG?.snapshot().visibleGlyphs > 500);
   await page.locator('#reset-view').click(); await settled();
-  assert.equal((await snapshot()).countryCount, 177);
+  assert.equal((await snapshot()).countryCount, 242);
   assert.equal((await snapshot()).lod, 0);
   await page.screenshot({ path: new URL('../../test-results/earthxt/desktop.png', import.meta.url).pathname, fullPage: true });
   const box = await page.locator('#globe').boundingBox();
@@ -425,7 +425,7 @@ try {
   });
   await offline.goto(standalone.output.href + '#/place/salar-de-uyuni');
   await offline.waitForFunction(() => window.EARTHXT_DEBUG?.snapshot().visibleGlyphs > 500);
-  assert.equal(await offline.evaluate(() => EARTHXT_DEBUG.snapshot().countryCount), 177);
+  assert.equal(await offline.evaluate(() => EARTHXT_DEBUG.snapshot().countryCount), 242);
   assert.equal(await offline.evaluate(() => EARTHXT_DEBUG.snapshot().source), 'earth');
   await offline.locator('[data-level="2"]').click();
   await offline.waitForFunction(() => EARTHXT_DEBUG.snapshot().lod === 2);

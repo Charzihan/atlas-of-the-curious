@@ -94,27 +94,35 @@ test('overlapping polygons retain per-country point parity and per-polygon scanl
   assert.deepEqual([...scanlineOwnership(countries, 1, 1)], [1]);
 });
 
-test('both builders reproduce committed geography bytes in a temporary output directory', async t => {
-  const source = join(root, 'data/world-110m-countries.geojson');
-  try {
-    await access(source);
-  } catch (error) {
-    if (error.code !== 'ENOENT') throw error;
-    t.skip('Natural Earth source data/world-110m-countries.geojson is absent (git-ignored); byte regeneration check skipped.');
-    return;
-  }
-  const output = await mkdtemp(join(tmpdir(), 'geo-raster-'));
-  t.after(() => rm(output, { recursive: true, force: true }));
-  for (const builder of ['scripts/build-map.mjs', 'scripts/earthxt/build-data.mjs']) {
-    await run(process.execPath, [join(root, builder)], {
-      cwd: output, env: { ...process.env, GEO_RASTER_OUTPUT_DIR: output }, timeout: 60_000,
+// Each builder reads its own git-ignored sources (README "Rebuilding generated
+// assets"); a builder whose sources are absent is skipped, not failed.
+const BUILDERS = [
+  { script: 'scripts/build-map.mjs', sources: ['data/world-110m-countries.geojson'], outputs: ['js/landmap.js'] },
+  { script: 'scripts/earthxt/build-data.mjs', sources: ['data/ne_50m_admin_0_countries.geojson', 'data/terrarium/5-31-31.png', 'data/ice-surface.bin'],
+    outputs: ['earthxt/data/world.bin', 'earthxt/data/world.json'] },
+];
+for (const builder of BUILDERS) {
+  test(`${builder.script} reproduces committed geography bytes in a temporary output directory`, async t => {
+    for (const source of builder.sources) {
+      try {
+        await access(join(root, source));
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+        t.skip(`Source ${source} is absent (git-ignored); byte regeneration check skipped.`);
+        return;
+      }
+    }
+    const output = await mkdtemp(join(tmpdir(), 'geo-raster-'));
+    t.after(() => rm(output, { recursive: true, force: true }));
+    await run(process.execPath, [join(root, builder.script)], {
+      cwd: output, env: { ...process.env, GEO_RASTER_OUTPUT_DIR: output }, timeout: 120_000,
     });
-  }
-  for (const path of ['js/landmap.js', 'earthxt/data/world.bin', 'earthxt/data/world.json']) {
-    const actual = await readFile(join(output, path));
-    const { stdout: committed } = await run('git', ['show', `HEAD:${path}`], {
-      cwd: root, encoding: 'buffer', maxBuffer: 4 * 1024 * 1024,
-    });
-    assert.ok(actual.equals(committed), `${path} must match committed bytes (got ${actual.length}, expected ${committed.length})`);
-  }
-});
+    for (const path of builder.outputs) {
+      const actual = await readFile(join(output, path));
+      const { stdout: committed } = await run('git', ['show', `HEAD:${path}`], {
+        cwd: root, encoding: 'buffer', maxBuffer: 8 * 1024 * 1024,
+      });
+      assert.ok(actual.equals(committed), `${path} must match committed bytes (got ${actual.length}, expected ${committed.length})`);
+    }
+  });
+}

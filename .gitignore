@@ -8,6 +8,9 @@ test-results/
 # needed at runtime and are large, so keep them out of deploys/exports.
 # (Kept locally so the map can be rebuilt.)
 data/*.geojson
+# Globe relief sources (pnpm fetch:earthxt-sources), read only by build:earthxt-data.
+data/terrarium/
+data/ice-surface.bin
 
 # Local scratch
 *.log

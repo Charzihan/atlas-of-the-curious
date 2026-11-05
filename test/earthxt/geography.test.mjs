@@ -12,11 +12,13 @@ const geography = new Geography(metadata, buffer, Buffer.byteLength(metadataText
 const sample = (lat, lon, level = LEVELS[2]) => { const out = {}; geography.sample(lat, lon, level, out); return out; };
 
 test('local payload is complete, contains valid IDs, and meets the geographic budget', () => {
-  assert.equal(geography.countries.length, 177);
+  assert.equal(geography.countries.length, 242);
   assert.ok(gzipSync(raw).byteLength + gzipSync(metadataText).byteLength < 10 * 1024 * 1024);
   assert.equal(geography.loadedBytes, raw.byteLength + Buffer.byteLength(metadataText));
-  for (const id of raw) assert.ok(id <= geography.countries.length);
-  assert.equal(metadata.levels.reduce((sum, level) => sum + level.bytes, 0), raw.byteLength);
+  for (const { grid } of geography.levels.values()) for (const id of grid) assert.ok(id <= geography.countries.length);
+  // Each level holds an ownership raster and a relief raster of the same size.
+  assert.equal(metadata.levels.reduce((sum, level) => sum + 2 * level.bytes, 0), raw.byteLength);
+  for (const level of metadata.levels) assert.equal(level.reliefOffset, level.offset + level.bytes);
   assert.throws(() => new Geography(metadata, buffer.slice(0, 100)), /incomplete/);
 });
 test('real-world continental locations and oceans classify correctly at every LOD', () => {
@@ -27,6 +29,45 @@ test('real-world continental locations and oceans classify correctly at every LO
     }
     for (const [lat, lon] of [[0, -140], [0, -25], [-35, 75]]) assert.equal(sample(lat, lon, level).country, 0);
   }
+});
+test('relief reads real heights, mountains, ice sheets and sea depths', () => {
+  const countries = LEVELS[2];
+  const at = (lat, lon) => sample(lat, lon, countries);
+  // Himalaya and Tibet: high and rugged.
+  assert.ok(at(27.99, 86.93).height >= 4000 && at(27.99, 86.93).rugged, 'Everest');
+  assert.ok(at(32, 88).height >= 4000, 'Tibetan Plateau');
+  // Andes and Alps carry the mountain flag; the Amazon basin and the Netherlands are low.
+  assert.ok(at(-32.65, -70.0).rugged, 'Aconcagua');
+  assert.ok(at(46.5, 8.0).rugged && at(46.5, 8.0).height >= 1000, 'Bernese Alps');
+  assert.ok(at(-3, -60).height <= 200 && !at(-3, -60).rugged, 'Amazon');
+  assert.ok(at(52.5, 5.5).height <= 100, 'Netherlands');
+  // The ice sheets read as their surface, not the bedrock beneath.
+  assert.ok(at(72.58, -38.46).height >= 2500, 'Greenland Summit');
+  assert.ok(at(-75.1, 123.35).height >= 2500, 'Dome C');
+  assert.ok(at(-89.9, 0).height >= 2000, 'South Pole, beyond the Mercator tiles');
+  // Sea depth: shallow shelf, abyssal plain, trench; land carries no depth.
+  assert.ok(at(55, 3).depth < 200, 'North Sea shelf');
+  assert.ok(at(30, -50).depth >= 3000, 'North Atlantic');
+  assert.ok(at(11.35, 142.2).depth >= 6000, 'Mariana Trench');
+  assert.equal(at(46, 2).depth, 0);
+  for (const level of LEVELS) assert.ok(sample(27.99, 86.93, level).height >= 3000, `Himalaya at ${level.id}`);
+});
+test('version 1 files without relief still load as flat land and sea', () => {
+  const ownership = new Uint8Array(metadata.levels.reduce((sum, level) => sum + level.bytes, 0));
+  let offset = 0;
+  const levels = metadata.levels.map(level => {
+    ownership.set(new Uint8Array(buffer, level.offset, level.bytes), offset);
+    const moved = { id: level.id, width: level.width, height: level.height, offset, bytes: level.bytes };
+    offset += level.bytes;
+    return moved;
+  });
+  const legacy = new Geography({ version: 1, bytes: ownership.byteLength, levels, countries: metadata.countries }, ownership.buffer);
+  const out = {};
+  legacy.sample(27.99, 86.93, LEVELS[2], out);
+  assert.ok(out.country > 0);
+  assert.deepEqual([out.height, out.depth, out.rugged], [0, 0, false]);
+  legacy.sample(11.35, 142.2, LEVELS[2], out);
+  assert.deepEqual([out.country, out.depth], [0, 0]);
 });
 test('longitude wraps seamlessly and pole lookups stay in bounds', () => {
   for (const lat of [-90, -70, 0, 50, 90]) {

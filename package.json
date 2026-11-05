@@ -16,12 +16,14 @@
     "smoke:earthxt": "node scripts/earthxt/smoke.mjs",
     "build:earthxt": "node scripts/earthxt/build.mjs",
     "build:earthxt-standalone": "node scripts/earthxt/standalone.mjs",
+    "fetch:earthxt-sources": "node scripts/earthxt/fetch-sources.mjs",
     "build:earthxt-data": "node scripts/earthxt/build-data.mjs",
     "postinstall": "node scripts/vendor.mjs"
   },
   "packageManager": "pnpm@12.3.4",
   "devDependencies": {
     "@chenglou/pretext": "latest",
+    "geotiff": "2.1.3",
     "playwright": "1.63.0"
   }
 }
