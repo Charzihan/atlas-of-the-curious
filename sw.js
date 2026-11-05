@@ -7,8 +7,13 @@
    Strategy:
    - Navigations: network-first (fresh content wins), cache as offline fallback.
    - Everything else: cache-first, falling back to network and caching the
-     result so repeated visits are instant. */
-const CACHE = "atlas-of-the-curious-v15";
+     result so repeated visits are instant.
+   - Every copy that enters the cache is fetched past the browser's HTTP cache
+     (GitHub Pages lets browsers keep files for 10 minutes), so a visit just
+     after a deploy cannot pin the previous release's files in the new cache.
+   - CORE paths are relative to the worker's scope, so the site works from a
+     subpath such as https://<user>.github.io/atlas-of-the-curious/. */
+const CACHE = "atlas-of-the-curious-v16";
 const CORE = [
   "/",
   "/index.html",
@@ -66,18 +71,24 @@ const CORE = [
   "/img/og-cover.png"
 ];
 
+// The deployment root: "/" locally, "/atlas-of-the-curious/" on GitHub Pages.
+const scope = () => new URL(self.registration ? self.registration.scope : self.location.origin + "/");
+const scoped = (path) => new URL(path.replace(/^\//, ""), scope()).href;
+const fresh = (url) => new Request(url, { cache: "no-cache" });
+
 self.addEventListener("install", (e) => {
   e.waitUntil(
     caches
       .open(CACHE)
       .then(async (c) => {
+        const requests = CORE.map((path) => fresh(scoped(path)));
         try {
-          await c.addAll(CORE);
+          await c.addAll(requests);
         } catch (_) {
           // addAll is atomic: one missing asset (e.g. a generated image not yet
           // built) would fail the whole install. Cache whatever exists instead,
           // so the offline cache still works.
-          await Promise.all(CORE.map((u) => c.add(u).catch(() => {})));
+          await Promise.all(requests.map((r) => c.add(r).catch(() => {})));
         }
       })
       .then(() => self.skipWaiting())
@@ -108,9 +119,10 @@ self.addEventListener("fetch", (e) => {
           caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
           return res;
         })
-        .catch(() =>
-          caches.match(req).then((hit) => hit || caches.match(url.pathname.startsWith("/earthxt/") ? "/earthxt/index.html" : "/index.html"))
-        )
+        .catch(() => {
+          const path = "/" + url.pathname.slice(scope().pathname.length);
+          return caches.match(req).then((hit) => hit || caches.match(scoped(path.startsWith("/earthxt/") ? "/earthxt/index.html" : "/index.html")));
+        })
     );
   } else {
     // Cache-first for static assets.
@@ -118,7 +130,7 @@ self.addEventListener("fetch", (e) => {
       caches.match(req).then(
         (hit) =>
           hit ||
-          fetch(req).then((res) => {
+          fetch(fresh(req)).then((res) => {
             const copy = res.clone();
             caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
             return res;
