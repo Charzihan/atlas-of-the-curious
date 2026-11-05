@@ -138,7 +138,7 @@ function updateMetrics() {
       'Silhouette / pill names': `${metrics.silhouetteLabels} / ${metrics.fallbackLabels}`,
       'Resident geography': geography ? `${(geography.loadedBytes / 1024).toFixed(1)} KiB` : 'None',
       'JS heap': performance.memory ? `${(performance.memory.usedJSHeapSize / 1024 / 1024).toFixed(1)} MiB` : 'Unavailable',
-      'Source': state.source === 'earth' ? 'Natural Earth 110m' : 'Synthetic field',
+      'Source': state.source === 'earth' ? 'Natural Earth 50m + relief' : 'Synthetic field',
     };
     $('debug-values').replaceChildren(...Object.entries(values).map(([key, value]) => {
       const row = document.createElement('div'), dt = document.createElement('dt'), dd = document.createElement('dd');

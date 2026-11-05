@@ -76,11 +76,13 @@ A logarithmic slider maps to camera distances of 4.6–1.16 Earth radii. Wheel a
 
 ## Local data and budget
 
-The checked-in [data files](data/README.md) include 177 Natural Earth country features rasterized at 1.5°, 0.5°, and 0.25° spacing, with names and label anchors. Coasts and borders are derived from neighboring ownership cells. Data are public domain. All three grids and metadata total approximately **38 KB with gzip**, or **1.29 MiB decoded**. Production transfer sizes depend on host compression. There are no runtime data downloads beyond these same-origin static files.
+The checked-in [data files](data/README.md) include 242 Natural Earth 1:50m country features rasterized at 1.5°, 0.5°, and 0.25° spacing, with names and label anchors, and a relief raster at each spacing: land height, rugged ground and sea depth. Coasts and borders are derived from neighboring ownership cells. The countries are public domain; the relief comes from Terrain Tiles and, over the ice sheets, the Copernicus GLO-90 DEM, with the attribution listed in the data README. All six grids and metadata total approximately **636 KB with gzip**, or **2.53 MiB decoded**. Production transfer sizes depend on host compression. There are no runtime data downloads beyond these same-origin static files.
 
-The budget is **10 MB compressed for initial geography**; `build:earthxt-data` enforces it. `npm run build:earthxt-data` regenerates the checked-in files from the original GeoJSON when that optional source file is available. Normal builds use the checked-in results.
+The budget is **10 MB compressed for initial geography**; `build:earthxt-data` enforces it. `npm run fetch:earthxt-sources` downloads the git-ignored sources into `data/`, then `npm run build:earthxt-data` regenerates the checked-in files. Normal builds use the checked-in results.
 
-All levels derive from the same simplified 1:110m source: higher detail improves raster resolution, not the source's geographic accuracy. Small islands and inland waters can be absent. Borders follow the source dataset. These data are deliberately unsuitable for street-level navigation.
+All levels derive from the same 1:50m source: higher detail improves raster resolution, not the source's geographic accuracy. The smallest islands and inland waters can be absent.
+
+Relief shapes the land and sea without changing the atlas's colours or glyphs. Land is the continent colour tinted paler in two steps, above 800 m and above 2,000 m. Rugged ground above 1,000 m takes a `^` glyph (with Serif, the densest ink). Continental shelves shallower than 200 m use a paler water tone. Heights are means over each cell, so peaks read lower than their summits. Borders follow the source dataset. These data are deliberately unsuitable for street-level navigation.
 
 To extend the hierarchy, add a detail entry in `lod.js` and corresponding provider data, then expose any desired preset in the controls. Geographic providers implement `sample(latitude, longitude, level, result)` and `labels()`. A future static chunk loader can populate provider caches and invalidate rendering as chunks arrive; this MVP loads the small global payload once. Streets, buildings, search, travel routing, accounts, and live services are not implemented.
 

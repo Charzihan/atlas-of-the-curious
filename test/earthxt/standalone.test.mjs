@@ -37,7 +37,7 @@ test('bundled data loader loads the complete real geography using only embedded 
   });
   const geography = await loadGeography();
   assert.equal(requests.length, 2);
-  assert.equal(geography.countries.length, 177);
+  assert.equal(geography.countries.length, 242);
   assert.ok(geography.loadedBytes > 1324800);
   const sample = {};
   geography.sample(56, -106, { id: 'countries' }, sample);
